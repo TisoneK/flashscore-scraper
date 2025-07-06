@@ -6,7 +6,7 @@ A powerful basketball match data scraper with a modern GUI interface, designed t
 
 ### Prerequisites
 - Python 3.8+
-- Chrome or Firefox browser
+- Internet connection (for automatic driver download)
 
 ### Installation
 
@@ -139,7 +139,7 @@ flashscore_scraper_1o/
 ├── output/                # Scraped data
 │   ├── json/              # JSON output files
 │   └── logs/              # Scraping logs
-└── drivers/               # WebDriver executables
+└── drivers/               # WebDriver executables (auto-downloaded)
     ├── windows/           # Windows drivers
     ├── linux/            # Linux drivers
     └── mac/              # macOS drivers

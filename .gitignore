@@ -255,11 +255,15 @@ matches_*.json
 raw_data/
 temp/
 
-# Browser driver files (KEEP THESE - they are essential for the scraper to work)
-# drivers/  # REMOVED - drivers are essential and should be included in repo
-# geckodriver*  # REMOVED - these are essential driver files
-# chromedriver*  # REMOVED - these are essential driver files
-# *.exe  # REMOVED - driver executables are essential
+# Browser driver files (IGNORE THESE - they will be downloaded automatically)
+drivers/
+*.exe
+geckodriver*
+chromedriver*
+chrome-win64/
+chrome-linux64/
+chrome-mac64/
+chrome-mac-arm64/
 
 # Only ignore driver downloads and temporary driver files
 drivers/downloads/
