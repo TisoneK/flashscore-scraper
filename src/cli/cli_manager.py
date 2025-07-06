@@ -72,13 +72,13 @@ class CLIManager:
             prog="flashscore-scraper"
         )
         parser.add_argument("--init", action="store_true", 
-                          help="Initialize project and install drivers")
+                          help="Initialize project (venv, install, drivers)")
         parser.add_argument("--ui", "-u", action="store_true", 
                           help="Launch GUI interface")
         parser.add_argument("--cli", "-c", action="store_true", 
                           help="Launch CLI interface")
         parser.add_argument("--install-drivers", action="store_true",
-                          help="Install Chrome and ChromeDriver automatically")
+                          help="Install Chrome and ChromeDriver only")
         parser.add_argument("--version", "-v", action="version", version="1.0.0")
         
         parsed_args = parser.parse_args(args)
@@ -152,22 +152,28 @@ class CLIManager:
         except Exception as e:
             print(f"❌ Error installing project: {e}")
         
-        # Check if setup_drivers.py exists and run it
-        setup_script = Path(__file__).parent.parent.parent / "setup_drivers.py"
-        if setup_script.exists():
-            print("📥 Installing browser drivers...")
-            try:
-                import subprocess
-                result = subprocess.run([sys.executable, str(setup_script)], 
-                                     capture_output=True, text=True)
-                if result.returncode == 0:
-                    print("✅ Drivers installed successfully!")
-                else:
-                    print("⚠️  Driver installation had issues. Check output above.")
-            except Exception as e:
-                print(f"❌ Error installing drivers: {e}")
-        else:
-            print("⚠️  setup_drivers.py not found. Drivers will be downloaded automatically.")
+        # Install drivers using the new automated driver manager
+        print("📥 Installing browser drivers...")
+        try:
+            from src.utils.driver_manager import DriverManager
+            
+            driver_manager = DriverManager()
+            results = driver_manager.install_all()
+            
+            if results['chrome_path'] and results['chromedriver_path']:
+                print("✅ Drivers installed successfully!")
+                print(f"   Chrome: {results['chrome_path']}")
+                print(f"   ChromeDriver: {results['chromedriver_path']}")
+                print(f"   Version: {results['version']}")
+            else:
+                print("⚠️  Some drivers failed to install.")
+                print("   You can try: fss --install-drivers")
+        except ImportError as e:
+            print(f"❌ Error importing driver manager: {e}")
+            print("💡 Make sure all dependencies are installed.")
+        except Exception as e:
+            print(f"❌ Error installing drivers: {e}")
+            print("💡 Check your internet connection and try again.")
         
         # Create necessary directories
         output_dirs = ["output", "output/json", "output/logs", "output/database"]

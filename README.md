@@ -47,10 +47,10 @@ fss -c    # Launch CLI
 After installation, you can use these simple commands:
 
 ```bash
-# Initialize project and install drivers
+# Initialize project (creates venv, installs project, installs drivers)
 flashscore-scraper --init
 
-# Install Chrome and ChromeDriver automatically (NEW!)
+# Install Chrome and ChromeDriver only (if you already have the project set up)
 flashscore-scraper --install-drivers
 # or short form
 fss --install-drivers
