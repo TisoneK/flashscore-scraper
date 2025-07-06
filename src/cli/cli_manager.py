@@ -535,7 +535,7 @@ class CLIManager:
 
     def _load_user_settings(self):
         """Load user settings from file."""
-        settings_file = Path("cli_settings.json")
+        settings_file = Path(__file__).parent / "cli_settings.json"
         if settings_file.exists():
             try:
                 import json
@@ -549,7 +549,7 @@ class CLIManager:
         """Save user settings to file."""
         try:
             import json
-            settings_file = Path("cli_settings.json")
+            settings_file = Path(__file__).parent / "cli_settings.json"
             with open(settings_file, 'w') as f:
                 json.dump(settings, f, indent=2)
         except Exception as e:
