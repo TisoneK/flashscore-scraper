@@ -189,7 +189,8 @@ flashscore-scraper/
 │   │   ├── cli_manager.py # Main CLI manager
 │   │   ├── display.py     # Console display
 │   │   ├── progress.py    # Progress tracking
-│   │   └── prompts.py     # User prompts
+│   │   ├── prompts.py     # User prompts
+│   │   └── cli_settings.json # CLI-specific settings
 │   ├── core/              # Core functionality
 │   │   ├── batch_processor.py
 │   │   ├── error_handler.py
@@ -230,6 +231,16 @@ flashscore-scraper/
 │   ├── index.md           # Main documentation
 │   └── issues.md          # Known issues
 ├── tests/                 # Test suite
+│   ├── test_headless.py   # Headless mode test
+│   ├── test_data_extractors.py
+│   ├── test_data_loaders.py
+│   ├── test_data_verifiers.py
+│   ├── test_driver.py
+│   ├── test_elements_model.py
+│   ├── test_models.py
+│   ├── test_odds_data_extractor.py
+│   ├── test_scraper.py
+│   └── run_tests.py
 ├── output/                # Scraped data (gitignored)
 │   ├── json/              # JSON output files
 │   └── logs/              # Scraping logs
