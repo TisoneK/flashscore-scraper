@@ -1,0 +1,19 @@
+# Core scraper dependencies
+selenium>=4.18.1
+webdriver-manager>=4.0.1
+pandas>=2.1.0  # Already installed (2.3.0)
+
+# UI dependencies
+flet>=0.28.0
+
+# CLI dependencies
+InquirerPy>=0.3.4
+rich>=13.0.0
+tqdm>=4.65.0
+
+# Testing dependencies
+pytest>=7.0.0
+
+# Additional utilities
+pathlib2>=2.3.7
+typing-extensions>=4.8.0 

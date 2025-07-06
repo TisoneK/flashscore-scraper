@@ -1,0 +1,239 @@
+{
+    "browser": {
+        "browser_name": "chrome",
+        "headless": true,
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "window_size": [
+            1920,
+            1080
+        ],
+        "download_path": null,
+        "proxy": null,
+        "ignore_certificate_errors": false,
+        "disable_images": true,
+        "disable_javascript": false,
+        "disable_css": false,
+        "driver_path": null
+    },
+    "tab": {
+        "max_tabs": 1,
+        "min_load_interval": 2.0,
+        "tab_recovery_attempts": 3,
+        "tab_health_check_interval": 5.0,
+        "tab_cleanup_interval": 300.0,
+        "max_tab_age": 3600.0
+    },
+    "batch": {
+        "base_batch_size": 2,
+        "min_batch_size": 1,
+        "max_batch_size": 3,
+        "base_delay": 3.0,
+        "max_delay": 10.0,
+        "success_threshold": 0.7,
+        "adaptive_delay": true,
+        "delay_multiplier": 1.5,
+        "delay_reduction_factor": 0.8
+    },
+    "connection": {
+        "connection_pool_size": 2,
+        "worker_timeout": 30,
+        "max_retries": 3,
+        "retry_delay": 1.0,
+        "max_concurrent_requests": 5,
+        "request_timeout": 30,
+        "keep_alive": true,
+        "verify_ssl": true,
+        "max_redirects": 5
+    },
+    "timeout": {
+        "page_load_timeout": 30,
+        "element_timeout": 10,
+        "dynamic_content_timeout": 15,
+        "script_timeout": 30,
+        "implicit_wait": 5,
+        "navigation_timeout": 30,
+        "worker_timeout": 60,
+        "retry_delay": 5,
+        "max_retries": 3
+    },
+    "logging": {
+        "log_level": "INFO",
+        "log_file": "output/logs/scraper.log",
+        "log_directory": "output/logs",
+        "log_format": "%(message)s",
+        "log_date_format": "%Y-%m-%d %H:%M:%S",
+        "log_filename_date_format": "%y%m%d",
+        "log_to_console": true,
+        "log_to_file": true,
+        "max_log_size": 10485760,
+        "backup_count": 5,
+        "quiet_modules": [
+            "urllib3",
+            "selenium",
+            "src.parser",
+            "src.data.h2h_data",
+            "src.data.odds_data",
+            "src.core.url_verifier"
+        ]
+    },
+    "url": {
+        "base_url": "https://www.flashscore.co.ke/basketball/",
+        "match_url_template": "https://www.flashscore.co.ke/match/basketball/{}/#/match-summary/match-summary",
+        "h2h_url_template": "https://www.flashscore.co.ke/match/basketball/{}/#/h2h/overall",
+        "api_endpoints": {},
+        "allowed_domains": [
+            "flashscore.co.ke"
+        ]
+    },
+    "output": {
+        "directory": "output",
+        "default_file": "matches.json",
+        "date_format": "%Y-%m-%d",
+        "time_format": "%H:%M:%S"
+    },
+    "debug_mode": false,
+    "save_raw_data": false,
+    "raw_data_dir": "raw_data",
+    "temp_dir": "temp",
+    "selectors": {
+        "match": {
+            "container": "div.event__match",
+            "scheduled": "div.event__match--scheduled",
+            "teams": {
+                "container": "div.duelParticipant__container",
+                "home": "div.duelParticipant__home .participant__participantName",
+                "away": "div.duelParticipant__away .participant__participantName"
+            },
+            "datetime": {
+                "container": "div.duelParticipant__startTime"
+            },
+            "navigation": {
+                "container": "nav.wcl-breadcrumbs_SRNRR",
+                "items": "li.wcl-breadcrumbItem_CiWQ7",
+                "text": "span.wcl-overline_rOFfd",
+                "country": {
+                    "index": 1,
+                    "name": "country"
+                },
+                "league": {
+                    "index": 2,
+                    "name": "league"
+                }
+            }
+        },
+        "match_info": {
+            "navigation": {
+                "container": "nav.wcl-breadcrumbs_SRNRR",
+                "item": "li.wcl-breadcrumbItem_CiWQ7",
+                "text": "span.wcl-overline_rOFfd",
+                "country": {
+                    "index": 1,
+                    "name": "country"
+                },
+                "league": {
+                    "index": 2,
+                    "name": "league"
+                }
+            },
+            "teams": {
+                "container": "div.duelParticipant__container",
+                "home": "div.duelParticipant__home .participant__participantName",
+                "away": "div.duelParticipant__away .participant__participantName"
+            },
+            "datetime": {
+                "container": "div.duelParticipant__startTime"
+            },
+            "venue": {
+                "container": "div.wcl-infoValue_0JeZb",
+                "name": "strong.wcl-simpleText_Asp-0",
+                "city": "span.wcl-simpleText_Asp-0"
+            }
+        },
+        "odds": {
+            "table": {
+                "container": "div.oddsTab__tableWrapper",
+                "home_away": {
+                    "container": "div.ui-table.oddsCell__odds",
+                    "row": "div.ui-table__row",
+                    "bookmaker": "div.oddsCell__bookmakerPart",
+                    "odds": {
+                        "container": "div.ui-table__body",
+                        "value": "span.wcl-oddsValue_Fc9sZ",
+                        "home": {
+                            "cell": "a.oddsCell__odd[data-analytics-element=\"ODDS_COMPARIONS_ODD_CELL_2\"]",
+                            "value": "span"
+                        },
+                        "away": {
+                            "cell": "a.oddsCell__odd[data-analytics-element=\"ODDS_COMPARIONS_ODD_CELL_3\"]",
+                            "value": "span"
+                        }
+                    }
+                },
+                "over_under": {
+                    "container": "div.oddsTab__tableWrapper",
+                    "row": "div.ui-table__row",
+                    "bookmaker": "div.oddsCell__bookmakerPart",
+                    "odds": {
+                        "container": "div.ui-table__body",
+                        "value": "span.wcl-oddsValue_Fc9sZ",
+                        "header": {
+                            "container": "div.ui-table__header",
+                            "row": "div.ui-table__headerCell",
+                            "cell": "div.ui-table__headerCell.oddsCell__header"
+                        },
+                        "total": {
+                            "cell": "div.wcl-oddsCell_djZ95",
+                            "value": "span.wcl-oddsValue_Fc9sZ"
+                        },
+                        "over": {
+                            "cell": "a.oddsCell__odd[data-analytics-element=\"ODDS_COMPARIONS_ODD_CELL_2\"]",
+                            "value": "span"
+                        },
+                        "under": {
+                            "cell": "a.oddsCell__odd[data-analytics-element=\"ODDS_COMPARIONS_ODD_CELL_3\"]",
+                            "value": "span"
+                        }
+                    }
+                },
+                "removed": "oddsCell__lineThrough"
+            }
+        },
+        "h2h": {
+            "container": "div.h2h",
+            "section": "div.h2h__section.section",
+            "row": "a.h2h__row",
+            "date": "span.h2h__date",
+            "event": {
+                "container": "span.h2h__event",
+                "name": "span.h2h__event span"
+            },
+            "home_participant": "span.h2h__participant.h2h__homeParticipant .h2h__participantInner",
+            "away_participant": "span.h2h__participant.h2h__awayParticipant .h2h__participantInner",
+            "result": {
+                "container": "span.h2h__result",
+                "home": "span.h2h__result span:first-child",
+                "away": "span.h2h__result span:last-child"
+            },
+            "show_more": "button.wclButtonLink.wclButtonLink--h2h"
+        },
+        "match_details": {
+            "home_team": ".duelParticipant__home .participant__participantName",
+            "away_team": ".duelParticipant__away .participant__participantName",
+            "match_time": ".duelParticipant__startTime",
+            "tournament_info": ".wcl-breadcrumbList_m5Npe li:nth-child(3)",
+            "country": ".wcl-breadcrumbList_m5Npe li:nth-child(2)",
+            "league": ".wcl-breadcrumbList_m5Npe li:nth-child(3)",
+            "venue": ".wcl-infoValue_0JeZb strong",
+            "venue_city": ".wcl-infoValue_0JeZb span"
+        },
+        "detailed_stats": {
+            "quarters": "div.event__part",
+            "score_breakdown": "div.event__scores",
+            "team_stats": "div.stat__row",
+            "player_stats": "div.stat__row",
+            "team_fouls": "div.stat__row",
+            "timeouts": "div.stat__row"
+        },
+        "loading_indicator": "loader"
+    }
+}
