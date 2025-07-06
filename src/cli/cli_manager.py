@@ -173,8 +173,9 @@ class CLIManager:
     def launch_ui(self):
         """Launch the GUI interface."""
         try:
+            import flet as ft
             from ui.main import main as ui_main
-            ui_main()
+            ft.app(target=ui_main)
         except ImportError as e:
             print(f"❌ Error launching UI: {e}")
             print("💡 Make sure you're in the project directory and all dependencies are installed.")

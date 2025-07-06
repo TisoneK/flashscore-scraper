@@ -10,6 +10,7 @@ import os
 import urllib3
 from src.config import CONFIG
 import platform
+from pathlib import Path
 
 from .config import CHROME_OPTIONS
 
@@ -24,6 +25,45 @@ class WebDriverManager:
         self.driver = None
         self._active = False
         self.logger = logging.getLogger(__name__)
+        
+    def _get_platform_paths(self, system: str, project_root: str) -> tuple[Optional[str], Optional[str]]:
+        """Get platform-specific driver and browser binary paths."""
+        driver_path = None
+        chrome_binary_path = None
+        
+        if system == 'windows':
+            # Windows paths
+            driver_path = os.path.join(project_root, 'drivers', 'windows', 'chromedriver.exe')
+            chrome_binary_path = os.path.join(project_root, 'drivers', 'windows', 'chrome-win64', 'chrome.exe')
+        elif system == 'linux':
+            # Linux paths
+            driver_path = os.path.join(project_root, 'drivers', 'linux', 'chromedriver')
+            chrome_binary_path = os.path.join(project_root, 'drivers', 'linux', 'chrome')
+        elif system == 'darwin':
+            # macOS paths
+            driver_path = os.path.join(project_root, 'drivers', 'mac', 'chromedriver')
+            chrome_binary_path = os.path.join(project_root, 'drivers', 'mac', 'chrome')
+        else:
+            # Unknown platform
+            logger.warning(f"Unknown platform: {system}, using system defaults")
+            
+        return driver_path, chrome_binary_path
+    
+    def _get_firefox_paths(self, system: str, project_root: str) -> tuple[Optional[str], Optional[str]]:
+        """Get platform-specific Firefox driver and browser binary paths."""
+        driver_path = None
+        firefox_binary_path = None
+        
+        if system == 'windows':
+            driver_path = os.path.join(project_root, 'drivers', 'windows', 'geckodriver.exe')
+        elif system == 'linux':
+            driver_path = os.path.join(project_root, 'drivers', 'linux', 'geckodriver')
+        elif system == 'darwin':
+            driver_path = os.path.join(project_root, 'drivers', 'mac', 'geckodriver')
+        else:
+            logger.warning(f"Unknown platform: {system}, using system defaults")
+            
+        return driver_path, firefox_binary_path
         
     def initialize(self) -> None:
         """Initialize the WebDriver with appropriate options."""
@@ -67,20 +107,28 @@ class WebDriverManager:
             options.add_argument('--disable-blink-features=AutomationControlled')
             options.add_experimental_option('excludeSwitches', ['enable-automation'])
             options.add_experimental_option('useAutomationExtension', False)
+            
+            # Enhanced platform-independent Chrome binary detection
+            driver_path, chrome_binary_path = self._get_platform_paths(system, project_root)
+            
+            # Check for Chrome binary in local installation
+            if chrome_binary_path and os.path.exists(chrome_binary_path):
+                self.logger.info(f"Found Chrome binary at: {chrome_binary_path}")
+                options.binary_location = chrome_binary_path
+            else:
+                # Fallback to system Chrome
+                self.logger.info("Chrome binary not found in local installation, using system Chrome")
+            
             # Determine driver path
             if CONFIG.browser.driver_path and os.path.exists(CONFIG.browser.driver_path):
                 driver_path = CONFIG.browser.driver_path
+                self.logger.info(f"Using configured driver path: {driver_path}")
+            elif driver_path and os.path.exists(driver_path):
+                self.logger.info(f"Using local ChromeDriver: {driver_path}")
             else:
-                if system == 'windows':
-                    local_driver_path = os.path.join(project_root, 'drivers', 'windows', 'chromedriver.exe')
-                elif system == 'linux':
-                    local_driver_path = os.path.join(project_root, 'drivers', 'linux', 'chromedriver')
-                elif system == 'darwin':
-                    local_driver_path = os.path.join(project_root, 'drivers', 'mac', 'chromedriver')
-                else:
-                    local_driver_path = None
-                if local_driver_path and os.path.exists(local_driver_path):
-                    driver_path = local_driver_path
+                self.logger.warning(f"Local ChromeDriver not found at {driver_path}")
+                driver_path = None
+            
             # Start Chrome WebDriver
             if driver_path and os.path.exists(driver_path):
                 service = ChromeService(executable_path=driver_path)
@@ -89,6 +137,7 @@ class WebDriverManager:
             else:
                 self.driver = webdriver.Chrome(options=options)
                 self.logger.warning(f"Local ChromeDriver not found, using system ChromeDriver")
+                
         elif browser_name == 'firefox':
             from selenium.webdriver.firefox.options import Options as FirefoxOptions
             from selenium.webdriver.firefox.service import Service as FirefoxService
@@ -97,20 +146,19 @@ class WebDriverManager:
                 options.add_argument('--headless')
             options.add_argument(f'--width={CONFIG.browser.window_size[0]}')
             options.add_argument(f'--height={CONFIG.browser.window_size[1]}')
+            
             # Determine driver path
+            driver_path, firefox_binary_path = self._get_firefox_paths(system, project_root)
+            
             if CONFIG.browser.driver_path and os.path.exists(CONFIG.browser.driver_path):
                 driver_path = CONFIG.browser.driver_path
+                self.logger.info(f"Using configured driver path: {driver_path}")
+            elif driver_path and os.path.exists(driver_path):
+                self.logger.info(f"Using local GeckoDriver: {driver_path}")
             else:
-                if system == 'windows':
-                    local_driver_path = os.path.join(project_root, 'drivers', 'windows', 'geckodriver.exe')
-                elif system == 'linux':
-                    local_driver_path = os.path.join(project_root, 'drivers', 'linux', 'geckodriver')
-                elif system == 'darwin':
-                    local_driver_path = os.path.join(project_root, 'drivers', 'mac', 'geckodriver')
-                else:
-                    local_driver_path = None
-                if local_driver_path and os.path.exists(local_driver_path):
-                    driver_path = local_driver_path
+                self.logger.warning(f"Local GeckoDriver not found at {driver_path}")
+                driver_path = None
+                
             # Start Firefox WebDriver
             if driver_path and os.path.exists(driver_path):
                 service = FirefoxService(executable_path=driver_path)
@@ -121,6 +169,7 @@ class WebDriverManager:
                 self.logger.warning(f"Local GeckoDriver not found, using system GeckoDriver")
         else:
             raise ValueError(f"Unsupported browser: {browser_name}")
+            
         # Anti-detection for Chrome only
         if browser_name == 'chrome' and self.driver is not None:
             try:
@@ -130,7 +179,7 @@ class WebDriverManager:
         self._active = True
         self.logger.info("WebDriver initialized successfully")
             
-    def get_driver(self) -> webdriver.Chrome:
+    def get_driver(self) -> Optional[webdriver.Remote]:
         """Get the WebDriver instance, initializing it if necessary."""
         if self.driver is None:
             self.initialize()

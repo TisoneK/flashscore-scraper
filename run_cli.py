@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """
-Flashscore Scraper - CLI Version
-
-This script runs the scraper in command-line mode using the new CLI utility.
+FlashScore Scraper CLI Entry Point
 """
 
-from src.cli import CLIManager
+import warnings
+import os
+import sys
 
-def main():
-    cli = CLIManager()
-    cli.run()
+# Suppress Python warnings about platform independent libraries
+warnings.filterwarnings("ignore", message="Could not find platform independent libraries")
+
+# Add the project root to Python path
+project_root = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, project_root)
+
+from src.cli.cli_manager import main
 
 if __name__ == "__main__":
     main() 

@@ -5,9 +5,13 @@ Flashscore Scraper - Main Entry Point
 This script launches the UI by default, but can also run the CLI scraper.
 """
 
+import warnings
 import sys
 import argparse
 from pathlib import Path
+
+# Suppress Python warnings about platform independent libraries
+warnings.filterwarnings("ignore", message="Could not find platform independent libraries")
 
 def run_cli_scraper():
     """Run the CLI version of the scraper using the new CLI manager."""
