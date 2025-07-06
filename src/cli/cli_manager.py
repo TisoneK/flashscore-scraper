@@ -71,28 +71,39 @@ class CLIManager:
             description="FlashScore Scraper - Basketball match data extraction tool",
             prog="flashscore-scraper"
         )
-        parser.add_argument("--init", nargs='?', const='chrome', metavar='BROWSER',
-                          help="Initialize project (venv, install, drivers). Browser: chrome (default) or firefox")
+        parser.add_argument("--init", nargs='*', metavar='BROWSER [VERSION]',
+                          help="Initialize project (venv, install, drivers). Browser: chrome (default) or firefox. Version: major version (e.g., 138)")
         parser.add_argument("--ui", "-u", action="store_true", 
                           help="Launch GUI interface")
         parser.add_argument("--cli", "-c", action="store_true", 
                           help="Launch CLI interface")
-        parser.add_argument("--install-drivers", nargs='?', const='chrome', metavar='BROWSER',
-                          help="Install drivers only. Browser: chrome (default) or firefox")
+        parser.add_argument("--install-drivers", nargs='*', metavar='BROWSER [VERSION]',
+                          help="Install drivers only. Browser: chrome (default) or firefox. Version: major version (e.g., 138)")
+        parser.add_argument("--list-versions", action="store_true",
+                          help="List available Chrome versions")
         parser.add_argument("--version", "-v", action="version", version="1.0.0")
         
         parsed_args = parser.parse_args(args)
         
+        # Handle version listing
+        if parsed_args.list_versions:
+            self.list_available_versions()
+            return
+        
         # Handle driver installation
         if parsed_args.install_drivers:
-            browser = parsed_args.install_drivers.lower()
-            self.install_drivers_automated(browser)
+            args = parsed_args.install_drivers
+            browser = args[0].lower() if args else 'chrome'
+            version = args[1] if len(args) > 1 else None
+            self.install_drivers_automated(browser, version)
             return
         
         # Handle initialization
         if parsed_args.init is not None:
-            browser = parsed_args.init.lower()
-            self.initialize_project(browser)
+            args = parsed_args.init
+            browser = args[0].lower() if args else 'chrome'
+            version = args[1] if len(args) > 1 else None
+            self.initialize_project(browser, version)
             return
         
         # Handle UI mode
@@ -108,7 +119,7 @@ class CLIManager:
         # Default: show help
         parser.print_help()
     
-    def initialize_project(self, browser='chrome'):
+    def initialize_project(self, browser='chrome', version=None):
         """Initialize the project and install drivers."""
         print(f"🚀 Initializing FlashScore Scraper with {browser}...")
         
@@ -167,7 +178,12 @@ class CLIManager:
                 from src.utils.driver_manager import DriverManager
                 
                 driver_manager = DriverManager()
-                results = driver_manager.install_all()
+                if version:
+                    print(f"🎯 Installing Chrome version {version}.*")
+                else:
+                    print("🎯 Installing latest Chrome version")
+                
+                results = driver_manager.install_all(version)
                 
                 if results['chrome_path'] and results['chromedriver_path']:
                     print("✅ Chrome drivers installed successfully!")
@@ -206,7 +222,16 @@ class CLIManager:
         print("  • Run: fss -u                     (short form for GUI)")
         print("  • Run: fss -c                     (short form for CLI)")
     
-    def install_drivers_automated(self, browser='chrome'):
+    def list_available_versions(self):
+        """List available Chrome versions."""
+        try:
+            from src.utils.driver_manager import DriverManager
+            driver_manager = DriverManager()
+            driver_manager.list_available_versions()
+        except Exception as e:
+            print(f"❌ Error listing versions: {e}")
+    
+    def install_drivers_automated(self, browser='chrome', version=None):
         """Install drivers for the specified browser."""
         print(f"🚀 Installing {browser} drivers automatically...")
         
@@ -222,7 +247,12 @@ class CLIManager:
                 from src.utils.driver_manager import DriverManager
                 
                 driver_manager = DriverManager()
-                results = driver_manager.install_all()
+                if version:
+                    print(f"🎯 Installing Chrome version {version}.*")
+                else:
+                    print("🎯 Installing latest Chrome version")
+                
+                results = driver_manager.install_all(version)
                 
                 print("\n✅ Chrome driver installation completed!")
                 print(f"   Chrome: {results['chrome_path'] or 'Not installed'}")

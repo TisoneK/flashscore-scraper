@@ -52,6 +52,11 @@ flashscore-scraper --init
 # or
 fss --init chrome
 
+# Initialize project with specific Chrome version
+flashscore-scraper --init chrome 138
+# or
+fss --init chrome 138
+
 # Initialize project with Firefox
 flashscore-scraper --init firefox
 # or
@@ -62,10 +67,20 @@ flashscore-scraper --install-drivers
 # or short form
 fss --install-drivers chrome
 
+# Install specific Chrome version drivers
+flashscore-scraper --install-drivers chrome 138
+# or short form
+fss --install-drivers chrome 138
+
 # Install Firefox drivers only
 flashscore-scraper --install-drivers firefox
 # or short form
 fss --install-drivers firefox
+
+# List available Chrome versions
+flashscore-scraper --list-versions
+# or short form
+fss --list-versions
 
 # Launch GUI (recommended)
 flashscore-scraper --ui
@@ -144,6 +159,33 @@ flashscore_scraper_1o/
     ├── linux/            # Linux drivers
     └── mac/              # macOS drivers
 ```
+
+## 🔧 Driver Management
+
+### Chrome Version Control
+The scraper supports installing specific Chrome versions to match your system:
+
+```bash
+# Install latest Chrome version (default)
+fss --install-drivers chrome
+
+# Install specific Chrome version (e.g., 138.*)
+fss --install-drivers chrome 138
+
+# List all available Chrome versions
+fss --list-versions
+```
+
+### Why Use Specific Versions?
+- **Compatibility**: Match your system's Chrome version exactly
+- **Stability**: Use a known working version
+- **Testing**: Test with different Chrome versions
+- **Corporate**: Some environments require specific versions
+
+### Version Matching
+- Use major version numbers (e.g., `138` for Chrome 138.*)
+- The system finds the latest patch version for that major version
+- Falls back to latest if specific version not found
 
 ## ⚙️ Configuration
 

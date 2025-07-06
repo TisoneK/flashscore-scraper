@@ -2,6 +2,7 @@
 """
 Automated Driver Manager for FlashScore Scraper
 Downloads and installs Chrome and ChromeDriver for any platform using Chrome for Testing API.
+Supports both latest version and specific version installation.
 """
 
 import os
@@ -61,6 +62,34 @@ class DriverManager:
                 return 'macos-x64'
         else:
             raise ValueError(f"Unsupported platform: {self.system}")
+    
+    def get_available_versions(self) -> list:
+        """Get all available Chrome for Testing versions."""
+        try:
+            logger.info("Fetching available Chrome for Testing versions...")
+            with urllib.request.urlopen(self.stable_endpoint) as response:
+                data = json.load(response)
+            
+            return data.get('versions', [])
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch Chrome versions: {e}")
+            return []
+    
+    def find_version_by_major(self, major_version: str) -> Optional[Dict[str, Any]]:
+        """Find a specific Chrome version by major version number (e.g., '138')."""
+        versions = self.get_available_versions()
+        
+        # Look for exact major version match
+        for version_info in versions:
+            version = version_info['version']
+            if version.startswith(f"{major_version}."):
+                logger.info(f"Found Chrome version {version} for major version {major_version}")
+                return version_info
+        
+        # If not found, return the latest version
+        logger.warning(f"No Chrome version found for major version {major_version}, using latest")
+        return versions[0] if versions else None
     
     def get_latest_chrome_version(self) -> Dict[str, Any]:
         """Get the latest Chrome for Testing version and download URLs."""
@@ -214,7 +243,7 @@ class DriverManager:
         
         return None
     
-    def install_all(self) -> Dict[str, Optional[str]]:
+    def install_all(self, version: Optional[str] = None) -> Dict[str, Optional[str]]:
         """Install both Chrome and ChromeDriver for the current platform."""
         logger.info("🚀 Starting automated driver installation...")
         
@@ -225,8 +254,21 @@ class DriverManager:
         # Create drivers directory
         self.drivers_dir.mkdir(exist_ok=True)
         
-        # Get latest version info
-        version_info = self.get_latest_chrome_version()
+        # Get version info based on parameter
+        if version:
+            logger.info(f"Installing Chrome version {version}.*")
+            version_info = self.find_version_by_major(version)
+            if not version_info:
+                logger.error(f"Could not find Chrome version {version}.*")
+                return {
+                    'chrome_path': None,
+                    'chromedriver_path': None,
+                    'version': f"{version}.* (not found)",
+                    'platform': platform_key
+                }
+        else:
+            logger.info("Installing latest Chrome version")
+            version_info = self.get_latest_chrome_version()
         
         # Install Chrome and ChromeDriver
         chrome_path = self.install_chrome(version_info, platform_key)
@@ -246,7 +288,25 @@ class DriverManager:
         
         return results
     
-    def check_installation(self) -> Dict[str, bool]:
+    def list_available_versions(self) -> None:
+        """List all available Chrome versions."""
+        versions = self.get_available_versions()
+        
+        print("📋 Available Chrome for Testing versions:")
+        print("=" * 50)
+        
+        for i, version_info in enumerate(versions[:10]):  # Show first 10 versions
+            version = version_info['version']
+            revision = version_info['revision']
+            print(f"{i+1:2d}. {version} (revision: {revision})")
+        
+        if len(versions) > 10:
+            print(f"... and {len(versions) - 10} more versions")
+        
+        print(f"\n💡 Use: fss --install-drivers chrome <major_version>")
+        print(f"   Example: fss --install-drivers chrome 138")
+    
+    def check_installation(self) -> Dict[str, Any]:
         """Check if Chrome and ChromeDriver are properly installed."""
         platform_key = self.detect_platform()
         
@@ -290,15 +350,19 @@ def main():
     
     parser = argparse.ArgumentParser(description="FlashScore Scraper Driver Manager")
     parser.add_argument("--install", action="store_true", help="Install Chrome and ChromeDriver")
+    parser.add_argument("--version", type=str, help="Specific Chrome major version (e.g., '138')")
+    parser.add_argument("--list-versions", action="store_true", help="List available Chrome versions")
     parser.add_argument("--check", action="store_true", help="Check installation status")
-    parser.add_argument("--version", action="version", version="1.0.0")
+    parser.add_argument("--version-info", action="version", version="1.0.0")
     
     args = parser.parse_args()
     
     driver_manager = DriverManager()
     
-    if args.install:
-        driver_manager.install_all()
+    if args.list_versions:
+        driver_manager.list_available_versions()
+    elif args.install:
+        driver_manager.install_all(args.version)
     elif args.check:
         status = driver_manager.check_installation()
         print(f"Platform: {status['platform']}")
