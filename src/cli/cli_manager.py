@@ -71,26 +71,28 @@ class CLIManager:
             description="FlashScore Scraper - Basketball match data extraction tool",
             prog="flashscore-scraper"
         )
-        parser.add_argument("--init", action="store_true", 
-                          help="Initialize project (venv, install, drivers)")
+        parser.add_argument("--init", nargs='?', const='chrome', metavar='BROWSER',
+                          help="Initialize project (venv, install, drivers). Browser: chrome (default) or firefox")
         parser.add_argument("--ui", "-u", action="store_true", 
                           help="Launch GUI interface")
         parser.add_argument("--cli", "-c", action="store_true", 
                           help="Launch CLI interface")
-        parser.add_argument("--install-drivers", action="store_true",
-                          help="Install Chrome and ChromeDriver only")
+        parser.add_argument("--install-drivers", nargs='?', const='chrome', metavar='BROWSER',
+                          help="Install drivers only. Browser: chrome (default) or firefox")
         parser.add_argument("--version", "-v", action="version", version="1.0.0")
         
         parsed_args = parser.parse_args(args)
         
         # Handle driver installation
         if parsed_args.install_drivers:
-            self.install_drivers_automated()
+            browser = parsed_args.install_drivers.lower()
+            self.install_drivers_automated(browser)
             return
         
         # Handle initialization
-        if parsed_args.init:
-            self.initialize_project()
+        if parsed_args.init is not None:
+            browser = parsed_args.init.lower()
+            self.initialize_project(browser)
             return
         
         # Handle UI mode
@@ -106,9 +108,15 @@ class CLIManager:
         # Default: show help
         parser.print_help()
     
-    def initialize_project(self):
+    def initialize_project(self, browser='chrome'):
         """Initialize the project and install drivers."""
-        print("🚀 Initializing FlashScore Scraper...")
+        print(f"🚀 Initializing FlashScore Scraper with {browser}...")
+        
+        # Validate browser choice
+        if browser not in ['chrome', 'firefox']:
+            print(f"❌ Unsupported browser: {browser}")
+            print("   Supported browsers: chrome, firefox")
+            return
         
         # Check if virtual environment exists
         venv_path = Path(__file__).parent.parent.parent / ".venv"
@@ -153,21 +161,32 @@ class CLIManager:
             print(f"❌ Error installing project: {e}")
         
         # Install drivers using the new automated driver manager
-        print("📥 Installing browser drivers...")
+        print(f"📥 Installing {browser} drivers...")
         try:
-            from src.utils.driver_manager import DriverManager
-            
-            driver_manager = DriverManager()
-            results = driver_manager.install_all()
-            
-            if results['chrome_path'] and results['chromedriver_path']:
-                print("✅ Drivers installed successfully!")
-                print(f"   Chrome: {results['chrome_path']}")
-                print(f"   ChromeDriver: {results['chromedriver_path']}")
-                print(f"   Version: {results['version']}")
-            else:
-                print("⚠️  Some drivers failed to install.")
-                print("   You can try: fss --install-drivers")
+            if browser == 'chrome':
+                from src.utils.driver_manager import DriverManager
+                
+                driver_manager = DriverManager()
+                results = driver_manager.install_all()
+                
+                if results['chrome_path'] and results['chromedriver_path']:
+                    print("✅ Chrome drivers installed successfully!")
+                    print(f"   Chrome: {results['chrome_path']}")
+                    print(f"   ChromeDriver: {results['chromedriver_path']}")
+                    print(f"   Version: {results['version']}")
+                else:
+                    print("⚠️  Some Chrome drivers failed to install.")
+                    print("   You can try: fss --install-drivers chrome")
+            elif browser == 'firefox':
+                print("📥 Installing Firefox drivers...")
+                # For Firefox, we'll use webdriver-manager or manual installation
+                try:
+                    from webdriver_manager.firefox import GeckoDriverManager
+                    driver_path = GeckoDriverManager().install()
+                    print(f"✅ Firefox driver installed at: {driver_path}")
+                except Exception as e:
+                    print(f"❌ Firefox driver installation failed: {e}")
+                    print("   You can try: fss --install-drivers firefox")
         except ImportError as e:
             print(f"❌ Error importing driver manager: {e}")
             print("💡 Make sure all dependencies are installed.")
@@ -181,43 +200,62 @@ class CLIManager:
             Path(dir_path).mkdir(parents=True, exist_ok=True)
         
         print("✅ Project initialized successfully!")
-        print("\n📋 Next steps:")
+        print(f"\n📋 Next steps:")
         print("  • Run: flashscore-scraper --ui    (for GUI)")
         print("  • Run: flashscore-scraper --cli   (for command line)")
         print("  • Run: fss -u                     (short form for GUI)")
         print("  • Run: fss -c                     (short form for CLI)")
     
-    def install_drivers_automated(self):
-        """Install Chrome and ChromeDriver using the automated driver manager."""
-        print("🚀 Installing Chrome and ChromeDriver automatically...")
-        print("📡 Using Chrome for Testing API...")
+    def install_drivers_automated(self, browser='chrome'):
+        """Install drivers for the specified browser."""
+        print(f"🚀 Installing {browser} drivers automatically...")
+        
+        # Validate browser choice
+        if browser not in ['chrome', 'firefox']:
+            print(f"❌ Unsupported browser: {browser}")
+            print("   Supported browsers: chrome, firefox")
+            return
         
         try:
-            from src.utils.driver_manager import DriverManager
-            
-            driver_manager = DriverManager()
-            results = driver_manager.install_all()
-            
-            print("\n✅ Driver installation completed!")
-            print(f"   Chrome: {results['chrome_path'] or 'Not installed'}")
-            print(f"   ChromeDriver: {results['chromedriver_path'] or 'Not installed'}")
-            print(f"   Version: {results['version']}")
-            print(f"   Platform: {results['platform']}")
-            
-            if results['chrome_path'] and results['chromedriver_path']:
-                print("\n🎉 Drivers installed successfully!")
+            if browser == 'chrome':
+                print("📡 Using Chrome for Testing API...")
+                from src.utils.driver_manager import DriverManager
+                
+                driver_manager = DriverManager()
+                results = driver_manager.install_all()
+                
+                print("\n✅ Chrome driver installation completed!")
+                print(f"   Chrome: {results['chrome_path'] or 'Not installed'}")
+                print(f"   ChromeDriver: {results['chromedriver_path'] or 'Not installed'}")
+                print(f"   Version: {results['version']}")
+                print(f"   Platform: {results['platform']}")
+                
+                if results['chrome_path'] and results['chromedriver_path']:
+                    print("\n🎉 Chrome drivers installed successfully!")
+                    print("   You can now run the scraper with:")
+                    print("   • fss --cli")
+                    print("   • fss --ui")
+                else:
+                    print("\n⚠️  Some Chrome drivers failed to install.")
+                    print("   You may need to install them manually or use system drivers.")
+                    
+            elif browser == 'firefox':
+                print("📡 Using webdriver-manager for Firefox...")
+                from webdriver_manager.firefox import GeckoDriverManager
+                
+                driver_path = GeckoDriverManager().install()
+                print(f"\n✅ Firefox driver installed successfully!")
+                print(f"   GeckoDriver: {driver_path}")
+                print("\n🎉 Firefox driver installed successfully!")
                 print("   You can now run the scraper with:")
                 print("   • fss --cli")
                 print("   • fss --ui")
-            else:
-                print("\n⚠️  Some drivers failed to install.")
-                print("   You may need to install them manually or use system drivers.")
                 
         except ImportError as e:
             print(f"❌ Error importing driver manager: {e}")
             print("💡 Make sure all dependencies are installed.")
         except Exception as e:
-            print(f"❌ Error installing drivers: {e}")
+            print(f"❌ Error installing {browser} drivers: {e}")
             print("💡 Check your internet connection and try again.")
     
     def launch_ui(self):
