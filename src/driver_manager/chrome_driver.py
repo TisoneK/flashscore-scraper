@@ -1,146 +1,176 @@
-"""Chrome WebDriver management for FlashScore Scraper."""
-import logging
-from typing import Optional, Tuple
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.chrome.options import Options as ChromeOptions
+#!/usr/bin/env python3
+"""
+Chrome WebDriver Manager for FlashScore Scraper
+Handles Chrome driver initialization and configuration.
+"""
+
 import os
 import platform
+import subprocess
 from pathlib import Path
-from src.config import CONFIG
+from typing import Optional, Dict, Any
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import WebDriverException
+import logging
 
 logger = logging.getLogger(__name__)
 
-class ChromeDriver:
-    """Manages Chrome WebDriver setup and configuration."""
+class ChromeDriverManager:
+    """Manages Chrome WebDriver initialization and configuration."""
     
-    def __init__(self):
-        """Initialize Chrome driver manager."""
-        self.logger = logging.getLogger(__name__)
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.project_root = Path(__file__).parent.parent.parent
+        self.drivers_dir = self.project_root / "drivers"
+        self.system = platform.system().lower()
+        self.machine = platform.machine().lower()
     
-    def _get_platform_paths(self, system: str, project_root: str) -> Tuple[Optional[str], Optional[str]]:
-        """Get platform-specific Chrome driver and browser binary paths."""
-        driver_path = None
-        chrome_binary_path = None
-        
-        if system == 'windows':
-            # Windows paths
-            driver_path = os.path.join(project_root, 'drivers', 'windows', 'chromedriver.exe')
-            chrome_binary_path = os.path.join(project_root, 'drivers', 'windows', 'chrome-win64', 'chrome.exe')
-        elif system == 'linux':
-            # Linux paths
-            driver_path = os.path.join(project_root, 'drivers', 'linux', 'chromedriver')
-            chrome_binary_path = os.path.join(project_root, 'drivers', 'linux', 'chrome')
-        elif system == 'darwin':
-            # macOS paths
-            driver_path = os.path.join(project_root, 'drivers', 'mac', 'chromedriver')
-            chrome_binary_path = os.path.join(project_root, 'drivers', 'mac', 'chrome')
+    def detect_platform(self) -> str:
+        """Detect the current platform and architecture."""
+        if self.system == 'windows':
+            if '64' in self.machine or 'x86_64' in self.machine:
+                return 'windows-x64'
+            else:
+                return 'windows-x86'
+        elif self.system == 'linux':
+            if 'x86_64' in self.machine or 'amd64' in self.machine:
+                return 'linux-x64'
+            elif 'aarch64' in self.machine or 'arm64' in self.machine:
+                return 'linux-arm64'
+            else:
+                return 'linux-x64'  # Default fallback
+        elif self.system == 'darwin':
+            if 'arm64' in self.machine or 'aarch64' in self.machine:
+                return 'macos-arm64'
+            else:
+                return 'macos-x64'
         else:
-            # Unknown platform
-            logger.warning(f"Unknown platform: {system}, using system defaults")
+            raise ValueError(f"Unsupported platform: {self.system}")
+    
+    def find_latest_driver_paths(self) -> tuple[Optional[str], Optional[str]]:
+        """Find the latest installed Chrome and ChromeDriver paths."""
+        # Check config first for user-specified paths
+        browser_config = self.config.get('browser', {})
+        config_chrome_path = browser_config.get('chrome_binary_path')
+        config_chromedriver_path = browser_config.get('chromedriver_path')
+        
+        # If config paths are set and exist, use them
+        if config_chrome_path and Path(config_chrome_path).exists():
+            chrome_path = config_chrome_path
+        else:
+            chrome_path = None
             
-        return driver_path, chrome_binary_path
-    
-    def create_options(self) -> ChromeOptions:
-        """Create Chrome options based on configuration."""
-        options = ChromeOptions()
-        
-        # Use chrome_options configuration if available, otherwise fall back to browser config
-        chrome_config = getattr(CONFIG, 'chrome_options', None)
-        
-        if chrome_config:
-            # Use the dedicated Chrome options configuration
-            for option in chrome_config.to_list():
-                options.add_argument(option)
+        if config_chromedriver_path and Path(config_chromedriver_path).exists():
+            chromedriver_path = config_chromedriver_path
         else:
-            # Fall back to browser configuration
-            if CONFIG.browser.headless:
-                options.add_argument('--headless=new')
-            options.add_argument('--disable-gpu')
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument(f'--window-size={CONFIG.browser.window_size[0]},{CONFIG.browser.window_size[1]}')
+            chromedriver_path = None
         
-        # Suppress browser console output
-        options.add_argument('--log-level=3')  # Only fatal errors
-        options.add_argument('--silent')
-        options.add_argument('--disable-logging')
-        options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        # If config paths not set or don't exist, auto-detect
+        if not chrome_path or not chromedriver_path:
+            platform_key = self.detect_platform()
+            
+            if platform_key.startswith('windows'):
+                base_dir = self.drivers_dir / "windows"
+            elif platform_key.startswith('linux'):
+                base_dir = self.drivers_dir / "linux"
+            elif platform_key.startswith('macos'):
+                base_dir = self.drivers_dir / "mac"
+            else:
+                return chrome_path, chromedriver_path
+            
+            # Find latest Chrome version if not set in config
+            if not chrome_path:
+                chrome_base = base_dir / "chrome"
+                if chrome_base.exists():
+                    chrome_versions = [d for d in chrome_base.iterdir() if d.is_dir()]
+                    if chrome_versions:
+                        latest_chrome = max(chrome_versions, key=lambda x: x.name)
+                        chrome_path = latest_chrome / "chrome.exe" if platform_key.startswith('windows') else latest_chrome / "chrome"
+                        if not chrome_path.exists():
+                            chrome_path = None
+            
+            # Find latest ChromeDriver version if not set in config
+            if not chromedriver_path:
+                chromedriver_base = base_dir / "chromedriver"
+                if chromedriver_base.exists():
+                    chromedriver_versions = [d for d in chromedriver_base.iterdir() if d.is_dir()]
+                    if chromedriver_versions:
+                        latest_chromedriver = max(chromedriver_versions, key=lambda x: x.name)
+                        chromedriver_path = latest_chromedriver / "chromedriver.exe" if platform_key.startswith('windows') else latest_chromedriver / "chromedriver"
+                        if not chromedriver_path.exists():
+                            chromedriver_path = None
         
-        # Performance options from browser config
-        if CONFIG.browser.disable_images:
-            options.add_argument('--blink-settings=imagesEnabled=false')
-        if CONFIG.browser.disable_javascript:
-            options.add_argument('--disable-javascript')
-        if CONFIG.browser.disable_css:
-            options.add_argument('--disable-css')
-        if CONFIG.browser.ignore_certificate_errors:
-            options.add_argument('--ignore-certificate-errors')
+        return str(chrome_path) if chrome_path else None, str(chromedriver_path) if chromedriver_path else None
+    
+    def get_chrome_options(self) -> Options:
+        """Get Chrome options from config."""
+        options = Options()
         
-        # User agent and anti-detection
-        options.add_argument(f'user-agent={CONFIG.browser.user_agent}')
-        options.add_argument('--disable-blink-features=AutomationControlled')
-        options.add_experimental_option('excludeSwitches', ['enable-automation'])
-        options.add_experimental_option('useAutomationExtension', False)
+        # Get options from config
+        chrome_options = self.config.get('chrome_options', {})
+        
+        # Add binary location if specified
+        chrome_path, _ = self.find_latest_driver_paths()
+        if chrome_path:
+            options.binary_location = chrome_path
+        
+        # Add arguments from config
+        arguments = chrome_options.get('arguments', [])
+        for arg in arguments:
+            options.add_argument(arg)
+        
+        # Add experimental options from config
+        experimental_options = chrome_options.get('experimental_options', {})
+        for key, value in experimental_options.items():
+            options.add_experimental_option(key, value)
+        
+        # Add preferences from config
+        preferences = chrome_options.get('preferences', {})
+        for key, value in preferences.items():
+            options.add_experimental_option(f"prefs.{key}", value)
         
         return options
     
-    def setup_binary_location(self, options: ChromeOptions, system: str, project_root: str) -> None:
-        """Set up Chrome binary location if available."""
-        _, chrome_binary_path = self._get_platform_paths(system, project_root)
-        
-        # Check for Chrome binary in local installation
-        if chrome_binary_path and os.path.exists(chrome_binary_path):
-            self.logger.info(f"Found Chrome binary at: {chrome_binary_path}")
-            options.binary_location = chrome_binary_path
-        else:
-            # Fallback to system Chrome
-            self.logger.info("Chrome binary not found in local installation, using system Chrome")
-    
-    def get_driver_path(self, system: str, project_root: str) -> Optional[str]:
-        """Get the appropriate ChromeDriver path."""
-        driver_path, _ = self._get_platform_paths(system, project_root)
-        
-        # Check configured driver path first
-        if CONFIG.browser.driver_path and os.path.exists(CONFIG.browser.driver_path):
-            driver_path = CONFIG.browser.driver_path
-            self.logger.info(f"Using configured driver path: {driver_path}")
-        elif driver_path and os.path.exists(driver_path):
-            self.logger.info(f"Using local ChromeDriver: {driver_path}")
-        else:
-            self.logger.warning(f"Local ChromeDriver not found at {driver_path}")
-            driver_path = None
-        
-        return driver_path
-    
-    def create_driver(self, options: ChromeOptions, driver_path: Optional[str] = None) -> webdriver.Chrome:
-        """Create and return a Chrome WebDriver instance."""
-        if driver_path and os.path.exists(driver_path):
-            service = ChromeService(executable_path=driver_path)
-            driver = webdriver.Chrome(service=service, options=options)
-            self.logger.info(f"Using ChromeDriver: {driver_path}")
-        else:
-            driver = webdriver.Chrome(options=options)
-            self.logger.warning("Local ChromeDriver not found, using system ChromeDriver")
-        
-        # Anti-detection
+    def create_driver(self) -> webdriver.Chrome:
+        """Create and configure Chrome WebDriver."""
         try:
-            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        except Exception:
-            pass
-        
-        return driver
+            # Get ChromeDriver path
+            _, chromedriver_path = self.find_latest_driver_paths()
+            
+            if not chromedriver_path:
+                raise WebDriverException("ChromeDriver not found. Run 'fss --init chrome' to install drivers.")
+            
+            # Create service
+            service = Service(executable_path=chromedriver_path)
+            
+            # Get Chrome options
+            options = self.get_chrome_options()
+            
+            # Create driver
+            driver = webdriver.Chrome(service=service, options=options)
+            
+            logger.info(f"✅ Chrome WebDriver initialized successfully")
+            logger.info(f"📁 ChromeDriver path: {chromedriver_path}")
+            
+            return driver
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to create Chrome WebDriver: {e}")
+            raise
     
-    def initialize(self, system: str, project_root: str) -> webdriver.Chrome:
-        """Initialize Chrome WebDriver with all necessary setup."""
-        # Create options
-        options = self.create_options()
+    def check_driver_installation(self) -> Dict[str, Any]:
+        """Check if Chrome and ChromeDriver are properly installed."""
+        chrome_path, chromedriver_path = self.find_latest_driver_paths()
         
-        # Setup binary location
-        self.setup_binary_location(options, system, project_root)
+        chrome_installed = chrome_path is not None and Path(chrome_path).exists()
+        chromedriver_installed = chromedriver_path is not None and Path(chromedriver_path).exists()
         
-        # Get driver path
-        driver_path = self.get_driver_path(system, project_root)
-        
-        # Create and return driver
-        return self.create_driver(options, driver_path) 
+        return {
+            'chrome_installed': chrome_installed,
+            'chrome_path': chrome_path,
+            'chromedriver_installed': chromedriver_installed,
+            'chromedriver_path': chromedriver_path,
+            'all_installed': chrome_installed and chromedriver_installed
+        } 

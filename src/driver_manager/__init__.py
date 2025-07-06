@@ -10,13 +10,13 @@ This module provides comprehensive driver management functionality including:
 
 from .web_driver_manager import WebDriverManager
 from .driver_installer import DriverInstaller
-from .chrome_driver import ChromeDriver
+from .chrome_driver import ChromeDriverManager
 from .firefox_driver import FirefoxDriver
 
 __all__ = [
     'WebDriverManager',
     'DriverInstaller',
-    'ChromeDriver',
+    'ChromeDriverManager',
     'FirefoxDriver'
 ]
 

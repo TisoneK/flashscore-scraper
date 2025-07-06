@@ -589,6 +589,91 @@ class CLIManager:
         except Exception as e:
             self.display.show_error(f"Failed to get status: {str(e)}")
 
+    def init_drivers(self, driver_type: str = "chrome", version: Optional[str] = None) -> bool:
+        """Initialize drivers for the scraper."""
+        try:
+            if driver_type.lower() == "chrome":
+                from ..driver_manager.driver_installer import DriverInstaller
+                
+                installer = DriverInstaller()
+                results = installer.install_all(version=version)
+                
+                if results.get('chrome') and results.get('chromedriver'):
+                    print(f"✅ Chrome installed: {results['chrome']}")
+                    print(f"✅ ChromeDriver installed: {results['chromedriver']}")
+                    print(f"✅ Version: {results['version']}")
+                    print(f"✅ Platform: {results['platform']}")
+                    return True
+                else:
+                    print("❌ Failed to install drivers")
+                    return False
+            else:
+                print(f"❌ Unsupported driver type: {driver_type}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error initializing drivers: {e}")
+            return False
+
+    def list_drivers(self, driver_type: str = "chrome") -> bool:
+        """List available driver versions."""
+        try:
+            if driver_type.lower() == "chrome":
+                from ..driver_manager.driver_installer import DriverInstaller
+                
+                installer = DriverInstaller()
+                installer.list_available_versions()
+                return True
+            else:
+                print(f"❌ Unsupported driver type: {driver_type}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error listing drivers: {e}")
+            return False
+
+    def check_drivers(self, driver_type: str = "chrome") -> bool:
+        """Check driver installation status."""
+        try:
+            if driver_type.lower() == "chrome":
+                from ..driver_manager.driver_installer import DriverInstaller
+                from ..config import CONFIG
+                
+                installer = DriverInstaller()
+                status = installer.check_installation()
+                
+                print(f"📋 Driver Status for {status['platform']}:")
+                print("-" * 50)
+                
+                # Show config paths if set
+                if CONFIG.browser.chrome_binary_path:
+                    print(f"📁 Config Chrome path: {CONFIG.browser.chrome_binary_path}")
+                if CONFIG.browser.chromedriver_path:
+                    print(f"📁 Config ChromeDriver path: {CONFIG.browser.chromedriver_path}")
+                
+                if status['chrome_installed']:
+                    print(f"✅ Chrome: {status['chrome_version']} at {status['chrome_path']}")
+                else:
+                    print("❌ Chrome: Not installed")
+                
+                if status['chromedriver_installed']:
+                    print(f"✅ ChromeDriver: {status['chromedriver_version']} at {status['chromedriver_path']}")
+                else:
+                    print("❌ ChromeDriver: Not installed")
+                
+                if status['all_installed']:
+                    print("✅ All drivers ready for use")
+                else:
+                    print("⚠️ Some drivers missing - run 'fss --init chrome' to install")
+                
+                return status['all_installed']
+            else:
+                print(f"❌ Unsupported driver type: {driver_type}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error checking drivers: {e}")
+            return False
 
 def main():
     """Main entry point for the CLI application."""

@@ -7,8 +7,9 @@ import os
 import platform
 from pathlib import Path
 from src.config import CONFIG
-from .chrome_driver import ChromeDriver
+from .chrome_driver import ChromeDriverManager
 from .firefox_driver import FirefoxDriver
+from dataclasses import asdict
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ class WebDriverManager:
         self.driver = None
         self._active = False
         self.logger = logging.getLogger(__name__)
-        self.chrome_driver = ChromeDriver()
+        self.chrome_driver = ChromeDriverManager(asdict(CONFIG))
         self.firefox_driver = FirefoxDriver()
         
     def initialize(self) -> None:
@@ -37,7 +38,7 @@ class WebDriverManager:
         
         # Initialize the appropriate driver
         if browser_name == 'chrome':
-            self.driver = self.chrome_driver.initialize(system, project_root)
+            self.driver = self.chrome_driver.create_driver()
         elif browser_name == 'firefox':
             self.driver = self.firefox_driver.initialize(system, project_root)
         else:

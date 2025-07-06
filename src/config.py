@@ -22,6 +22,8 @@ class BrowserConfig:
     disable_javascript: bool = False
     disable_css: bool = False
     driver_path: Optional[str] = None  # Path to ChromeDriver or GeckoDriver executable
+    chrome_binary_path: Optional[str] = None  # Path to Chrome browser binary
+    chromedriver_path: Optional[str] = None  # Path to ChromeDriver executable
 
 @dataclass
 class TabConfig:
