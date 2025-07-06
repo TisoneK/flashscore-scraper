@@ -103,7 +103,8 @@ class ChromeDriverManager:
         """Get Chrome options from config."""
         options = Options()
         
-        # Get options from config
+        # Get browser config
+        browser_config = self.config.get('browser', {})
         chrome_options = self.config.get('chrome_options', {})
         
         # Add binary location if specified
@@ -111,7 +112,11 @@ class ChromeDriverManager:
         if chrome_path:
             options.binary_location = chrome_path
         
-        # Add arguments from config
+        # Handle headless mode from browser config
+        if browser_config.get('headless', False):
+            options.add_argument('--headless=new')
+        
+        # Add arguments from chrome_options config
         arguments = chrome_options.get('arguments', [])
         for arg in arguments:
             options.add_argument(arg)
