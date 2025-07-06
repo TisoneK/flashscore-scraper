@@ -211,6 +211,7 @@ flashscore-scraper/
 │   │   ├── database.py
 │   │   └── json_storage.py
 │   ├── utils/             # Utilities
+│   │   ├── driver_manager.py # Legacy driver management
 │   │   ├── progress_monitor.py
 │   │   ├── selenium_utils.py
 │   │   └── utils.py
@@ -219,13 +220,15 @@ flashscore-scraper/
 │   │   ├── run_cli.py     # CLI launcher
 │   │   ├── setup_platform.py # Platform setup
 │   │   └── activate_and_run.py # Environment activation
-│   └── ui/                # GUI interface
-│       ├── main.py        # UI application
-│       ├── components/    # Reusable UI components
-│       ├── pages/         # Application pages
-│       └── utils/         # UI utilities
+│   ├── ui/                # GUI interface
+│   │   ├── main.py        # UI application
+│   │   ├── components/    # Reusable UI components
+│   │   ├── pages/         # Application pages
+│   │   └── utils/         # UI utilities
+│   └── api/               # API interface
 ├── docs/                  # Documentation
-│   └── index.md           # Main documentation
+│   ├── index.md           # Main documentation
+│   └── issues.md          # Known issues
 ├── tests/                 # Test suite
 ├── output/                # Scraped data (gitignored)
 │   ├── json/              # JSON output files
