@@ -10,113 +10,123 @@ A powerful basketball match data scraper with a modern GUI interface, designed t
 
 ### Installation
 
-1. **Clone the repository:**
+1. **Clone and install:**
 ```bash
 git clone https://github.com/TisoneK/flashscore-scraper.git
 cd flashscore-scraper
-```
-
-2. **Install the package:**
-```bash
-# Install in development mode
 pip install -e .
 ```
 
-3. **Initialize drivers (recommended):**
+2. **Set up drivers:**
 ```bash
-# Initialize with Chrome (default)
 fss --init
-# or
-flashscore-scraper --init
 ```
 
-This will:
-- Set up browser drivers automatically
-- Create necessary directories
-- Configure the environment
-
-4. **Start using the scraper:**
+3. **Start scraping:**
 ```bash
-fss -u    # Launch GUI
+fss -u    # Launch GUI (recommended)
+# or
 fss -c    # Launch CLI
 ```
 
 ## 🖥️ Usage
 
-### Quick Start
-After installation, you can use these simple commands:
+### Basic Scraping
 
+#### GUI Mode (Recommended)
 ```bash
-# Initialize drivers with Chrome (default)
-fss --init
-# or
-flashscore-scraper --init
-
-# Initialize drivers with specific Chrome version
-fss --init chrome 138
-# or
-flashscore-scraper --init chrome 138
-
-# Initialize drivers with Firefox
-fss --init firefox
-# or
-flashscore-scraper --init firefox
-
-# Install Chrome drivers only (if you already have the project set up)
-fss --install-drivers
-# or
-flashscore-scraper --install-drivers
-
-# Install specific Chrome version drivers
-fss --install-drivers chrome 138
-# or
-flashscore-scraper --install-drivers chrome 138
-
-# Install Firefox drivers only
-fss --install-drivers firefox
-# or
-flashscore-scraper --install-drivers firefox
-
-# List available Chrome versions
-fss --list-versions
-# or
-flashscore-scraper --list-versions
-
-# Launch GUI (recommended)
 fss -u
-# or
-flashscore-scraper --ui
-
-# Launch CLI
-fss -c
-# or
-flashscore-scraper --cli
-
-# Show help
-fss --help
-# or
-flashscore-scraper --help
 ```
-
-### Alternative Methods
-
-#### GUI Mode
-```bash
-python main.py
-# or
-python src/scripts/run_ui.py
-# or
-python -m ui.main
-```
+The GUI provides:
+- **Dashboard**: Overview of recent scraping activity
+- **Scraper Control**: Start/stop scraping with real-time progress
+- **Results View**: Browse and filter scraped data
+- **Settings**: Configure scraping parameters
+- **Export**: Download data as JSON
 
 #### CLI Mode
 ```bash
-python main.py --cli
-# or
-python src/scripts/run_cli.py
-# or
+fss -c
+```
+Interactive CLI with:
+- **Menu-driven interface**: Easy navigation
+- **Real-time progress**: Live scraping status
+- **Data export**: Save results to files
+- **Configuration**: Adjust settings on the fly
+
+### Advanced Usage
+
+#### Driver Management
+```bash
+# Install specific Chrome version
+fss --init chrome 138
+
+# Install Firefox drivers
+fss --init firefox
+
+# Install drivers only (if already set up)
+fss --install-drivers
+
+# List available Chrome versions
+fss --list-versions
+```
+
+#### Alternative Launch Methods
+```bash
+# Full command names
+flashscore-scraper --ui
+flashscore-scraper --cli
+
+# Direct Python execution
+python main.py
+python -m ui.main
 python -m src.cli.cli_manager
 ```
+
+## 📚 Tutorial
+
+### First Time Setup
+1. **Install and initialize:**
+   ```bash
+   git clone https://github.com/TisoneK/flashscore-scraper.git
+   cd flashscore-scraper
+   pip install -e .
+   fss --init
+   ```
+
+2. **Launch the GUI:**
+   ```bash
+   fss -u
+   ```
+
+3. **Configure settings:**
+   - Go to Settings page
+   - Adjust scraping limits, timeouts, and data fields
+   - Save your preferences
+
+4. **Start scraping:**
+   - Go to Scraper Control page
+   - Click "Start Scraping"
+   - Watch real-time progress
+   - View results in Results page
+
+### Data Output
+- **Location**: `output/json/` directory
+- **Format**: JSON files with match data
+- **Organization**: Daily files with timestamps
+- **Content**: Match details, odds, head-to-head data
+
+### Configuration
+The scraper can be configured through:
+- **GUI Settings**: Interactive configuration panel
+- **config.json**: Direct file editing
+- **CLI**: Command-line options
+
+Key settings include:
+- **Scraping limits**: Max matches, timeouts
+- **Browser options**: Headless mode, window size
+- **Data fields**: Which information to extract
+- **Output settings**: File organization and naming
 
 ## 🎯 Features
 
@@ -202,32 +212,7 @@ flashscore-scraper/
     └── mac/              # macOS drivers
 ```
 
-## 🔧 Driver Management
 
-### Chrome Version Control
-The scraper supports installing specific Chrome versions to match your system:
-
-```bash
-# Install latest Chrome version (default)
-fss --install-drivers chrome
-
-# Install specific Chrome version (e.g., 138.*)
-fss --install-drivers chrome 138
-
-# List all available Chrome versions
-fss --list-versions
-```
-
-### Why Use Specific Versions?
-- **Compatibility**: Match your system's Chrome version exactly
-- **Stability**: Use a known working version
-- **Testing**: Test with different Chrome versions
-- **Corporate**: Some environments require specific versions
-
-### Version Matching
-- Use major version numbers (e.g., `138` for Chrome 138.*)
-- The system finds the latest patch version for that major version
-- Falls back to latest if specific version not found
 
 ## ⚙️ Configuration
 
@@ -240,6 +225,28 @@ The scraper can be configured through the UI settings or by editing `config.json
 
 ### Timeout Settings
 - **Page Load Timeout**: Maximum time to load pages
+
+## 🔧 Troubleshooting
+
+### Driver Issues
+If you encounter browser driver problems:
+
+```bash
+# Reinstall drivers
+fss --install-drivers
+
+# Install specific Chrome version
+fss --install-drivers chrome 138
+
+# List available versions
+fss --list-versions
+```
+
+### Common Problems
+- **Chrome version mismatch**: Use `fss --init chrome 138` to match your Chrome version
+- **Permission errors**: Run as administrator or check file permissions
+- **Network timeouts**: Increase timeout settings in config.json
+- **Memory issues**: Reduce batch size in settings
 - **Element Timeout**: Maximum time to find elements
 - **Retry Settings**: Number of retries and delay between attempts
 
