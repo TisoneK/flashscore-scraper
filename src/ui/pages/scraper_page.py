@@ -2,8 +2,8 @@ import flet as ft
 import threading
 import time
 from typing import Optional
-from ui.components.scraper_control import ScraperControl
-from ui.components.progress_display import ProgressDisplay
+from src.ui.components.scraper_control import ScraperControl
+from src.ui.components.progress_display import ProgressDisplay
 
 class ScraperPage:
     def __init__(self, on_navigate: callable = None, page: ft.Page = None):

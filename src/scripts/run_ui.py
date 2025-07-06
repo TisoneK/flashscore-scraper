@@ -15,7 +15,7 @@ def main():
     """Launch the UI application"""
     try:
         # Import and run the UI
-        from ui.main import main as ui_main
+        from src.ui.main import main as ui_main
         ui_main()
     except ImportError as e:
         print(f"Error importing UI modules: {e}")

@@ -175,9 +175,9 @@ class CLIManager:
         print(f"📥 Installing {browser} drivers...")
         try:
             if browser == 'chrome':
-                from src.utils.driver_manager import DriverManager
+                from src.driver_manager import DriverInstaller
                 
-                driver_manager = DriverManager()
+                driver_manager = DriverInstaller()
                 if version:
                     print(f"🎯 Installing Chrome version {version}.*")
                 else:
@@ -225,8 +225,8 @@ class CLIManager:
     def list_available_versions(self):
         """List available Chrome versions."""
         try:
-            from src.utils.driver_manager import DriverManager
-            driver_manager = DriverManager()
+            from src.driver_manager import DriverInstaller
+            driver_manager = DriverInstaller()
             driver_manager.list_available_versions()
         except Exception as e:
             print(f"❌ Error listing versions: {e}")
@@ -244,9 +244,9 @@ class CLIManager:
         try:
             if browser == 'chrome':
                 print("📡 Using Chrome for Testing API...")
-                from src.utils.driver_manager import DriverManager
+                from src.driver_manager import DriverInstaller
                 
-                driver_manager = DriverManager()
+                driver_manager = DriverInstaller()
                 if version:
                     print(f"🎯 Installing Chrome version {version}.*")
                 else:
@@ -292,7 +292,7 @@ class CLIManager:
         """Launch the GUI interface."""
         try:
             import flet as ft
-            from ui.main import main as ui_main
+            from src.ui.main import main as ui_main
             ft.app(target=ui_main)
         except ImportError as e:
             print(f"❌ Error launching UI: {e}")

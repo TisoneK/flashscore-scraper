@@ -3,10 +3,10 @@ import threading
 import time
 from typing import Dict, Any
 
-from ui.pages.home_page import HomePage
-from ui.pages.scraper_page import ScraperPage
-from ui.pages.results_page import ResultsPage
-from ui.pages.settings_page import SettingsPage
+from src.ui.pages.home_page import HomePage
+from src.ui.pages.scraper_page import ScraperPage
+from src.ui.pages.results_page import ResultsPage
+from src.ui.pages.settings_page import SettingsPage
 
 class FlashscoreScraperApp:
     def __init__(self, page: ft.Page):

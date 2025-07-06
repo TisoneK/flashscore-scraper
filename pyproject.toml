@@ -73,20 +73,20 @@ Repository = "https://github.com/your-username/flashscore-scraper.git"
 [project.scripts]
 flashscore-scraper = "src.cli.cli_manager:main"
 fss = "src.cli.cli_manager:main"
-flashscore-ui = "ui.main:main"
+flashscore-ui = "src.ui.main:main"
 setup-drivers = "setup_drivers:main"
 
 [project.gui-scripts]
-flashscore-gui = "ui.main:main"
+flashscore-gui = "src.ui.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*", "ui*"]
+include = ["src*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 "src" = ["*.py", "*.json"]
-"ui" = ["*.py", "*.json"]
+
 "drivers" = ["**/*"]
 
 [tool.black]
@@ -111,7 +111,7 @@ extend-exclude = '''
 profile = "black"
 multi_line_output = 3
 line_length = 88
-known_first_party = ["src", "ui"]
+known_first_party = ["src"]
 known_third_party = ["selenium", "pandas", "flet", "rich", "tqdm"]
 
 [tool.mypy]
@@ -154,7 +154,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src", "ui"]
+source = ["src"]
 omit = [
     "*/tests/*",
     "*/test_*",
@@ -197,7 +197,7 @@ version = "1.0.0"
 description = "A web scraper for FlashScore basketball data with CLI and GUI interfaces"
 authors = ["FlashScore Scraper Team <dev@flashscore-scraper.com>"]
 readme = "README.md"
-packages = [{include = "src"}, {include = "ui"}]
+packages = [{include = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.8"
@@ -232,7 +232,7 @@ myst-parser = "^1.0.0"
 
 [tool.poetry.scripts]
 flashscore-scraper = "src.cli.cli_manager:main"
-flashscore-ui = "ui.main:main"
+flashscore-ui = "src.ui.main:main"
 
 [tool.poetry.urls]
 Homepage = "https://github.com/your-username/flashscore-scraper"

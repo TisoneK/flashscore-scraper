@@ -150,9 +150,9 @@ class SettingsPage:
     def load_config(self):
         """Load configuration from file or use defaults"""
         try:
-            config_path = Path("config.json")
+            config_path = Path("src/config.json")
             if config_path.exists():
-                self.config = ScraperConfig.load("config.json")
+                self.config = ScraperConfig.load("src/config.json")
         except Exception as e:
             print(f"Error loading config: {e}")
             # Use default config
@@ -188,7 +188,7 @@ class SettingsPage:
             self.config.scraping.min_h2h_matches = int(self.min_h2h_matches_field.value or 6)
             
             # Save to file
-            self.config.save("config.json")
+            self.config.save("src/config.json")
             
             self.status_text.value = "Settings saved successfully!"
             self.status_text.color = ft.Colors.GREEN_400

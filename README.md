@@ -79,7 +79,7 @@ flashscore-scraper --cli
 
 # Direct Python execution
 python main.py
-python -m ui.main
+python -m src.ui.main
 python -m src.cli.cli_manager
 ```
 
@@ -119,7 +119,7 @@ python -m src.cli.cli_manager
 ### Configuration
 The scraper can be configured through:
 - **GUI Settings**: Interactive configuration panel
-- **config.json**: Direct file editing
+- **src/config.json**: Direct file editing
 - **CLI**: Command-line options
 
 Key settings include:
@@ -154,7 +154,7 @@ Key settings include:
 ```
 flashscore-scraper/
 ├── main.py                 # Main entry point (UI by default)
-├── config.json            # Configuration file
+├── src/config.json        # Configuration file
 ├── requirements.txt       # Dependencies
 ├── pyproject.toml        # Project configuration
 ├── src/                   # Core scraper logic
@@ -216,7 +216,7 @@ flashscore-scraper/
 
 ## ⚙️ Configuration
 
-The scraper can be configured through the UI settings or by editing `config.json`:
+The scraper can be configured through the UI settings or by editing `src/config.json`:
 
 ### Browser Settings
 - **Headless Mode**: Run browser in background
@@ -245,7 +245,7 @@ fss --list-versions
 ### Common Problems
 - **Chrome version mismatch**: Use `fss --init chrome 138` to match your Chrome version
 - **Permission errors**: Run as administrator or check file permissions
-- **Network timeouts**: Increase timeout settings in config.json
+- **Network timeouts**: Increase timeout settings in src/config.json
 - **Memory issues**: Reduce batch size in settings
 - **Element Timeout**: Maximum time to find elements
 - **Retry Settings**: Number of retries and delay between attempts

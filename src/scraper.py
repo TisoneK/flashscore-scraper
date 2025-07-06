@@ -4,7 +4,7 @@ import time
 import logging
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
-from src.driver import WebDriverManager
+from src.driver_manager import WebDriverManager
 from src.utils.selenium_utils import SeleniumUtils
 from src.core.url_verifier import URLVerifier
 from src.config import CONFIG, MIN_H2H_MATCHES

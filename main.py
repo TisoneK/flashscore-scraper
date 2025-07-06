@@ -31,7 +31,7 @@ def run_ui():
     """Run the UI version of the scraper."""
     try:
         import flet as ft
-        from ui.main import main as ui_main
+        from src.ui.main import main as ui_main
         ft.app(target=ui_main)
     except ImportError as e:
         print(f"Error importing UI modules: {e}")

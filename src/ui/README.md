@@ -61,7 +61,7 @@ ui/
 
 2. Run the UI:
    ```bash
-   python run_ui.py
+   python -m src.scripts.run_ui
    ```
 
    Or directly:

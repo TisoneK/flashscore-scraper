@@ -405,7 +405,7 @@ class ScraperConfig:
         }
     
     @classmethod
-    def load(cls, config_path: str = "config.json") -> 'ScraperConfig':
+    def load(cls, config_path: str = "src/config.json") -> 'ScraperConfig':
         """Load configuration from a JSON file.
         
         Args:
@@ -432,7 +432,7 @@ class ScraperConfig:
             logger.info("Using default configuration")
             return cls()
     
-    def save(self, config_path: str = "config.json") -> None:
+    def save(self, config_path: str = "src/config.json") -> None:
         """Save configuration to a JSON file.
         
         Args:

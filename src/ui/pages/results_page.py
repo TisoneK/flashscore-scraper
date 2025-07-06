@@ -1,5 +1,5 @@
 import flet as ft
-from ui.components.results_view import ResultsView
+from src.ui.components.results_view import ResultsView
 
 class ResultsPage:
     def __init__(self, on_navigate: callable = None, page: ft.Page = None):

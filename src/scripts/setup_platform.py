@@ -209,7 +209,7 @@ class PlatformSetup:
         """Update the configuration file with platform-specific settings."""
         print("⚙️  Updating configuration...")
         
-        config_file = self.project_root / "config.json"
+        config_file = self.project_root / "src" / "config.json"
         if not config_file.exists():
             print("⚠️  config.json not found, creating default configuration")
             return

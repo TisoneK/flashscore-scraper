@@ -8,7 +8,7 @@ import pytest
 from unittest.mock import patch, Mock
 sys.path.append('.')
 
-from src.driver import WebDriverManager
+from src.driver_manager import WebDriverManager
 from src.config import CONFIG
 
 
