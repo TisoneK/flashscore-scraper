@@ -12,28 +12,28 @@ A powerful basketball match data scraper with a modern GUI interface, designed t
 
 1. **Clone the repository:**
 ```bash
-git clone <repository-url>
-cd flashscore_scraper_1o
+git clone https://github.com/TisoneK/flashscore-scraper.git
+cd flashscore-scraper
 ```
 
-2. **Initialize everything (recommended):**
+2. **Install the package:**
 ```bash
+# Install in development mode
+pip install -e .
+```
+
+3. **Initialize drivers (recommended):**
+```bash
+# Initialize with Chrome (default)
+fss --init
+# or
 flashscore-scraper --init
 ```
+
 This will:
-- Create virtual environment automatically
-- Install all dependencies
-- Set up browser drivers
+- Set up browser drivers automatically
 - Create necessary directories
-
-3. **Activate virtual environment:**
-```bash
-# Windows
-.venv\Scripts\activate
-
-# Linux/Mac
-source .venv/bin/activate
-```
+- Configure the environment
 
 4. **Start using the scraper:**
 ```bash
@@ -47,52 +47,54 @@ fss -c    # Launch CLI
 After installation, you can use these simple commands:
 
 ```bash
-# Initialize project with Chrome (default)
+# Initialize drivers with Chrome (default)
+fss --init
+# or
 flashscore-scraper --init
-# or
-fss --init chrome
 
-# Initialize project with specific Chrome version
-flashscore-scraper --init chrome 138
-# or
+# Initialize drivers with specific Chrome version
 fss --init chrome 138
-
-# Initialize project with Firefox
-flashscore-scraper --init firefox
 # or
+flashscore-scraper --init chrome 138
+
+# Initialize drivers with Firefox
 fss --init firefox
+# or
+flashscore-scraper --init firefox
 
 # Install Chrome drivers only (if you already have the project set up)
+fss --install-drivers
+# or
 flashscore-scraper --install-drivers
-# or short form
-fss --install-drivers chrome
 
 # Install specific Chrome version drivers
-flashscore-scraper --install-drivers chrome 138
-# or short form
 fss --install-drivers chrome 138
+# or
+flashscore-scraper --install-drivers chrome 138
 
 # Install Firefox drivers only
-flashscore-scraper --install-drivers firefox
-# or short form
 fss --install-drivers firefox
+# or
+flashscore-scraper --install-drivers firefox
 
 # List available Chrome versions
-flashscore-scraper --list-versions
-# or short form
 fss --list-versions
+# or
+flashscore-scraper --list-versions
 
 # Launch GUI (recommended)
-flashscore-scraper --ui
-# or short form
 fss -u
+# or
+flashscore-scraper --ui
 
 # Launch CLI
-flashscore-scraper --cli
-# or short form
 fss -c
+# or
+flashscore-scraper --cli
 
 # Show help
+fss --help
+# or
 flashscore-scraper --help
 ```
 
@@ -103,6 +105,8 @@ flashscore-scraper --help
 python main.py
 # or
 python src/scripts/run_ui.py
+# or
+python -m ui.main
 ```
 
 #### CLI Mode
@@ -110,6 +114,8 @@ python src/scripts/run_ui.py
 python main.py --cli
 # or
 python src/scripts/run_cli.py
+# or
+python -m src.cli.cli_manager
 ```
 
 ## 🎯 Features
@@ -136,7 +142,7 @@ python src/scripts/run_cli.py
 ## 📁 Project Structure
 
 ```
-flashscore_scraper_1o/
+flashscore-scraper/
 ├── main.py                 # Main entry point (UI by default)
 ├── config.json            # Configuration file
 ├── requirements.txt       # Dependencies
@@ -147,21 +153,41 @@ flashscore_scraper_1o/
 │   ├── models.py          # Data models
 │   ├── driver.py          # WebDriver management
 │   ├── cli/               # CLI interface
+│   │   ├── cli_manager.py # Main CLI manager
+│   │   ├── display.py     # Console display
+│   │   ├── progress.py    # Progress tracking
+│   │   └── prompts.py     # User prompts
 │   ├── core/              # Core functionality
+│   │   ├── batch_processor.py
+│   │   ├── error_handler.py
+│   │   ├── network_monitor.py
+│   │   ├── performance_monitor.py
+│   │   ├── tab_manager.py
+│   │   └── url_verifier.py
 │   ├── data/              # Data processing
+│   │   ├── elements_model.py
+│   │   ├── extractor/     # Data extractors
+│   │   ├── loader/        # Data loaders
+│   │   └── verifier/      # Data verifiers
 │   ├── storage/           # Data storage
-│   └── utils/             # Utilities (including driver manager)
+│   │   ├── database.py
+│   │   └── json_storage.py
+│   ├── utils/             # Utilities
+│   │   ├── driver_manager.py # Automated driver management
+│   │   ├── progress_monitor.py
+│   │   ├── selenium_utils.py
+│   │   └── utils.py
+│   └── scripts/           # Utility scripts
+│       ├── run_ui.py      # UI launcher
+│       ├── run_cli.py     # CLI launcher
+│       ├── setup_platform.py # Platform setup
+│       ├── setup_drivers.py  # Legacy driver setup
+│       └── activate_and_run.py # Environment activation
 ├── ui/                    # GUI interface
 │   ├── main.py            # UI application
 │   ├── components/        # Reusable UI components
 │   ├── pages/             # Application pages
 │   └── utils/             # UI utilities
-│   ├── scripts/           # Utility scripts
-│   │   ├── run_ui.py      # UI launcher
-│   │   ├── run_cli.py     # CLI launcher
-│   │   ├── setup_platform.py # Platform setup
-│   │   ├── setup_drivers.py  # Legacy driver setup
-│   │   └── activate_and_run.py # Environment activation
 ├── docs/                  # Documentation
 │   ├── index.md           # Main documentation
 │   ├── issues.md          # Known issues
