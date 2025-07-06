@@ -323,4 +323,50 @@ class DriverInstaller:
             'chromedriver_installed': chromedriver_installed,
             'chromedriver_path': str(chromedriver_path) if chromedriver_path else None,
             'all_installed': chrome_installed and chromedriver_installed
-        } 
+        }
+
+
+def main():
+    """Main function for command-line usage."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Driver Installer for FlashScore Scraper')
+    parser.add_argument('--check', action='store_true', help='Check driver installation status')
+    parser.add_argument('--install', action='store_true', help='Install drivers')
+    parser.add_argument('--list-versions', action='store_true', help='List available Chrome versions')
+    parser.add_argument('--version', type=str, help='Specific Chrome version to install (e.g., 138)')
+    
+    args = parser.parse_args()
+    
+    installer = DriverInstaller()
+    
+    if args.check:
+        status = installer.check_installation()
+        print(f"Platform: {status['platform']}")
+        print(f"Chrome installed: {status['chrome_installed']}")
+        print(f"ChromeDriver installed: {status['chromedriver_installed']}")
+        print(f"All installed: {status['all_installed']}")
+        if status['chrome_path']:
+            print(f"Chrome path: {status['chrome_path']}")
+        if status['chromedriver_path']:
+            print(f"ChromeDriver path: {status['chromedriver_path']}")
+    
+    elif args.list_versions:
+        installer.list_available_versions()
+    
+    elif args.install:
+        results = installer.install_all(args.version)
+        if results:
+            print(f"Installation completed:")
+            print(f"  Chrome: {results.get('chrome', 'Not installed')}")
+            print(f"  ChromeDriver: {results.get('chromedriver', 'Not installed')}")
+            print(f"  Version: {results.get('version', 'Unknown')}")
+        else:
+            print("Installation failed")
+    
+    else:
+        parser.print_help()
+
+
+if __name__ == '__main__':
+    main() 

@@ -352,10 +352,10 @@ The scraper now includes an automated driver management system that uses the [Ch
 fss --install-drivers
 
 # Check driver installation status
-python -m src.utils.driver_manager --check
+python -m src.driver_manager.driver_installer --check
 
 # Manual driver installation
-python -m src.utils.driver_manager --install
+python -m src.driver_manager.driver_installer --install
 ```
 
 ### Supported Platforms
