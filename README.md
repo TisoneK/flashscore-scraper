@@ -102,14 +102,14 @@ flashscore-scraper --help
 ```bash
 python main.py
 # or
-python run_ui.py
+python src/scripts/run_ui.py
 ```
 
 #### CLI Mode
 ```bash
 python main.py --cli
 # or
-python run_cli.py
+python src/scripts/run_cli.py
 ```
 
 ## 🎯 Features
@@ -138,20 +138,36 @@ python run_cli.py
 ```
 flashscore_scraper_1o/
 ├── main.py                 # Main entry point (UI by default)
-├── run_ui.py              # UI launcher
-├── run_cli.py             # CLI launcher
+├── config.json            # Configuration file
 ├── requirements.txt       # Dependencies
+├── pyproject.toml        # Project configuration
 ├── src/                   # Core scraper logic
 │   ├── scraper.py         # Main scraper class
 │   ├── config.py          # Configuration management
 │   ├── models.py          # Data models
-│   └── storage/           # Data storage
+│   ├── driver.py          # WebDriver management
+│   ├── cli/               # CLI interface
+│   ├── core/              # Core functionality
+│   ├── data/              # Data processing
+│   ├── storage/           # Data storage
+│   └── utils/             # Utilities (including driver manager)
 ├── ui/                    # GUI interface
 │   ├── main.py            # UI application
 │   ├── components/        # Reusable UI components
 │   ├── pages/             # Application pages
 │   └── utils/             # UI utilities
-├── output/                # Scraped data
+│   ├── scripts/           # Utility scripts
+│   │   ├── run_ui.py      # UI launcher
+│   │   ├── run_cli.py     # CLI launcher
+│   │   ├── setup_platform.py # Platform setup
+│   │   ├── setup_drivers.py  # Legacy driver setup
+│   │   └── activate_and_run.py # Environment activation
+├── docs/                  # Documentation
+│   ├── index.md           # Main documentation
+│   ├── issues.md          # Known issues
+│   └── tasks.md           # Development tasks
+├── tests/                 # Test suite
+├── output/                # Scraped data (gitignored)
 │   ├── json/              # JSON output files
 │   └── logs/              # Scraping logs
 └── drivers/               # WebDriver executables (auto-downloaded)
