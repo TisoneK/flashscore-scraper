@@ -185,10 +185,10 @@ class CLIManager:
                 
                 results = driver_manager.install_all(version)
                 
-                if results['chrome_path'] and results['chromedriver_path']:
+                if results['chrome'] and results['chromedriver']:
                     print("✅ Chrome drivers installed successfully!")
-                    print(f"   Chrome: {results['chrome_path']}")
-                    print(f"   ChromeDriver: {results['chromedriver_path']}")
+                    print(f"   Chrome: {results['chrome']}")
+                    print(f"   ChromeDriver: {results['chromedriver']}")
                     print(f"   Version: {results['version']}")
                 else:
                     print("⚠️  Some Chrome drivers failed to install.")
@@ -255,12 +255,12 @@ class CLIManager:
                 results = driver_manager.install_all(version)
                 
                 print("\n✅ Chrome driver installation completed!")
-                print(f"   Chrome: {results['chrome_path'] or 'Not installed'}")
-                print(f"   ChromeDriver: {results['chromedriver_path'] or 'Not installed'}")
+                print(f"   Chrome: {results['chrome'] or 'Not installed'}")
+                print(f"   ChromeDriver: {results['chromedriver'] or 'Not installed'}")
                 print(f"   Version: {results['version']}")
                 print(f"   Platform: {results['platform']}")
                 
-                if results['chrome_path'] and results['chromedriver_path']:
+                if results['chrome'] and results['chromedriver']:
                     print("\n🎉 Chrome drivers installed successfully!")
                     print("   You can now run the scraper with:")
                     print("   • fss --cli")
@@ -498,6 +498,23 @@ class CLIManager:
             self.display.show_configuration_start()
             settings = self.prompts.ask_settings()
             
+            # Handle driver management actions
+            if 'driver_action' in settings:
+                driver_action = settings['driver_action']
+                if driver_action == "Check Driver Status":
+                    self.check_drivers("chrome")
+                elif driver_action == "List Installed Drivers":
+                    self.list_installed_drivers("chrome")
+                elif driver_action == "Set Default Driver":
+                    self.set_default_driver("chrome")
+                elif driver_action == "Install New Driver":
+                    version = input("Enter Chrome version to install (e.g., 138) or press Enter for latest: ").strip()
+                    if version:
+                        self.init_drivers("chrome", version)
+                    else:
+                        self.init_drivers("chrome")
+                return
+            
             # Update configuration based on user input
             if settings.get('headless') is not None:
                 CONFIG.browser.headless = settings['headless']
@@ -673,6 +690,52 @@ class CLIManager:
                 
         except Exception as e:
             print(f"❌ Error checking drivers: {e}")
+            return False
+
+    def set_default_driver(self, driver_type: str = "chrome") -> bool:
+        """Set the default driver version."""
+        try:
+            if driver_type.lower() == "chrome":
+                from ..driver_manager.driver_installer import DriverInstaller
+                
+                installer = DriverInstaller()
+                return installer.select_default_driver()
+            else:
+                print(f"❌ Unsupported driver type: {driver_type}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error setting default driver: {e}")
+            return False
+    
+    def list_installed_drivers(self, driver_type: str = "chrome") -> bool:
+        """List installed driver versions."""
+        try:
+            if driver_type.lower() == "chrome":
+                from ..driver_manager.driver_installer import DriverInstaller
+                
+                installer = DriverInstaller()
+                installed = installer.list_installed_versions()
+                
+                chrome_versions = installed.get('chrome', [])
+                if not chrome_versions:
+                    print("❌ No Chrome versions installed")
+                    return False
+                
+                print(f"📋 Installed Chrome versions ({len(chrome_versions)} total):")
+                print("-" * 50)
+                
+                for i, version in enumerate(chrome_versions, 1):
+                    print(f"{i:2d}. {version}")
+                
+                print(f"\n💡 Use: fss --set-default chrome to set default version")
+                return True
+            else:
+                print(f"❌ Unsupported driver type: {driver_type}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error listing installed drivers: {e}")
             return False
 
 def main():

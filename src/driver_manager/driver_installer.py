@@ -153,92 +153,72 @@ class DriverInstaller:
             logger.info(f"Downloading {description}...")
             logger.info(f"URL: {url}")
             
-            # Create target directory
-            target_path.parent.mkdir(parents=True, exist_ok=True)
+            version_dir = target_path.parent  # The version directory
+            # Directory existence is checked at the top level, so just create it
+            version_dir.mkdir(parents=True, exist_ok=True)
             
             # Download file
-            temp_file = target_path.with_suffix('.zip')
+            temp_file = version_dir / (description.lower() + '.zip')
             urllib.request.urlretrieve(url, temp_file)
             
-            # Extract zip file to a temporary directory first
-            temp_extract_dir = target_path.parent / f"temp_{target_path.name}"
+            # Extract zip file directly into version_dir
             with zipfile.ZipFile(temp_file, 'r') as zip_ref:
-                zip_ref.extractall(temp_extract_dir)
-            
-            # Find the actual binary in the extracted directory
-            # Chrome/ChromeDriver archives typically have a single directory containing the binary
-            extracted_items = list(temp_extract_dir.iterdir())
-            if len(extracted_items) == 1 and extracted_items[0].is_dir():
-                # Single directory found, look for binary inside
-                binary_dir = extracted_items[0]
-                if target_path.name.endswith('.exe'):
-                    # Windows: look for .exe file
-                    binary_files = list(binary_dir.glob('*.exe'))
-                else:
-                    # Unix: look for binary without extension
-                    binary_files = [f for f in binary_dir.iterdir() if f.is_file() and not f.suffix]
-                
-                if binary_files:
-                    # Move the binary to target location
-                    binary_files[0].rename(target_path)
-                    # Remove the temporary directory
-                    shutil.rmtree(temp_extract_dir, ignore_errors=True)
-                else:
-                    logger.error(f"Binary not found in extracted directory: {binary_dir}")
-                    return False
-            else:
-                # Multiple files or no directory structure, try to find binary directly
-                if target_path.name.endswith('.exe'):
-                    binary_files = list(temp_extract_dir.glob('*.exe'))
-                else:
-                    binary_files = [f for f in temp_extract_dir.iterdir() if f.is_file() and not f.suffix]
-                
-                if binary_files:
-                    binary_files[0].rename(target_path)
-                    # Clean up other extracted files
-                    for item in temp_extract_dir.iterdir():
-                        if item != target_path:
-                            if item.is_file():
-                                item.unlink()
-                            elif item.is_dir():
-                                shutil.rmtree(item)
-                else:
-                    logger.error(f"Binary not found in extracted files")
-                    return False
-            
-            # Make executable on Unix systems
-            if self.system != 'windows':
-                os.chmod(target_path, 0o755)
+                zip_ref.extractall(version_dir)
             
             # Clean up zip file
             temp_file.unlink()
             
-            logger.info(f"✅ {description} installed successfully at: {target_path}")
+            # Remove the unnecessary chrome-win64 folder if it exists
+            chrome_win64_dir = version_dir / "chrome-win64"
+            if chrome_win64_dir.exists():
+                logger.info(f"Moving contents from {chrome_win64_dir} to {version_dir}")
+                # Move all contents from chrome-win64 to version_dir
+                for item in chrome_win64_dir.iterdir():
+                    target_item = version_dir / item.name
+                    if target_item.exists():
+                        if target_item.is_file():
+                            target_item.unlink()
+                        elif target_item.is_dir():
+                            shutil.rmtree(target_item)
+                    item.rename(target_item)
+                # Remove the empty chrome-win64 directory
+                chrome_win64_dir.rmdir()
+            
+            # Move chromedriver.exe from chromedriver-win64 subdirectory if it exists
+            chromedriver_win64_dir = version_dir / "chromedriver-win64"
+            if chromedriver_win64_dir.exists():
+                logger.info(f"Moving chromedriver.exe from {chromedriver_win64_dir} to {version_dir}")
+                chromedriver_exe = chromedriver_win64_dir / "chromedriver.exe"
+                if chromedriver_exe.exists():
+                    target_chromedriver = version_dir / "chromedriver.exe"
+                    if target_chromedriver.exists():
+                        target_chromedriver.unlink()
+                    chromedriver_exe.rename(target_chromedriver)
+                # Remove the empty chromedriver-win64 directory
+                shutil.rmtree(chromedriver_win64_dir, ignore_errors=True)
+            
+            logger.info(f"✅ {description} installed successfully at: {version_dir}")
             return True
             
         except Exception as e:
             logger.error(f"❌ Failed to download {description}: {e}")
             return False
     
-    def _get_clean_installation_paths(self, platform_key: str, version: str) -> Tuple[Path, Path]:
-        """Get clean installation paths without double-nesting."""
+    def _get_clean_installation_paths(self, platform_key: str, version: str) -> Path:
+        """Get clean installation path for the version directory."""
         if platform_key.startswith('windows'):
-            chrome_dir = self.drivers_dir / "windows" / "chrome"
-            chromedriver_dir = self.drivers_dir / "windows" / "chromedriver"
+            base_dir = self.drivers_dir / "windows" / "chrome"
         elif platform_key.startswith('linux'):
-            chrome_dir = self.drivers_dir / "linux" / "chrome"
-            chromedriver_dir = self.drivers_dir / "linux" / "chromedriver"
+            base_dir = self.drivers_dir / "linux" / "chrome"
         elif platform_key.startswith('macos'):
-            chrome_dir = self.drivers_dir / "mac" / "chrome"
-            chromedriver_dir = self.drivers_dir / "mac" / "chromedriver"
+            base_dir = self.drivers_dir / "mac" / "chrome"
         else:
             raise ValueError(f"Unknown platform: {platform_key}")
         
-        # Add version to directory names
-        chrome_dir = chrome_dir / version
-        chromedriver_dir = chromedriver_dir / version
+        # Single version directory containing both Chrome and ChromeDriver
+        version_dir = base_dir / version
         
-        return chrome_dir, chromedriver_dir
+        return version_dir
     
     def _cleanup_old_versions(self, platform_key: str, keep_versions: int = 2):
         """Clean up old driver versions, keeping only the specified number."""
@@ -251,22 +231,13 @@ class DriverInstaller:
         else:
             return
         
-        # Clean up old Chrome versions
+        # Clean up old Chrome versions (now contains both Chrome and ChromeDriver)
         chrome_base = base_dir / "chrome"
         if chrome_base.exists():
             versions = sorted([d for d in chrome_base.iterdir() if d.is_dir()], 
                            key=lambda x: x.name, reverse=True)
             for old_version in versions[keep_versions:]:
                 logger.info(f"Removing old Chrome version: {old_version.name}")
-                shutil.rmtree(old_version, ignore_errors=True)
-        
-        # Clean up old ChromeDriver versions
-        chromedriver_base = base_dir / "chromedriver"
-        if chromedriver_base.exists():
-            versions = sorted([d for d in chromedriver_base.iterdir() if d.is_dir()], 
-                           key=lambda x: x.name, reverse=True)
-            for old_version in versions[keep_versions:]:
-                logger.info(f"Removing old ChromeDriver version: {old_version.name}")
                 shutil.rmtree(old_version, ignore_errors=True)
     
     def install_chrome(self, version_info: Dict[str, Any], platform_key: str) -> Optional[str]:
@@ -278,22 +249,11 @@ class DriverInstaller:
             return None
         
         version = version_info['version']
-        chrome_dir, _ = self._get_clean_installation_paths(platform_key, version)
+        version_dir = self._get_clean_installation_paths(platform_key, version)
         
-        # Determine Chrome binary path
-        if platform_key.startswith('windows'):
-            chrome_binary = chrome_dir / "chrome.exe"
-        elif platform_key.startswith('linux'):
-            chrome_binary = chrome_dir / "chrome"
-        elif platform_key.startswith('macos'):
-            chrome_binary = chrome_dir / "chrome"
-        else:
-            logger.warning(f"Unknown platform: {platform_key}")
-            return None
-        
-        # Download and install Chrome
-        if self.download_and_extract(chrome_url, chrome_binary, "Chrome"):
-            return str(chrome_binary)
+        # Install Chrome directory
+        if self.download_and_extract(chrome_url, version_dir / "chrome.exe", "Chrome"):
+            return str(version_dir)
         return None
     
     def install_chromedriver(self, version_info: Dict[str, Any], platform_key: str) -> Optional[str]:
@@ -305,22 +265,11 @@ class DriverInstaller:
             return None
         
         version = version_info['version']
-        _, chromedriver_dir = self._get_clean_installation_paths(platform_key, version)
+        version_dir = self._get_clean_installation_paths(platform_key, version)
         
-        # Determine ChromeDriver binary path
-        if platform_key.startswith('windows'):
-            driver_binary = chromedriver_dir / "chromedriver.exe"
-        elif platform_key.startswith('linux'):
-            driver_binary = chromedriver_dir / "chromedriver"
-        elif platform_key.startswith('macos'):
-            driver_binary = chromedriver_dir / "chromedriver"
-        else:
-            logger.warning(f"Unknown platform: {platform_key}")
-            return None
-        
-        # Download and install ChromeDriver
-        if self.download_and_extract(chromedriver_url, driver_binary, "ChromeDriver"):
-            return str(driver_binary)
+        # Install ChromeDriver directory
+        if self.download_and_extract(chromedriver_url, version_dir / "chromedriver.exe", "ChromeDriver"):
+            return str(version_dir)
         return None
     
     def list_installed_versions(self) -> Dict[str, List[str]]:
@@ -338,15 +287,12 @@ class DriverInstaller:
         
         installed = {'chrome': [], 'chromedriver': []}
         
-        # Check Chrome versions
+        # Check Chrome versions (now contains both Chrome and ChromeDriver)
         chrome_base = base_dir / "chrome"
         if chrome_base.exists():
-            installed['chrome'] = [d.name for d in chrome_base.iterdir() if d.is_dir()]
-        
-        # Check ChromeDriver versions
-        chromedriver_base = base_dir / "chromedriver"
-        if chromedriver_base.exists():
-            installed['chromedriver'] = [d.name for d in chromedriver_base.iterdir() if d.is_dir()]
+            versions = [d.name for d in chrome_base.iterdir() if d.is_dir()]
+            installed['chrome'] = versions
+            installed['chromedriver'] = versions  # Same versions for both
         
         return installed
     
@@ -355,11 +301,22 @@ class DriverInstaller:
         try:
             from src.config import CONFIG
             
-            # Update config with new paths
-            if chrome_path:
-                CONFIG.browser.chrome_binary_path = chrome_path
-            if chromedriver_path:
-                CONFIG.browser.chromedriver_path = chromedriver_path
+            # Get the actual binary paths from the version directory
+            platform_key = self.detect_platform()
+            version_dir = self._get_clean_installation_paths(platform_key, version)
+            
+            if platform_key.startswith('windows'):
+                chrome_binary = version_dir / "chrome.exe"
+                chromedriver_binary = version_dir / "chromedriver.exe"
+            else:
+                chrome_binary = version_dir / "chrome"
+                chromedriver_binary = version_dir / "chromedriver"
+            
+            # Update config with actual binary paths
+            if chrome_binary.exists():
+                CONFIG.browser.chrome_binary_path = str(chrome_binary)
+            if chromedriver_binary.exists():
+                CONFIG.browser.chromedriver_path = str(chromedriver_binary)
             
             # Save updated config
             CONFIG.save()
@@ -392,6 +349,21 @@ class DriverInstaller:
         # Clean up old versions if requested
         if cleanup:
             self._cleanup_old_versions(platform_key)
+        
+        # Check if version directory already exists before installing
+        version_dir = self._get_clean_installation_paths(platform_key, version_str)
+        if version_dir.exists():
+            print(f"⚠️ Chrome version {version_str} already exists at {version_dir}")
+            resp = input("Do you want to [r]einstall (overwrite) or [c]ancel? [r/c]: ").strip().lower()
+            if resp == 'c':
+                logger.info(f"User cancelled installation")
+                return {}
+            elif resp == 'r':
+                shutil.rmtree(version_dir, ignore_errors=True)
+                logger.info(f"Overwriting Chrome version {version_str}")
+            else:
+                logger.info(f"Invalid input, cancelling installation")
+                return {}
         
         # Install Chrome and ChromeDriver
         chrome_path = self.install_chrome(version_info, platform_key)
@@ -451,18 +423,13 @@ class DriverInstaller:
         if latest_chrome:
             if platform_key.startswith('windows'):
                 chrome_path = self.drivers_dir / "windows" / "chrome" / latest_chrome / "chrome.exe"
+                chromedriver_path = self.drivers_dir / "windows" / "chrome" / latest_chrome / "chromedriver.exe"
             elif platform_key.startswith('linux'):
                 chrome_path = self.drivers_dir / "linux" / "chrome" / latest_chrome / "chrome"
+                chromedriver_path = self.drivers_dir / "linux" / "chrome" / latest_chrome / "chromedriver"
             elif platform_key.startswith('macos'):
                 chrome_path = self.drivers_dir / "mac" / "chrome" / latest_chrome / "chrome"
-        
-        if latest_chromedriver:
-            if platform_key.startswith('windows'):
-                chromedriver_path = self.drivers_dir / "windows" / "chromedriver" / latest_chromedriver / "chromedriver.exe"
-            elif platform_key.startswith('linux'):
-                chromedriver_path = self.drivers_dir / "linux" / "chromedriver" / latest_chromedriver / "chromedriver"
-            elif platform_key.startswith('macos'):
-                chromedriver_path = self.drivers_dir / "mac" / "chromedriver" / latest_chromedriver / "chromedriver"
+                chromedriver_path = self.drivers_dir / "mac" / "chrome" / latest_chrome / "chromedriver"
         
         chrome_installed = chrome_path.exists() if chrome_path else False
         chromedriver_installed = chromedriver_path.exists() if chromedriver_path else False
@@ -478,6 +445,78 @@ class DriverInstaller:
             'all_installed': chrome_installed and chromedriver_installed,
             'installed_versions': installed_versions
         }
+    
+    def set_default_driver_version(self, version: str) -> bool:
+        """Set the default driver version and update config."""
+        try:
+            platform_key = self.detect_platform()
+            version_dir = self._get_clean_installation_paths(platform_key, version)
+            
+            if not version_dir.exists():
+                logger.error(f"Version {version} is not installed")
+                return False
+            
+            # Get the binary paths for this version
+            if platform_key.startswith('windows'):
+                chrome_path = version_dir / "chrome.exe"
+                chromedriver_path = version_dir / "chromedriver.exe"
+            else:
+                chrome_path = version_dir / "chrome"
+                chromedriver_path = version_dir / "chromedriver"
+            
+            if not chrome_path.exists() or not chromedriver_path.exists():
+                logger.error(f"Version {version} is incomplete (missing binaries)")
+                return False
+            
+            # Update config with the selected version paths
+            self.update_config_with_paths(str(version_dir), str(version_dir), version)
+            
+            logger.info(f"✅ Set version {version} as default driver")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to set default driver version: {e}")
+            return False
+    
+    def select_default_driver(self) -> bool:
+        """Interactive selection of default driver version."""
+        try:
+            installed_versions = self.list_installed_versions()
+            chrome_versions = installed_versions.get('chrome', [])
+            
+            if not chrome_versions:
+                logger.error("No Chrome versions installed")
+                return False
+            
+            if len(chrome_versions) == 1:
+                # Only one version, automatically set as default
+                version = chrome_versions[0]
+                logger.info(f"Only one version installed ({version}), setting as default")
+                return self.set_default_driver_version(version)
+            
+            # Multiple versions, let user choose
+            print(f"📋 Installed Chrome versions:")
+            for i, version in enumerate(chrome_versions, 1):
+                print(f"  {i}. {version}")
+            
+            while True:
+                try:
+                    choice = input(f"Select default version (1-{len(chrome_versions)}): ").strip()
+                    choice_idx = int(choice) - 1
+                    if 0 <= choice_idx < len(chrome_versions):
+                        selected_version = chrome_versions[choice_idx]
+                        return self.set_default_driver_version(selected_version)
+                    else:
+                        print(f"Invalid choice. Please enter 1-{len(chrome_versions)}")
+                except ValueError:
+                    print("Invalid input. Please enter a number.")
+                except KeyboardInterrupt:
+                    print("\nCancelled")
+                    return False
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to select default driver: {e}")
+            return False
 
 
 def main():

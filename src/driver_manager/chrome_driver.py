@@ -81,26 +81,21 @@ class ChromeDriverManager:
                 return chrome_path, chromedriver_path
             
             # Find latest Chrome version if not set in config
-            if not chrome_path:
+            if not chrome_path or not chromedriver_path:
                 chrome_base = base_dir / "chrome"
                 if chrome_base.exists():
                     chrome_versions = [d for d in chrome_base.iterdir() if d.is_dir()]
                     if chrome_versions:
                         latest_chrome = max(chrome_versions, key=lambda x: x.name)
-                        chrome_path = latest_chrome / "chrome.exe" if platform_key.startswith('windows') else latest_chrome / "chrome"
-                        if not chrome_path.exists():
-                            chrome_path = None
-            
-            # Find latest ChromeDriver version if not set in config
-            if not chromedriver_path:
-                chromedriver_base = base_dir / "chromedriver"
-                if chromedriver_base.exists():
-                    chromedriver_versions = [d for d in chromedriver_base.iterdir() if d.is_dir()]
-                    if chromedriver_versions:
-                        latest_chromedriver = max(chromedriver_versions, key=lambda x: x.name)
-                        chromedriver_path = latest_chromedriver / "chromedriver.exe" if platform_key.startswith('windows') else latest_chromedriver / "chromedriver"
-                        if not chromedriver_path.exists():
-                            chromedriver_path = None
+                        # Both binaries are in the same version directory
+                        if not chrome_path:
+                            chrome_path = latest_chrome / "chrome.exe" if platform_key.startswith('windows') else latest_chrome / "chrome"
+                            if not chrome_path.exists():
+                                chrome_path = None
+                        if not chromedriver_path:
+                            chromedriver_path = latest_chrome / "chromedriver.exe" if platform_key.startswith('windows') else latest_chrome / "chromedriver"
+                            if not chromedriver_path.exists():
+                                chromedriver_path = None
         
         return str(chrome_path) if chrome_path else None, str(chromedriver_path) if chromedriver_path else None
     
