@@ -125,6 +125,21 @@ class SettingsPage:
             active_color=ft.Colors.GREEN_400
         )
         
+        # Scraping settings
+        self.max_matches_field = ft.TextField(
+            label="Max Matches",
+            value=str(self.config.scraping.max_matches),
+            width=120,
+            keyboard_type=ft.KeyboardType.NUMBER
+        )
+        
+        self.min_h2h_matches_field = ft.TextField(
+            label="Min H2H Matches",
+            value=str(self.config.scraping.min_h2h_matches),
+            width=150,
+            keyboard_type=ft.KeyboardType.NUMBER
+        )
+        
         # Status message
         self.status_text = ft.Text(
             "",
@@ -168,6 +183,10 @@ class SettingsPage:
             self.config.batch.base_delay = float(self.base_delay_field.value or 3.0)
             self.config.batch.adaptive_delay = self.adaptive_delay_switch.value
             
+            # Update scraping settings
+            self.config.scraping.max_matches = int(self.max_matches_field.value or 3)
+            self.config.scraping.min_h2h_matches = int(self.min_h2h_matches_field.value or 6)
+            
             # Save to file
             self.config.save("config.json")
             
@@ -209,6 +228,9 @@ class SettingsPage:
             self.batch_size_field.value = str(self.config.batch.base_batch_size)
             self.base_delay_field.value = str(self.config.batch.base_delay)
             self.adaptive_delay_switch.value = self.config.batch.adaptive_delay
+            
+            self.max_matches_field.value = str(self.config.scraping.max_matches)
+            self.min_h2h_matches_field.value = str(self.config.scraping.min_h2h_matches)
             
             self.status_text.value = "Settings reset to defaults"
             self.status_text.color = ft.Colors.BLUE_400
@@ -307,6 +329,21 @@ class SettingsPage:
                                 ft.Row([
                                     self.adaptive_delay_switch,
                                 ]),
+                            ], spacing=10),
+                            padding=15,
+                            bgcolor=ft.Colors.GREY_900,
+                            border_radius=8,
+                            margin=ft.margin.only(bottom=20)
+                        ),
+                        ft.Divider(height=10, color=ft.Colors.GREY_800),
+                        # Scraping Settings
+                        ft.Text("Scraping Settings", weight=ft.FontWeight.BOLD, size=16),
+                        ft.Container(
+                            content=ft.Column([
+                                ft.Row([
+                                    self.max_matches_field,
+                                    self.min_h2h_matches_field,
+                                ], spacing=10),
                             ], spacing=10),
                             padding=15,
                             bgcolor=ft.Colors.GREY_900,

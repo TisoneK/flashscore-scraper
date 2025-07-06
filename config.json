@@ -95,6 +95,74 @@
     "save_raw_data": false,
     "raw_data_dir": "raw_data",
     "temp_dir": "temp",
+    "scraping": {
+        "max_matches": 3,
+        "min_h2h_matches": 6,
+        "max_concurrent_requests": 5,
+        "max_tabs": 1,
+        "success_threshold": 0.7
+    },
+    "chrome_options": {
+        "headless": true,
+        "no_sandbox": true,
+        "disable_dev_shm_usage": true,
+        "disable_gpu": true,
+        "window_size": "1920,1080",
+        "disable_extensions": true,
+        "disable_notifications": true,
+        "disable_popup_blocking": true,
+        "disable_infobars": true,
+        "disable_blink_features": "AutomationControlled",
+        "disable_features": "IsolateOrigins,site-per-process"
+    },
+    "data_fields": {
+        "match_fields": [
+            "country",
+            "league",
+            "home_team",
+            "away_team",
+            "date",
+            "time",
+            "match_id"
+        ],
+        "odds_fields": [
+            "match_id",
+            "total_goals",
+            "over_odds",
+            "under_odds",
+            "last_update"
+        ],
+        "h2h_fields": [
+            "match_id",
+            "date",
+            "home_team",
+            "away_team",
+            "home_score",
+            "away_score",
+            "competition"
+        ],
+        "detailed_match_fields": [
+            "match_id",
+            "league",
+            "home_team",
+            "away_team",
+            "status",
+            "current_score",
+            "quarter_scores",
+            "team_stats",
+            "player_stats",
+            "team_fouls",
+            "timeouts",
+            "last_update"
+        ]
+    },
+    "output_files": {
+        "default_output_file": "matches.json",
+        "odds_output_file": "match_odds.csv",
+        "h2h_output_file": "h2h_matches.csv",
+        "log_file_pattern": "scraper_{}.log",
+        "json_file_pattern": "matches_{}.json"
+    },
     "selectors": {
         "match": {
             "container": "div.event__match",

@@ -118,6 +118,114 @@ class URLConfig:
     allowed_domains: List[str] = field(default_factory=lambda: ["flashscore.co.ke"])
 
 @dataclass
+class ScrapingConfig:
+    """Scraping behavior configuration."""
+    max_matches: int = 3  # Limit for demo/testing
+    min_h2h_matches: int = 6  # Minimum H2H matches required
+    max_concurrent_requests: int = 5
+    max_tabs: int = 1
+    success_threshold: float = 0.7
+
+@dataclass
+class ChromeOptionsConfig:
+    """Chrome browser options configuration."""
+    headless: bool = True
+    no_sandbox: bool = True
+    disable_dev_shm_usage: bool = True
+    disable_gpu: bool = True
+    window_size: str = "1920,1080"
+    disable_extensions: bool = True
+    disable_notifications: bool = True
+    disable_popup_blocking: bool = True
+    disable_infobars: bool = True
+    disable_blink_features: str = "AutomationControlled"
+    disable_features: str = "IsolateOrigins,site-per-process"
+    
+    def to_list(self) -> List[str]:
+        """Convert configuration to Chrome options list."""
+        options = []
+        
+        if self.headless:
+            options.append("--headless=new")
+        if self.no_sandbox:
+            options.append("--no-sandbox")
+        if self.disable_dev_shm_usage:
+            options.append("--disable-dev-shm-usage")
+        if self.disable_gpu:
+            options.append("--disable-gpu")
+        if self.window_size:
+            options.append(f"--window-size={self.window_size}")
+        if self.disable_extensions:
+            options.append("--disable-extensions")
+        if self.disable_notifications:
+            options.append("--disable-notifications")
+        if self.disable_popup_blocking:
+            options.append("--disable-popup-blocking")
+        if self.disable_infobars:
+            options.append("--disable-infobars")
+        if self.disable_blink_features:
+            options.append(f"--disable-blink-features={self.disable_blink_features}")
+        if self.disable_features:
+            options.append(f"--disable-features={self.disable_features}")
+        
+        return options
+
+@dataclass
+class DataFieldsConfig:
+    """Data field definitions for different data types."""
+    match_fields: List[str] = field(default_factory=lambda: [
+        "country",
+        "league", 
+        "home_team",
+        "away_team",
+        "date",
+        "time",
+        "match_id"
+    ])
+    
+    odds_fields: List[str] = field(default_factory=lambda: [
+        "match_id",
+        "total_goals",
+        "over_odds", 
+        "under_odds",
+        "last_update"
+    ])
+    
+    h2h_fields: List[str] = field(default_factory=lambda: [
+        "match_id",
+        "date",
+        "home_team",
+        "away_team", 
+        "home_score",
+        "away_score",
+        "competition"
+    ])
+    
+    detailed_match_fields: List[str] = field(default_factory=lambda: [
+        "match_id",
+        "league",
+        "home_team", 
+        "away_team",
+        "status",
+        "current_score",
+        "quarter_scores",
+        "team_stats",
+        "player_stats",
+        "team_fouls",
+        "timeouts",
+        "last_update"
+    ])
+
+@dataclass
+class OutputFilesConfig:
+    """Output file configuration."""
+    default_output_file: str = "matches.json"
+    odds_output_file: str = "match_odds.csv"
+    h2h_output_file: str = "h2h_matches.csv"
+    log_file_pattern: str = "scraper_{}.log"
+    json_file_pattern: str = "matches_{}.json"
+
+@dataclass
 class ScraperConfig:
     """Main configuration for the scraper."""
     # Component configurations
@@ -137,7 +245,19 @@ class ScraperConfig:
     temp_dir: str = "temp"
     
     # Selectors
-    selectors: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    selectors: Dict[str, Any] = field(default_factory=dict)
+    
+    # Scraping behavior configuration
+    scraping: ScrapingConfig = field(default_factory=ScrapingConfig)
+    
+    # Chrome browser options configuration
+    chrome_options: ChromeOptionsConfig = field(default_factory=ChromeOptionsConfig)
+    
+    # Data field definitions
+    data_fields: DataFieldsConfig = field(default_factory=DataFieldsConfig)
+    
+    # Output file configuration
+    output_files: OutputFilesConfig = field(default_factory=OutputFilesConfig)
     
     def __post_init__(self):
         """Initialize selectors after object creation."""
@@ -295,17 +415,17 @@ class ScraperConfig:
             ScraperConfig: Loaded configuration
         """
         try:
-            config_path = Path(config_path)
-            if config_path.exists():
-                with open(config_path, 'r') as f:
+            path = Path(config_path)
+            if path.exists():
+                with open(path, 'r') as f:
                     config_dict = json.load(f)
-                logger.info(f"Loaded configuration from {config_path}")
+                logger.info(f"Loaded configuration from {path}")
                 
                 # Convert nested dictionaries to appropriate config objects
                 config_dict = cls._process_config_dict(config_dict)
                 return cls(**config_dict)
             else:
-                logger.info(f"No config file found at {config_path}, using defaults")
+                logger.info(f"No config file found at {path}, using defaults")
                 return cls()
         except Exception as e:
             logger.error(f"Error loading config from {config_path}: {e}")
@@ -319,16 +439,16 @@ class ScraperConfig:
             config_path: Path to save the configuration file
         """
         try:
-            config_path = Path(config_path)
-            config_path.parent.mkdir(parents=True, exist_ok=True)
+            path = Path(config_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
             
             # Convert config to dictionary
             config_dict = asdict(self)
             
             # Save to file
-            with open(config_path, 'w') as f:
+            with open(path, 'w') as f:
                 json.dump(config_dict, f, indent=4)
-            logger.info(f"Saved configuration to {config_path}")
+            logger.info(f"Saved configuration to {path}")
         except Exception as e:
             logger.error(f"Error saving config to {config_path}: {e}")
     
@@ -369,7 +489,11 @@ class ScraperConfig:
             'timeout': TimeoutConfig,
             'logging': LoggingConfig,
             'url': URLConfig,
-            'output': OutputConfig
+            'output': OutputConfig,
+            'scraping': ScrapingConfig,
+            'chrome_options': ChromeOptionsConfig,
+            'data_fields': DataFieldsConfig,
+            'output_files': OutputFilesConfig
         }
         
         processed = {}
@@ -390,6 +514,12 @@ CONFIG = ScraperConfig.load()
 BASE_URL = CONFIG.url.base_url
 WAIT_TIMEOUT = CONFIG.timeout.element_timeout
 DYNAMIC_CONTENT_WAIT = CONFIG.timeout.dynamic_content_timeout
+
+# Export new configuration values
+MIN_H2H_MATCHES = CONFIG.scraping.min_h2h_matches
+MAX_MATCHES = CONFIG.scraping.max_matches
+MAX_CONCURRENT_REQUESTS = CONFIG.scraping.max_concurrent_requests
+CHROME_OPTIONS = CONFIG.chrome_options.to_list()
 
 # All selectors consolidated into a single dictionary
 SELECTORS = {
@@ -553,71 +683,13 @@ H2H_URL = "https://www.flashscore.co.ke/match/basketball/{match_id}/#/h2h/overal
 ODDS_URL_HOME_AWAY = "https://www.flashscore.co.ke/match/basketball/{match_id}/#/odds-comparison/home-away/ft-including-ot"  # For home/away odds
 ODDS_URL_OVER_UNDER = "https://www.flashscore.co.ke/match/basketball/{match_id}/#/odds-comparison/over-under/ft-including-ot"  # For over/under odds
 
-# Browser settings
-CHROME_OPTIONS = [
-    "--headless=new",  # Using new headless mode
-    "--no-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-gpu",
-    "--window-size=1920,1080",
-    "--disable-extensions",
-    "--disable-notifications",
-    "--disable-popup-blocking",
-    "--disable-infobars",
-    "--disable-blink-features=AutomationControlled",
-    "--disable-features=IsolateOrigins,site-per-process"
-]
+# Export data field configurations for backward compatibility
+MATCH_FIELDS = CONFIG.data_fields.match_fields
+ODDS_FIELDS = CONFIG.data_fields.odds_fields
+H2H_FIELDS = CONFIG.data_fields.h2h_fields
+DETAILED_MATCH_FIELDS = CONFIG.data_fields.detailed_match_fields
 
-# Scraping settings
-MAX_CONCURRENT_REQUESTS = 5
-MIN_H2H_MATCHES = 6
-
-# Output settings
-DEFAULT_OUTPUT_FILE = str(OutputConfig().default_output_path)
-ODDS_OUTPUT_FILE = "match_odds.csv"
-H2H_OUTPUT_FILE = "h2h_matches.csv"
-
-# Data fields to collect
-MATCH_FIELDS = [
-    "country",
-    "league",
-    "home_team",
-    "away_team",
-    "date",
-    "time",
-    "match_id"
-]
-
-ODDS_FIELDS = [
-    "match_id",
-    "total_goals", # "alternative"
-    "over_odds",
-    "under_odds",
-    "last_update"
-]
-
-H2H_FIELDS = [
-    "match_id",
-    "date",
-    "home_team",
-    "away_team",
-    "home_score",
-    "away_score",
-    "competition"
-]
-
-# Detailed match data selectors
-DETAILED_MATCH_FIELDS = [
-    "match_id",
-    "league",
-    "home_team",
-    "away_team",
-    "status",
-    "current_score",
-    "quarter_scores",
-    "team_stats",
-    "player_stats",
-    "team_fouls",
-    "timeouts",
-    "last_update"
-] 
+# Export output file configurations for backward compatibility
+DEFAULT_OUTPUT_FILE = CONFIG.output_files.default_output_file
+ODDS_OUTPUT_FILE = CONFIG.output_files.odds_output_file
+H2H_OUTPUT_FILE = CONFIG.output_files.h2h_output_file 
