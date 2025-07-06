@@ -184,7 +184,7 @@ flashscore-scraper/
 │   ├── scraper.py         # Main scraper class
 │   ├── config.py          # Configuration management
 │   ├── models.py          # Data models
-│   ├── driver.py          # WebDriver management
+│   ├── driver.py          # WebDriver management (legacy)
 │   ├── cli/               # CLI interface
 │   │   ├── cli_manager.py # Main CLI manager
 │   │   ├── display.py     # Console display
@@ -202,40 +202,40 @@ flashscore-scraper/
 │   │   ├── extractor/     # Data extractors
 │   │   ├── loader/        # Data loaders
 │   │   └── verifier/      # Data verifiers
+│   ├── driver_manager/    # Driver management system
+│   │   ├── web_driver_manager.py # Main WebDriver manager
+│   │   ├── chrome_driver.py     # Chrome driver management
+│   │   ├── firefox_driver.py    # Firefox driver management
+│   │   └── driver_installer.py  # Driver installation
 │   ├── storage/           # Data storage
 │   │   ├── database.py
 │   │   └── json_storage.py
 │   ├── utils/             # Utilities
-│   │   ├── driver_manager.py # Automated driver management
 │   │   ├── progress_monitor.py
 │   │   ├── selenium_utils.py
 │   │   └── utils.py
-│   └── scripts/           # Utility scripts
-│       ├── run_ui.py      # UI launcher
-│       ├── run_cli.py     # CLI launcher
-│       ├── setup_platform.py # Platform setup
-│       ├── setup_drivers.py  # Legacy driver setup
-│       └── activate_and_run.py # Environment activation
-├── ui/                    # GUI interface
-│   ├── main.py            # UI application
-│   ├── components/        # Reusable UI components
-│   ├── pages/             # Application pages
-│   └── utils/             # UI utilities
+│   ├── scripts/           # Utility scripts
+│   │   ├── run_ui.py      # UI launcher
+│   │   ├── run_cli.py     # CLI launcher
+│   │   ├── setup_platform.py # Platform setup
+│   │   └── activate_and_run.py # Environment activation
+│   └── ui/                # GUI interface
+│       ├── main.py        # UI application
+│       ├── components/    # Reusable UI components
+│       ├── pages/         # Application pages
+│       └── utils/         # UI utilities
 ├── docs/                  # Documentation
-│   ├── index.md           # Main documentation
-│   ├── issues.md          # Known issues
-│   └── tasks.md           # Development tasks
+│   └── index.md           # Main documentation
 ├── tests/                 # Test suite
 ├── output/                # Scraped data (gitignored)
 │   ├── json/              # JSON output files
 │   └── logs/              # Scraping logs
 └── drivers/               # WebDriver executables (auto-downloaded)
     ├── windows/           # Windows drivers
+    │   └── chrome/        # Chrome versions
     ├── linux/            # Linux drivers
     └── mac/              # macOS drivers
 ```
-
-
 
 ## ⚙️ Configuration
 
