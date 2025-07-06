@@ -50,6 +50,11 @@ After installation, you can use these simple commands:
 # Initialize project and install drivers
 flashscore-scraper --init
 
+# Install Chrome and ChromeDriver automatically (NEW!)
+flashscore-scraper --install-drivers
+# or short form
+fss --install-drivers
+
 # Launch GUI (recommended)
 flashscore-scraper --ui
 # or short form
@@ -228,15 +233,39 @@ scraper.scrape()
    - Verify Flashscore.co.ke is accessible
    - Review log files for errors
 
-4. **UI Not Launching**
-   - Install flet: `pip install flet==0.27.1`
-   - Check for display/rendering issues
-   - Verify system requirements
+## 🤖 Automated Driver Management
 
-### Logs
-- **UI Logs**: Displayed in the Scraper page
-- **CLI Logs**: Written to `output/logs/` directory
-- **Export Logs**: Use export functionality in UI
+The scraper now includes an automated driver management system that uses the [Chrome for Testing API](https://googlechromelabs.github.io/chrome-for-testing/#stable) to automatically download and install the correct Chrome and ChromeDriver versions for your platform.
+
+### Features
+- **Cross-platform Support**: Automatically detects Windows, Linux, and macOS
+- **Latest Versions**: Always downloads the latest stable Chrome for Testing versions
+- **Automatic Installation**: Downloads and installs both Chrome binary and ChromeDriver
+- **Platform Detection**: Automatically detects your system architecture (x64, ARM64, etc.)
+
+### Usage
+```bash
+# Install drivers automatically
+fss --install-drivers
+
+# Check driver installation status
+python -m src.utils.driver_manager --check
+
+# Manual driver installation
+python -m src.utils.driver_manager --install
+```
+
+### Supported Platforms
+- **Windows**: x64 and x86 architectures
+- **Linux**: x64 and ARM64 architectures  
+- **macOS**: x64 and ARM64 (Apple Silicon) architectures
+
+### What Gets Installed
+- **Chrome Binary**: Latest stable Chrome for Testing version
+- **ChromeDriver**: Matching ChromeDriver version
+- **Platform-specific**: Correct binaries for your operating system
+
+The automated driver manager ensures compatibility and eliminates manual driver management across different platforms.
 
 ## 📝 Notes
 

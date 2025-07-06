@@ -1,3 +1,4 @@
+import warnings
 import logging
 import sys
 import argparse
@@ -11,6 +12,9 @@ import time
 import re
 import os
 import datetime
+
+# Suppress Python warnings about platform independent libraries
+warnings.filterwarnings("ignore", message="Could not find platform independent libraries")
 
 from src.config import CONFIG
 from src.utils import setup_logging
@@ -73,9 +77,16 @@ class CLIManager:
                           help="Launch GUI interface")
         parser.add_argument("--cli", "-c", action="store_true", 
                           help="Launch CLI interface")
+        parser.add_argument("--install-drivers", action="store_true",
+                          help="Install Chrome and ChromeDriver automatically")
         parser.add_argument("--version", "-v", action="version", version="1.0.0")
         
         parsed_args = parser.parse_args(args)
+        
+        # Handle driver installation
+        if parsed_args.install_drivers:
+            self.install_drivers_automated()
+            return
         
         # Handle initialization
         if parsed_args.init:
@@ -169,6 +180,39 @@ class CLIManager:
         print("  • Run: flashscore-scraper --cli   (for command line)")
         print("  • Run: fss -u                     (short form for GUI)")
         print("  • Run: fss -c                     (short form for CLI)")
+    
+    def install_drivers_automated(self):
+        """Install Chrome and ChromeDriver using the automated driver manager."""
+        print("🚀 Installing Chrome and ChromeDriver automatically...")
+        print("📡 Using Chrome for Testing API...")
+        
+        try:
+            from src.utils.driver_manager import DriverManager
+            
+            driver_manager = DriverManager()
+            results = driver_manager.install_all()
+            
+            print("\n✅ Driver installation completed!")
+            print(f"   Chrome: {results['chrome_path'] or 'Not installed'}")
+            print(f"   ChromeDriver: {results['chromedriver_path'] or 'Not installed'}")
+            print(f"   Version: {results['version']}")
+            print(f"   Platform: {results['platform']}")
+            
+            if results['chrome_path'] and results['chromedriver_path']:
+                print("\n🎉 Drivers installed successfully!")
+                print("   You can now run the scraper with:")
+                print("   • fss --cli")
+                print("   • fss --ui")
+            else:
+                print("\n⚠️  Some drivers failed to install.")
+                print("   You may need to install them manually or use system drivers.")
+                
+        except ImportError as e:
+            print(f"❌ Error importing driver manager: {e}")
+            print("💡 Make sure all dependencies are installed.")
+        except Exception as e:
+            print(f"❌ Error installing drivers: {e}")
+            print("💡 Check your internet connection and try again.")
     
     def launch_ui(self):
         """Launch the GUI interface."""
