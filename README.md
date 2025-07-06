@@ -53,6 +53,29 @@ Interactive CLI with:
 - **Real-time progress**: Live scraping status
 - **Data export**: Save results to files
 - **Configuration**: Adjust settings on the fly
+- **Driver Management**: Configure browser drivers through settings menu
+
+### CLI Settings Menu
+The CLI includes a comprehensive settings menu accessible via "Configure Settings":
+
+#### Browser Settings
+- **Headless Mode**: Run browser in background (configurable via CLI settings)
+- **Window Size**: Browser window dimensions
+- **Image Loading**: Enable/disable image loading for performance
+
+#### Driver Management
+- **Check Driver Status**: Verify current driver installation
+- **List Installed Drivers**: View all available Chrome versions
+- **Set Default Driver**: Choose which version to use by default
+- **Install New Driver**: Install a specific Chrome version
+
+#### Output Settings
+- **File Format**: Choose JSON or CSV output format
+- **Log Level**: Set logging detail level (INFO, DEBUG, WARNING, ERROR)
+
+#### Logging Settings
+- **Log Level**: Configure console and file logging detail
+- **Output Directory**: Set where logs and data are saved
 
 ### Advanced Usage
 
@@ -219,7 +242,7 @@ flashscore-scraper/
 The scraper can be configured through the UI settings or by editing `src/config.json`:
 
 ### Browser Settings
-- **Headless Mode**: Run browser in background
+- **Headless Mode**: Run browser in background (configurable via CLI settings)
 - **Window Size**: Browser window dimensions
 - **Image Loading**: Enable/disable image loading for performance
 
