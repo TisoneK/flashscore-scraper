@@ -63,6 +63,7 @@ docs = [
     "sphinx-rtd-theme>=1.2.0",
     "myst-parser>=1.0.0",
 ]
+network = ["ping3>=4.0.8"]
 
 [project.urls]
 Homepage = "https://github.com/your-username/flashscore-scraper"

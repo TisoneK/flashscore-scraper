@@ -16,6 +16,8 @@ from src.data.loader.h2h_data_loader import H2HDataLoader
 from src.data.extractor.h2h_data_extractor import H2HDataExtractor
 from src.models import MatchModel, OddsModel, H2HMatchModel
 from src.storage.json_storage import JSONStorage
+from src.core.network_monitor import NetworkMonitor
+from src.core.retry_manager import NetworkRetryManager
 
 MAX_MATCHES = 3  # Limit for demo/testing
 
@@ -45,12 +47,18 @@ class FlashscoreScraper:
         self.home_away_loader = None
         self.over_under_loader = None
         self.h2h_loader = None
+        # Network resilience components
+        self.network_monitor = NetworkMonitor()
+        self.retry_manager = NetworkRetryManager()
 
     def initialize(self):
         self.driver_manager.initialize()
         self.driver = self.driver_manager.get_driver()
         self.selenium_utils = SeleniumUtils(self.driver)
         self.url_verifier = URLVerifier(self.driver)
+        # Start network monitoring
+        self.network_monitor.start_monitoring()
+        logger.info("Network monitoring started.")
 
     def load_initial_data(self):
         logger.info('--- Loading main page ---')
@@ -188,92 +196,97 @@ class FlashscoreScraper:
 
     def close(self):
         self.driver_manager.close()
+        # Stop network monitoring
+        self.network_monitor.stop_monitoring()
+        logger.info("Network monitoring stopped.")
 
     def scrape(self, progress_callback=None):
         self.initialize()
         try:
-            match_ids = self.load_initial_data()
-            logger.info(f'Found {len(match_ids)} scheduled matches.')
-            if not match_ids:
-                return
+            def main_scrape():
+                match_ids = self.load_initial_data()
+                logger.info(f'Found {len(match_ids)} scheduled matches.')
+                if not match_ids:
+                    return
 
-            processed_match_ids, processed_reasons = self.check_and_get_processed_matches()
-            if processed_match_ids:
-                logger.info(f"Found {len(processed_match_ids)} previously processed matches.")
+                processed_match_ids, processed_reasons = self.check_and_get_processed_matches()
+                if processed_match_ids:
+                    logger.info(f"Found {len(processed_match_ids)} previously processed matches.")
 
-            matches = []
-            MAX_MATCHES = len(match_ids)
+                matches = []
+                MAX_MATCHES = len(match_ids)
 
-            for i, match_id in enumerate(match_ids[:MAX_MATCHES]):
-                if progress_callback:
-                    progress_callback(i+1, MAX_MATCHES)
-                # Only log if no progress callback (for non-CLI usage)
-                if not progress_callback:
-                    logger.info(f'Processing match {match_id} ({i+1}/{MAX_MATCHES})')
+                for i, match_id in enumerate(match_ids[:MAX_MATCHES]):
+                    if progress_callback:
+                        progress_callback(i+1, MAX_MATCHES)
+                    if not progress_callback:
+                        logger.info(f'Processing match {match_id} ({i+1}/{MAX_MATCHES})')
 
-                if match_id in processed_match_ids:
-                    logger.info(f"Skipping already processed match: {match_id} (reason: {processed_reasons.get(match_id, 'already processed')})")
-                    continue
+                    if match_id in processed_match_ids:
+                        logger.info(f"Skipping already processed match: {match_id} (reason: {processed_reasons.get(match_id, 'already processed')})")
+                        continue
 
-                if self.load_match_details(match_id):
-                    logger.info(f'  - Match page loaded and verified for {match_id}')
-                    match_data = self.extract_match_data()
-                    odds = OddsModel(match_id=match_id)
+                    if self.load_match_details(match_id):
+                        logger.info(f'  - Match page loaded and verified for {match_id}')
+                        match_data = self.extract_match_data()
+                        odds = OddsModel(match_id=match_id)
 
-                    if self.load_home_away_odds(match_id):
-                        logger.info(f'  - Home/Away odds loaded for match {match_id}')
-                        odds.home_odds, odds.away_odds = self.extract_home_away_odds()
+                        if self.load_home_away_odds(match_id):
+                            logger.info(f'  - Home/Away odds loaded for match {match_id}')
+                            odds.home_odds, odds.away_odds = self.extract_home_away_odds()
+                        else:
+                            logger.warning(f'  - Failed to load home/away odds for match {match_id}')
+
+                        if self.load_over_under_odds(match_id):
+                            logger.info(f'  - Over/Under odds loaded for match {match_id}')
+                            odds.match_total, odds.over_odds, odds.under_odds = self.extract_over_under_odds()
+                            if odds.match_total is None:
+                                logger.warning(f"  - No selected over/under alternative available for match {match_id}")
+                        else:
+                            logger.warning(f'  - Failed to load over/under odds for match {match_id}')
+
+                        odds_incomplete, missing_odds_fields = self.validate_odds_data(odds)
+                        if odds_incomplete:
+                            logger.warning(f"  - Missing compulsory odds fields for match {match_id}: {', '.join(missing_odds_fields)}")
+
+                        h2h_matches = []
+                        h2h_count = 0
+                        if self.load_h2h_data(match_id):
+                            logger.info(f'  - H2H data loaded for match {match_id}')
+                            h2h_matches, h2h_count = self.extract_h2h_matches(match_id)
+                            logger.info(f'  - H2H matches found: {h2h_count} (required: {MIN_H2H_MATCHES})')
+                            if h2h_count < MIN_H2H_MATCHES:
+                                logger.warning(f'  - Insufficient H2H matches for match {match_id}: {h2h_count} found, {MIN_H2H_MATCHES} required')
+                        else:
+                            logger.warning(f'  - Failed to load H2H data for match {match_id}')
+
+                        skip_reason = self.compose_skip_reason(odds_incomplete, missing_odds_fields, h2h_count)
+                        status = "complete" if not skip_reason else "incomplete"
+
+                        match = MatchModel(
+                            match_id=match_id,
+                            country=match_data.country or "",
+                            league=match_data.league or "",
+                            home_team=match_data.home_team or "",
+                            away_team=match_data.away_team or "",
+                            date=match_data.date or "",
+                            time=match_data.time or "",
+                            odds=odds,
+                            h2h_matches=h2h_matches,
+                            status=status,
+                            skip_reason=skip_reason
+                        )
+                        matches.append(match)
+                        self.save_match_data(match)
                     else:
-                        logger.warning(f'  - Failed to load home/away odds for match {match_id}')
+                        logger.warning(f'  - Failed to load/verify match page for {match_id}')
+                        continue
 
-                    if self.load_over_under_odds(match_id):
-                        logger.info(f'  - Over/Under odds loaded for match {match_id}')
-                        odds.match_total, odds.over_odds, odds.under_odds = self.extract_over_under_odds()
-                        if odds.match_total is None:
-                            logger.warning(f"  - No selected over/under alternative available for match {match_id}")
-                    else:
-                        logger.warning(f'  - Failed to load over/under odds for match {match_id}')
+                logger.info(f"\n--- Summary: Collected {len(matches)} matches ---")
+                for m in matches:
+                    FlashscoreScraper.log_match_info(m)
 
-                    odds_incomplete, missing_odds_fields = self.validate_odds_data(odds)
-                    if odds_incomplete:
-                        logger.warning(f"  - Missing compulsory odds fields for match {match_id}: {', '.join(missing_odds_fields)}")
-
-                    h2h_matches = []
-                    h2h_count = 0
-                    if self.load_h2h_data(match_id):
-                        logger.info(f'  - H2H data loaded for match {match_id}')
-                        h2h_matches, h2h_count = self.extract_h2h_matches(match_id)
-                        logger.info(f'  - H2H matches found: {h2h_count} (required: {MIN_H2H_MATCHES})')
-                        if h2h_count < MIN_H2H_MATCHES:
-                            logger.warning(f'  - Insufficient H2H matches for match {match_id}: {h2h_count} found, {MIN_H2H_MATCHES} required')
-                    else:
-                        logger.warning(f'  - Failed to load H2H data for match {match_id}')
-
-                    skip_reason = self.compose_skip_reason(odds_incomplete, missing_odds_fields, h2h_count)
-                    status = "complete" if not skip_reason else "incomplete"
-
-                    match = MatchModel(
-                        match_id=match_id,
-                        country=match_data.country or "",
-                        league=match_data.league or "",
-                        home_team=match_data.home_team or "",
-                        away_team=match_data.away_team or "",
-                        date=match_data.date or "",
-                        time=match_data.time or "",
-                        odds=odds,
-                        h2h_matches=h2h_matches,
-                        status=status,
-                        skip_reason=skip_reason
-                    )
-                    matches.append(match)
-                    self.save_match_data(match)
-                else:
-                    logger.warning(f'  - Failed to load/verify match page for {match_id}')
-                    continue
-
-            logger.info(f"\n--- Summary: Collected {len(matches)} matches ---")
-            for m in matches:
-                FlashscoreScraper.log_match_info(m)
-
+            # Run the main scrape with retry logic
+            self.retry_manager.retry_network_operation(main_scrape)
         finally:
             self.close()

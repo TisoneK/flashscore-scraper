@@ -3,6 +3,8 @@ from ..elements_model import H2HElements
 from typing import Optional
 from ...config import CONFIG, SELECTORS, H2H_URL, MIN_H2H_MATCHES
 from ...core.url_verifier import URLVerifier
+from ...core.network_monitor import NetworkMonitor
+from ...core.retry_manager import NetworkRetryManager
 from selenium.webdriver.remote.webdriver import WebDriver
 from ..verifier.h2h_data_verifier import H2HDataVerifier
 
@@ -16,6 +18,18 @@ class H2HDataLoader:
         self.selenium_utils = selenium_utils
         self.url_verifier = URLVerifier(driver)
         self.h2h_data_verifier = H2HDataVerifier(driver)
+        
+        # Network resilience components
+        self.network_monitor = NetworkMonitor()
+        self.retry_manager = NetworkRetryManager()
+        
+        # Start network monitoring
+        self.network_monitor.start_monitoring()
+
+    def __del__(self):
+        """Cleanup network monitoring on destruction."""
+        if hasattr(self, 'network_monitor'):
+            self.network_monitor.stop_monitoring()
 
     def get_h2h_section(self):
         sections = self._safe_find_elements('css', SELECTORS['h2h']['section'])
@@ -45,64 +59,75 @@ class H2HDataLoader:
         return len(h2h_rows)
 
     def load_h2h(self, match_id: str) -> bool:
-        """Load the H2H page for a match and extract all required elements into self.elements (as WebElements)."""
-        try:
+        """Load the H2H page for a match and extract all required elements with network resilience."""
+        def _load_operation():
             url = H2H_URL.format(match_id=match_id)
             success, error = self.url_verifier.load_and_verify_url(url)
             if not success:
-                logger.error(f"Error loading H2H page for {match_id}: {error}")
-                self.elements.h2h_rows = []
-                self.elements.h2h_row_count = 0
-                return False
+                raise Exception(f"Error loading H2H page for {match_id}: {error}")
             if self.selenium_utils:
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+            
             self.elements.h2h_section = self.get_h2h_section()
             is_valid, error = self.h2h_data_verifier.verify_h2h_section(self.elements.h2h_section)
             if not is_valid:
-                logger.error(f"Error verifying h2h_section for {match_id}: {error}")
-                self.elements.h2h_rows = []
-                self.elements.h2h_row_count = 0
-                return False
+                raise Exception(f"Error verifying h2h_section for {match_id}: {error}")
+            
             # Try to click 'show more' in the third section
             show_more_selector = SELECTORS['h2h']['show_more']
             show_more_btn = self._safe_find_element('css', show_more_selector, parent=self.elements.h2h_section)
             if show_more_btn and show_more_btn.is_displayed():
                 show_more_btn.click()
-                self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+                if self.selenium_utils:
+                    self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
             else:
                 logger.warning(f"'Show more' button not present in H2H section for {match_id}. Insufficient H2H data likely.")
+            
             self.elements.h2h_rows = self.get_h2h_rows(self.elements.h2h_section)
-            self.elements.h2h_row_count = self.get_h2h_row_count(self.elements.h2h_rows)  # Always set row count
+            self.elements.h2h_row_count = self.get_h2h_row_count(self.elements.h2h_rows)
+            
             is_valid, error = self.h2h_data_verifier.verify_h2h_rows(self.elements.h2h_rows)
             if not is_valid:
-                logger.error(f"Error verifying h2h_rows for {match_id}: {error}")
-                # Don't reset h2h_row_count - preserve the actual count found
-                return False
+                raise Exception(f"Error verifying h2h_rows for {match_id}: {error}")
+            
             is_valid, error = self.h2h_data_verifier.verify_h2h_row_count(self.elements.h2h_row_count)
             if not is_valid:
-                logger.error(f"Error verifying h2h_row_count for {match_id}: {error}")
-                # Don't reset h2h_row_count - preserve the actual count found
-                return False
+                raise Exception(f"Error verifying h2h_row_count for {match_id}: {error}")
+            
             return True
+
+        try:
+            # Execute with retry logic
+            result = self.retry_manager.retry_network_operation(_load_operation)
+            return result
+            
         except Exception as e:
-            logger.error(f"Error loading H2H page for {match_id}: {e}")
+            logger.error(f"Failed to load H2H page for {match_id} after retries: {e}")
             self.elements.h2h_rows = []
             self.elements.h2h_row_count = 0
             return False
 
     def _safe_find_element(self, locator: str, value: str, parent: Optional[object] = None):
-        try:
+        """Safely find and return a WebElement using selenium_utils with network resilience."""
+        def _find_operation():
             if self.selenium_utils:
                 return self.selenium_utils.find(locator, value, parent=parent)
             return None
+
+        try:
+            return self.retry_manager.retry_network_operation(_find_operation)
         except Exception:
             return None
 
     def _safe_find_elements(self, locator: str, value: str, parent: Optional[object] = None):
-        try:
+        """Safely find and return WebElements using selenium_utils with network resilience."""
+        def _find_operation():
             if self.selenium_utils:
                 return self.selenium_utils.find_all(locator, value, parent=parent)
             return []
+
+        try:
+            return self.retry_manager.retry_network_operation(_find_operation)
         except Exception:
             return []
 
@@ -122,8 +147,8 @@ class H2HDataLoader:
         return row.get('competition')
 
     def click_show_more(self):
-        """Click the 'show more' button in the H2H section if present."""
-        try:
+        """Click the 'show more' button in the H2H section if present with network resilience."""
+        def _click_operation():
             if not self.selenium_utils:
                 return False
             show_more_selector = SELECTORS['h2h']['show_more']
@@ -134,6 +159,9 @@ class H2HDataLoader:
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
                 return True
             return False
+
+        try:
+            return self.retry_manager.retry_network_operation(_click_operation)
         except Exception as e:
             logger.error(f"Error clicking show more: {e}")
             return False
@@ -152,6 +180,4 @@ class H2HDataLoader:
 
     def get_h2h_count(self):
         """Return the number of H2H matches found, capped at MIN_H2H_MATCHES."""
-        return min(self.elements.h2h_row_count, MIN_H2H_MATCHES)
-
-    # Optionally add get_competition if you add that field 
+        return min(self.elements.h2h_row_count, MIN_H2H_MATCHES) 
