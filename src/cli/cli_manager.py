@@ -12,6 +12,11 @@ import time
 import re
 import os
 import datetime
+import glob
+import json
+from datetime import datetime, timedelta
+import csv
+import json as pyjson
 
 # Suppress Python warnings about platform independent libraries
 warnings.filterwarnings("ignore", message="Could not find platform independent libraries")
@@ -21,12 +26,17 @@ from src.utils import setup_logging
 from src.scraper import FlashscoreScraper
 from .prompts import ScraperPrompts
 from .display import ConsoleDisplay
+from .colors import ColoredDisplay
 from .progress import ProgressManager
+from src.prediction import PredictionService
+from src.models import MatchModel, OddsModel, H2HMatchModel
+from src.prediction.prediction_data_loader import load_matches
 
 class CLIManager:
     def __init__(self):
         self.prompts = ScraperPrompts()
         self.display = ConsoleDisplay()
+        self.colored_display = ColoredDisplay()
         self.progress = ProgressManager()
         self.logger = logging.getLogger("cli")
         self.scraper: Optional[FlashscoreScraper] = None
@@ -34,8 +44,6 @@ class CLIManager:
         self.scraping_results = {}
         self.log_queue = queue.Queue()
         self.critical_messages = []
-        
-        # Browser noise patterns to filter out
         self.browser_noise_patterns = [
             r'DevTools listening on ws://',
             r'ERROR:gpu\\command_buffer\\service\\gles2_cmd_decoder_passthrough\.cc',
@@ -60,7 +68,8 @@ class CLIManager:
             r'Registration response error message.*',
             r'google_apis.*registration_request.*'
         ]
-
+        self.debug = False
+        
     def run(self, args=None):
         """Main CLI entry point."""
         # Parse command line arguments
@@ -82,8 +91,10 @@ class CLIManager:
         parser.add_argument("--list-versions", action="store_true",
                           help="List available Chrome versions")
         parser.add_argument("--version", "-v", action="version", version="1.0.0")
+        parser.add_argument("--debug", action="store_true", help="Enable debug output")
         
         parsed_args = parser.parse_args(args)
+        self.debug = parsed_args.debug
         
         # Handle version listing
         if parsed_args.list_versions:
@@ -305,7 +316,7 @@ class CLIManager:
     def run_interactive_cli(self):
         """Run the interactive CLI interface."""
         try:
-            self.display.show_welcome()
+            self.colored_display.show_welcome()
             
             while True:
                 action = self.prompts.ask_main_action()
@@ -316,8 +327,10 @@ class CLIManager:
                     self.configure_settings()
                 elif action == "View Status":
                     self.view_status()
+                elif action == "Prediction":
+                    self.run_prediction_menu()
                 elif action == "Exit":
-                    self.display.show_goodbye()
+                    self.colored_display.show_goodbye()
                     break
                     
         except KeyboardInterrupt:
@@ -326,6 +339,201 @@ class CLIManager:
         except Exception as e:
             self.display.show_error(str(e))
             sys.exit(1)
+
+    def run_prediction_menu(self):
+        """Show the prediction sub-menu and handle user selection."""
+        while True:
+            range_choice = self.prompts.ask_prediction_range()
+            if range_choice == "Back":
+                return
+            self.handle_prediction_range(range_choice)
+
+    def handle_prediction_range(self, range_choice):
+        from datetime import datetime, timedelta
+        from src.prediction import PredictionService
+        from src.prediction.prediction_data_loader import load_matches
+
+        today = datetime.now().strftime('%d.%m.%Y')
+        yesterday = (datetime.now() - timedelta(days=1)).strftime('%d.%m.%Y')
+        date_filter = None
+        if range_choice == "Today":
+            date_filter = today
+        elif range_choice == "Yesterday":
+            date_filter = yesterday
+        # else: All (no filter)
+
+        # Load all matches with debug flag
+        match_models = load_matches(date_filter=date_filter, status="complete", debug=self.debug)
+        if not match_models:
+            self.colored_display.show_warning_message("No completed matches found for the selected range.")
+            return
+
+        # Run predictions first
+        prediction_service = PredictionService()
+        results = []
+        match_id_map = {}
+        for match in match_models:
+            result = prediction_service.generate_prediction(match)
+            if result.success and result.prediction:
+                pred = result.prediction
+                summary = {
+                    "date": match.date,
+                    "home": match.home_team,
+                    "away": match.away_team,
+                    "line": match.odds.match_total,
+                    "prediction": pred.recommendation.value,
+                    "confidence": pred.confidence.value,
+                    "avg_rate": f"{pred.average_rate:.2f}",
+                    "match_id": match.match_id
+                }
+                results.append(summary)
+                match_id_map[match.match_id] = (match, pred)
+
+        # Display initial results
+        if not results:
+            self.colored_display.show_warning_message("No valid predictions for the selected range.")
+            return
+        
+        # Show prediction header
+        self.colored_display.show_prediction_header()
+        
+        # Create and display colored table
+        table = self.colored_display.create_prediction_table(results)
+        self.colored_display.console.print(table)
+        print()
+
+        # Ask if user wants to filter
+        filter_choice = self.prompts.ask_filter_choice()
+        if filter_choice == "Back":
+            return
+        elif filter_choice == "Filter Results":
+            # Apply filters
+            filtered_results = self.apply_filters(results, match_id_map)
+            if filtered_results:
+                # Re-display filtered results
+                self.colored_display.show_prediction_header()
+                table = self.colored_display.create_prediction_table(filtered_results)
+                self.colored_display.console.print(table)
+                print()
+                results = filtered_results  # Update results for post-actions
+
+        # Post-summary actions
+        match_choices = [f"{r['date']} | {r['home']} vs {r['away']} | {r['match_id']}" for r in results]
+        while True:
+            action = self.prompts.ask_post_summary_action(match_choices)
+            if action == "back":
+                return
+            elif action == "details":
+                selected = self.prompts.ask_select_match(match_choices)
+                if selected == "Back":
+                    continue
+                # Extract match_id from choice
+                match_id = selected.split("|")[-1].strip()
+                match, pred = match_id_map[match_id]
+                self.display_prediction_details(match, pred)
+            elif action == "export":
+                fmt = self.prompts.ask_export_format()
+                if fmt == "Back":
+                    continue
+                filename = f"output/predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt.lower()}"
+                try:
+                    if fmt == "CSV":
+                        with open(filename, "w", newline='', encoding="utf-8") as f:
+                            writer = csv.DictWriter(f, fieldnames=["date", "home", "away", "line", "prediction", "confidence", "avg_rate", "match_id"])
+                            writer.writeheader()
+                            writer.writerows(results)
+                    elif fmt == "JSON":
+                        with open(filename, "w", encoding="utf-8") as f:
+                            pyjson.dump(results, f, ensure_ascii=False, indent=2)
+                    print(f"Exported predictions to {filename}")
+                except Exception as e:
+                    print(f"Error exporting predictions: {e}")
+
+    def apply_filters(self, results, match_id_map):
+        """Apply league and team filters to results."""
+        # Get all unique leagues from results
+        leagues = sorted(set(match_id_map[r['match_id']].league for r in results))
+        
+        # Prompt for league filter
+        self.colored_display.show_filter_header("League")
+        league_choice = self.prompts.ask_league_filter(leagues) if leagues else "All"
+        if league_choice == "Back":
+            return results
+        if league_choice != "All":
+            # Filter by league
+            filtered_results = []
+            for r in results:
+                match = match_id_map[r['match_id']]
+                if match.league == league_choice:
+                    filtered_results.append(r)
+            results = filtered_results
+            if not results:
+                self.colored_display.show_warning_message(f"No matches found for league: {league_choice}")
+                return []
+
+        # Prompt for team filter
+        self.colored_display.show_filter_header("Team")
+        teams = sorted(set([r['home'] for r in results] + [r['away'] for r in results]))
+        team_choice = self.prompts.ask_team_filter(teams) if teams else "All"
+        if team_choice == "Back":
+            return results
+        if team_choice != "All":
+            # Filter by team
+            filtered_results = []
+            for r in results:
+                if r['home'] == team_choice or r['away'] == team_choice:
+                    filtered_results.append(r)
+            results = filtered_results
+            if not results:
+                self.colored_display.show_warning_message(f"No matches found for team: {team_choice}")
+                return []
+
+        return results
+
+    def display_prediction_details(self, match, pred):
+        """Display detailed prediction information with colors."""
+        self.colored_display.console.print(f"\n[bold {self.colored_display.colors.PRIMARY}]Prediction Details[/bold {self.colored_display.colors.PRIMARY}]")
+        
+        # Match info
+        self.colored_display.console.print(f"[bold]Match:[/bold] {match.home_team} vs {match.away_team}")
+        self.colored_display.console.print(f"[bold]Date:[/bold] {match.date}  [bold]Time:[/bold] {match.time}")
+        self.colored_display.console.print(f"[bold]League:[/bold] {match.league}  [bold]Country:[/bold] {match.country}")
+        self.colored_display.console.print(f"[bold]Bookmaker Line:[/bold] {match.odds.match_total}")
+        
+        # Prediction info with colors
+        pred_color = self.colored_display.colors.PREDICTION_NO_BET
+        if pred.recommendation.value == 'OVER':
+            pred_color = self.colored_display.colors.PREDICTION_OVER
+        elif pred.recommendation.value == 'UNDER':
+            pred_color = self.colored_display.colors.PREDICTION_UNDER
+            
+        conf_color = self.colored_display.colors.PREDICTION_LOW_CONFIDENCE
+        if pred.confidence.value == 'HIGH':
+            conf_color = self.colored_display.colors.PREDICTION_HIGH_CONFIDENCE
+        elif pred.confidence.value == 'MEDIUM':
+            conf_color = self.colored_display.colors.PREDICTION_MEDIUM_CONFIDENCE
+            
+        self.colored_display.console.print(f"[bold]Prediction:[/bold] [{pred_color}]{pred.recommendation.value}[/{pred_color}]  [bold]Confidence:[/bold] [{conf_color}]{pred.confidence.value}[/{conf_color}]")
+        self.colored_display.console.print(f"[bold]Average Rate:[/bold] {pred.average_rate:.2f}")
+        
+        # Statistics
+        self.colored_display.console.print(f"[bold]Matches Above Line:[/bold] {pred.matches_above_line}")
+        self.colored_display.console.print(f"[bold]Matches Below Line:[/bold] {pred.matches_below_line}")
+        self.colored_display.console.print(f"[bold]Decrement Test:[/bold] {pred.decrement_test}")
+        self.colored_display.console.print(f"[bold]Increment Test:[/bold] {pred.increment_test}")
+        self.colored_display.console.print(f"[bold]H2H Totals:[/bold] {pred.h2h_totals}")
+        self.colored_display.console.print(f"[bold]Rate Values:[/bold] {[f'{r:.2f}' for r in pred.rate_values]}")
+        
+        # H2H Matches
+        self.colored_display.console.print(f"\n[bold {self.colored_display.colors.SECONDARY}]H2H Matches:[/bold {self.colored_display.colors.SECONDARY}]")
+        for h2h in match.h2h_matches:
+            self.colored_display.console.print(f"  {h2h.date}: {h2h.home_team} {h2h.home_score} - {h2h.away_score} {h2h.away_team} ({h2h.competition})")
+        
+        # Calculation Details
+        self.colored_display.console.print(f"\n[bold {self.colored_display.colors.SECONDARY}]Calculation Details:[/bold {self.colored_display.colors.SECONDARY}]")
+        for k, v in pred.calculation_details.items():
+            self.colored_display.console.print(f"  [bold]{k}:[/bold] {v}")
+        print()
 
     def start_scraping_immediate(self):
         """Start scraping immediately with current settings."""

@@ -10,9 +10,23 @@ class ScraperPrompts:
                 "Start Scraping",
                 "Configure Settings", 
                 "View Status",
+                "Prediction",
                 "Exit"
             ],
             default="Start Scraping"
+        ).execute()
+
+    def ask_prediction_range(self):
+        """Ask user for prediction date range."""
+        return inquirer.select(
+            message="Prediction - Select range:",
+            choices=[
+                "Yesterday",
+                "Today",
+                "All",
+                "Back"
+            ],
+            default="Today"
         ).execute()
 
     def ask_settings(self):
@@ -69,3 +83,60 @@ class ScraperPrompts:
             ).execute()
         
         return settings 
+
+    def ask_league_filter(self, leagues):
+        """Prompt user to filter by league or show all."""
+        return inquirer.select(
+            message="Filter by league:",
+            choices=["All"] + sorted(leagues) + ["Back"],
+            default="All"
+        ).execute()
+
+    def ask_team_filter(self, teams):
+        """Prompt user to filter by team or show all."""
+        return inquirer.select(
+            message="Filter by team:",
+            choices=["All"] + sorted(teams) + ["Back"],
+            default="All"
+        ).execute()
+
+    def ask_post_summary_action(self, match_choices):
+        """Prompt user for post-summary action: view details, export, or back."""
+        return inquirer.select(
+            message="What would you like to do next?",
+            choices=[
+                {"name": f"View details for a match", "value": "details"} if match_choices else None,
+                {"name": "Export results", "value": "export"} if match_choices else None,
+                {"name": "Back", "value": "back"}
+            ],
+            default="back",
+            filter=lambda x: x  # Remove None
+        ).execute()
+
+    def ask_select_match(self, match_choices):
+        """Prompt user to select a match for details."""
+        return inquirer.select(
+            message="Select a match for details:",
+            choices=match_choices + ["Back"],
+            default=match_choices[0] if match_choices else "Back"
+        ).execute()
+
+    def ask_export_format(self):
+        """Prompt user to select export format."""
+        return inquirer.select(
+            message="Select export format:",
+            choices=["CSV", "JSON", "Back"],
+            default="CSV"
+        ).execute()
+
+    def ask_filter_choice(self):
+        """Prompt user to choose between filtering or proceeding with actions."""
+        return inquirer.select(
+            message="What would you like to do?",
+            choices=[
+                "Filter Results",
+                "View Details/Export",
+                "Back"
+            ],
+            default="View Details/Export"
+        ).execute() 

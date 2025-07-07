@@ -424,4 +424,139 @@ The automated driver manager ensures compatibility and eliminates manual driver 
 
 ## 📄 License
 
-This project is for educational purposes. Please respect the terms of service of any websites you scrape. 
+This project is for educational purposes. Please respect the terms of service of any websites you scrape.
+
+# Prediction Calculator Algorithm
+
+## Overview
+
+The prediction calculator algorithm is designed to estimate the likely outcome of a sports match using a combination of:
+- Historical head-to-head (H2H) results
+- Current betting odds (home, away, over/under, total)
+- Statistical analysis of recent team performance
+
+This document outlines the algorithmic steps, data requirements, and logic used to generate predictions.
+
+---
+
+## 1. Data Requirements
+
+- **Match Odds**: Home odds, away odds, over/under odds, match total
+- **H2H History**: List of previous matches between the two teams, including scores and dates
+- **Recent Form (optional)**: Last N matches for each team, with scores
+
+---
+
+## 2. Algorithm Steps
+
+### Step 1: Data Collection
+
+- Gather the latest odds for the match (home, away, over, under, total).
+- Retrieve at least the last 5 H2H matches between the teams.
+- Optionally, collect recent form for each team (last 5 matches).
+
+### Step 2: H2H Analysis
+
+- Calculate the average total points scored in H2H matches.
+- Calculate win rates for each team in H2H.
+- Calculate average margin of victory.
+
+### Step 3: Odds Analysis
+
+- Identify the bookmaker's expected total (match_total).
+- Compare the average H2H total to the bookmaker's total.
+- Analyze the over/under odds:
+  - If over_odds < under_odds, the market expects a higher-scoring game.
+  - If under_odds < over_odds, the market expects a lower-scoring game.
+
+### Step 4: Recent Form Adjustment (optional)
+
+- Calculate each team's average points scored and conceded in their last N matches.
+- Adjust the H2H averages based on recent form trends.
+
+### Step 5: Prediction Calculation
+
+- **Total Prediction**:
+  - If H2H average total and recent form both exceed the bookmaker's total, lean towards "Over".
+  - If both are below, lean towards "Under".
+  - If mixed, use odds as a tiebreaker.
+
+- **Winner Prediction**:
+  - Combine H2H win rates, recent form, and odds (implied probability).
+  - Calculate implied probability from odds:
+    - `implied_prob = 1 / odds`
+  - Adjust for recent form and H2H dominance.
+
+### Step 6: Confidence Scoring
+
+- Assign a confidence score based on:
+  - Agreement between H2H, recent form, and odds
+  - Number of H2H matches available
+  - Magnitude of difference between calculated and bookmaker's total
+
+---
+
+## 3. Example Calculation
+
+Suppose:
+- H2H average total: 180
+- Bookmaker total: 176.5
+- Over odds: 1.85, Under odds: 1.95
+- Recent form average total: 182
+
+**Prediction**: Over 176.5  
+**Confidence**: High (all indicators agree)
+
+---
+
+## 4. Pseudocode
+
+```python
+def predict(match, h2h_matches, odds, recent_form=None):
+    h2h_total = average([m.home_score + m.away_score for m in h2h_matches])
+    h2h_win_rate_home = sum(1 for m in h2h_matches if m.home_score > m.away_score) / len(h2h_matches)
+    bookmaker_total = odds.match_total
+    over_odds = odds.over_odds
+    under_odds = odds.under_odds
+
+    # Recent form adjustment
+    if recent_form:
+        recent_total = average([m.home_score + m.away_score for m in recent_form])
+        avg_total = (h2h_total + recent_total) / 2
+    else:
+        avg_total = h2h_total
+
+    # Total prediction
+    if avg_total > bookmaker_total:
+        total_pred = "Over"
+    else:
+        total_pred = "Under"
+
+    # Winner prediction (simplified)
+    home_prob = 1 / odds.home_odds
+    away_prob = 1 / odds.away_odds
+    winner_pred = "Home" if home_prob > away_prob else "Away"
+
+    # Confidence
+    confidence = "High" if abs(avg_total - bookmaker_total) > 3 else "Medium"
+
+    return {"total_pred": total_pred, "winner_pred": winner_pred, "confidence": confidence}
+```
+
+---
+
+## 5. Notes
+
+- The algorithm can be extended with more advanced statistical or machine learning models.
+- Always validate predictions against real outcomes to improve the model.
+
+---
+
+## 6. References
+
+- [Implied Probability from Odds](https://www.sportsbookreview.com/betting-odds/converter/)
+- [Sports Prediction Models](https://www.kaggle.com/competitions/ncaam-march-mania-2021/overview)
+
+---
+
+*This document serves as a blueprint for implementing or improving the prediction calculator in your project.* 
