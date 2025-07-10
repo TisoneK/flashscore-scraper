@@ -9,29 +9,58 @@ import re
 from ..models import MatchModel
 from ..config import CONFIG, DEFAULT_OUTPUT_FILE
 
+logger = logging.getLogger(__name__)
+
 def setup_logging() -> None:
     """Configure logging for the application."""
+    logger.debug("setup_logging() called")
+    
     # Create logs directory if it doesn't exist
     log_dir = Path(CONFIG.logging.log_directory)
+    logger.debug(f"Log directory: {log_dir}")
     log_dir.mkdir(parents=True, exist_ok=True)
     
     # Generate log filename with date
     log_filename = f"scraper_{datetime.now().strftime(CONFIG.logging.log_filename_date_format)}.log"
     log_file_path = log_dir / log_filename
+    logger.debug(f"Log file path: {log_file_path}")
+    logger.debug(f"Log level: {CONFIG.logging.log_level}")
+    logger.debug(f"Log format: {CONFIG.logging.log_format}")
+    logger.debug(f"Log date format: {CONFIG.logging.log_date_format}")
     
-    # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, CONFIG.logging.log_level),
-        format=CONFIG.logging.log_format,
-        handlers=[
-            logging.FileHandler(log_file_path, encoding='utf-8'),
-            logging.StreamHandler(stream=open(1, 'w', encoding='utf-8', closefd=False))  # Use UTF-8 for console
-        ]
-    )
+    # Configure logging with separate levels for console and file
+    file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)  # File shows DEBUG and above
+    
+    console_handler = logging.StreamHandler(stream=open(1, 'w', encoding='utf-8', closefd=False))
+    console_handler.setLevel(logging.INFO)  # Console shows INFO and above
+    
+    # Set formatter for both handlers
+    formatter = logging.Formatter(CONFIG.logging.log_format, datefmt=CONFIG.logging.log_date_format)
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # Root logger accepts all levels
+    root_logger.handlers.clear()  # Clear existing handlers
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+    
+    # Debug: Check if handlers were added
+    logger.debug(f"Root logger handlers: {root_logger.handlers}")
+    logger.debug(f"Root logger level: {root_logger.level}")
+    
+    # Test logging to file
+    test_logger = logging.getLogger('test_setup')
+    test_logger.info("=== TEST LOG MESSAGE FROM SETUP_LOGGING ===")
+    logger.debug(f"Test log message sent. Check if it appears in: {log_file_path}")
     
     # Set specific log levels for noisy modules
     for module in CONFIG.logging.quiet_modules:
         logging.getLogger(module).setLevel(logging.WARNING)
+    
+    logger.debug("setup_logging() completed")
 
 def save_matches_to_csv(matches: List[MatchModel], filename: str = DEFAULT_OUTPUT_FILE) -> None:
     """Save a list of matches to a CSV file.

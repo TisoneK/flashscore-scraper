@@ -2,6 +2,7 @@ import sys
 import os
 import time
 import logging
+print("[DEBUG] Starting src/scraper.py...")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
 from src.driver_manager import WebDriverManager
@@ -18,25 +19,20 @@ from src.models import MatchModel, OddsModel, H2HMatchModel
 from src.storage.json_storage import JSONStorage
 from src.core.network_monitor import NetworkMonitor
 from src.core.retry_manager import NetworkRetryManager
+from src.utils import setup_logging
+setup_logging()
+
+# Test logging during scraper initialization
+logger = logging.getLogger(__name__)
+logger.info("=== SCRAPER INITIALIZATION TEST LOG ===")
 
 MAX_MATCHES = 3  # Limit for demo/testing
 
-# Setup logging
-log_dir = os.path.join("output", "logs")
-os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, f"scraper_{time.strftime('%y%m%d')}.log")
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(levelname)s: %(message)s',
-    handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
 class FlashscoreScraper:
     def __init__(self):
+        print("[DEBUG] FlashscoreScraper.__init__ called")
         self.driver_manager = WebDriverManager()
         self.driver = None
         self.selenium_utils = None
@@ -97,7 +93,6 @@ class FlashscoreScraper:
 
     def extract_home_away_odds(self):
         home_away_extractor = OddsDataExtractor(self.home_away_loader)
-        home_away_extractor.extract_home_away_odds()
         home_odds = float(home_away_extractor.home_odds) if home_away_extractor.home_odds else None
         away_odds = float(home_away_extractor.away_odds) if home_away_extractor.away_odds else None
         return home_odds, away_odds
@@ -108,7 +103,6 @@ class FlashscoreScraper:
 
     def extract_over_under_odds(self):
         over_under_extractor = OddsDataExtractor(self.over_under_loader)
-        over_under_extractor.extract_over_under_odds()
         selected = over_under_extractor.get_selected_alternative()
         if selected:
             match_total = float(selected['alternative']) if selected['alternative'] else None
@@ -167,6 +161,7 @@ class FlashscoreScraper:
         return "; ".join(reasons)
 
     def save_match_data(self, match):
+        print(f"[DEBUG] save_match_data called for match_id={getattr(match, 'match_id', None)}, status={getattr(match, 'status', None)}")
         self.json_storage.save_matches([match])
 
     @staticmethod
@@ -206,67 +201,78 @@ class FlashscoreScraper:
         logger.info("Network monitoring stopped.")
 
     def scrape(self, progress_callback=None, day="Today"):
+        print("[DEBUG] FlashscoreScraper.scrape() called")
         self.initialize()
         try:
             def main_scrape():
                 match_ids = self.load_initial_data(day)
-                logger.info(f'Found {len(match_ids)} scheduled matches for {day.lower()}.')
+                print(f"[DEBUG] Found {len(match_ids)} scheduled matches for {day.lower()}.")
                 if not match_ids:
+                    print("[DEBUG] No match IDs found. Exiting main_scrape.")
                     return
 
                 processed_match_ids, processed_reasons = self.check_and_get_processed_matches()
-                if processed_match_ids:
-                    logger.info(f"Found {len(processed_match_ids)} previously processed matches.")
+                print(f"[DEBUG] Found {len(processed_match_ids)} previously processed matches.")
 
                 matches = []
                 MAX_MATCHES = len(match_ids)
 
                 for i, match_id in enumerate(match_ids[:MAX_MATCHES]):
+                    print(f"[DEBUG] Processing match {match_id} ({i+1}/{MAX_MATCHES})")
                     if progress_callback:
                         progress_callback(i+1, MAX_MATCHES)
                     if not progress_callback:
                         logger.info(f'Processing match {match_id} ({i+1}/{MAX_MATCHES})')
 
                     if match_id in processed_match_ids:
+                        print(f"[DEBUG] Skipping already processed match: {match_id} (reason: {processed_reasons.get(match_id, 'already processed')})")
                         logger.info(f"Skipping already processed match: {match_id} (reason: {processed_reasons.get(match_id, 'already processed')})")
                         continue
 
                     if self.load_match_details(match_id):
-                        logger.info(f'  - Match page loaded and verified for {match_id}')
+                        print(f"[DEBUG] Match page loaded and verified for {match_id}")
                         match_data = self.extract_match_data()
                         odds = OddsModel(match_id=match_id)
 
                         if self.load_home_away_odds(match_id):
-                            logger.info(f'  - Home/Away odds loaded for match {match_id}')
+                            print(f"[DEBUG] Home/Away odds loaded for match {match_id}")
                             odds.home_odds, odds.away_odds = self.extract_home_away_odds()
                         else:
+                            print(f"[DEBUG] Failed to load home/away odds for match {match_id}")
                             logger.warning(f'  - Failed to load home/away odds for match {match_id}')
 
                         if self.load_over_under_odds(match_id):
-                            logger.info(f'  - Over/Under odds loaded for match {match_id}')
+                            print(f"[DEBUG] Over/Under odds loaded for match {match_id}")
                             odds.match_total, odds.over_odds, odds.under_odds = self.extract_over_under_odds()
                             if odds.match_total is None:
+                                print(f"[DEBUG] No selected over/under alternative available for match {match_id}")
                                 logger.warning(f"  - No selected over/under alternative available for match {match_id}")
                         else:
+                            print(f"[DEBUG] Failed to load over/under odds for match {match_id}")
                             logger.warning(f'  - Failed to load over/under odds for match {match_id}')
 
                         odds_incomplete, missing_odds_fields = self.validate_odds_data(odds)
                         if odds_incomplete:
+                            print(f"[DEBUG] Missing compulsory odds fields for match {match_id}: {', '.join(missing_odds_fields)}")
                             logger.warning(f"  - Missing compulsory odds fields for match {match_id}: {', '.join(missing_odds_fields)}")
 
                         h2h_matches = []
                         h2h_count = 0
                         if self.load_h2h_data(match_id):
-                            logger.info(f'  - H2H data loaded for match {match_id}')
+                            print(f"[DEBUG] H2H data loaded for match {match_id}")
                             h2h_matches, h2h_count = self.extract_h2h_matches(match_id)
+                            print(f"[DEBUG] H2H matches found: {h2h_count} (required: {MIN_H2H_MATCHES})")
                             logger.info(f'  - H2H matches found: {h2h_count} (required: {MIN_H2H_MATCHES})')
                             if h2h_count < MIN_H2H_MATCHES:
+                                print(f"[DEBUG] Insufficient H2H matches for match {match_id}: {h2h_count} found, {MIN_H2H_MATCHES} required")
                                 logger.warning(f'  - Insufficient H2H matches for match {match_id}: {h2h_count} found, {MIN_H2H_MATCHES} required')
                         else:
+                            print(f"[DEBUG] Failed to load H2H data for match {match_id}")
                             logger.warning(f'  - Failed to load H2H data for match {match_id}')
 
                         skip_reason = self.compose_skip_reason(odds_incomplete, missing_odds_fields, h2h_count)
                         status = "complete" if not skip_reason else "incomplete"
+                        print(f"[DEBUG] Match {match_id} status: {status}, skip_reason: {skip_reason}")
 
                         match = MatchModel(
                             match_id=match_id,
@@ -284,9 +290,11 @@ class FlashscoreScraper:
                         matches.append(match)
                         self.save_match_data(match)
                     else:
+                        print(f"[DEBUG] Failed to load/verify match page for {match_id}")
                         logger.warning(f'  - Failed to load/verify match page for {match_id}')
                         continue
 
+                print(f"[DEBUG] --- Summary: Collected {len(matches)} matches for {day.lower()} ---")
                 logger.info(f"\n--- Summary: Collected {len(matches)} matches for {day.lower()} ---")
                 for m in matches:
                     FlashscoreScraper.log_match_info(m)

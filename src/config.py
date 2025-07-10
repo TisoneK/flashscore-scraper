@@ -94,7 +94,7 @@ class LoggingConfig:
     log_level: str = "INFO"
     log_file: str = "output/logs/scraper.log"
     log_directory: str = "output/logs"
-    log_format: str = "%(message)s"
+    log_format: str = "%(asctime)s,%(msecs)03d %(levelname)s: %(message)s"
     log_date_format: str = "%Y-%m-%d %H:%M:%S"
     log_filename_date_format: str = "%y%m%d"
     log_to_console: bool = True

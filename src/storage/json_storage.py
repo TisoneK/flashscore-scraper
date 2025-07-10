@@ -52,20 +52,7 @@ class JSONStorage:
             return {}
             
     def save_matches(self, matches: List[MatchModel], filename: Optional[str] = None) -> bool:
-        """
-        Save/update matches in a JSON file, separating complete and incomplete entries.
-
-        Complete matches are stored as full objects in the 'matches' list.
-        Incomplete matches are stored with just their ID and reason in
-        'metadata.skipped_matches'.
-
-        Args:
-            matches: A list containing the single MatchModel object to process.
-            filename: Optional filename. Defaults to the daily file.
-
-        Returns:
-            True if successful, False otherwise.
-        """
+        print(f"[DEBUG] JSONStorage.save_matches called with {len(matches)} match(es). First match_id: {getattr(matches[0], 'match_id', None) if matches else None}")
         try:
             filepath = self._get_daily_filepath() if filename is None else self.base_dir / filename
 
@@ -85,25 +72,22 @@ class JSONStorage:
 
             for match in matches:
                 match_id = match.match_id
-                
+                print(f"[DEBUG] Processing match for JSON output: match_id={match_id}, status={getattr(match, 'status', None)}")
                 if match.status == "complete":
-                    # Add to complete list and remove from skipped if it exists there
                     existing_complete[match_id] = match.to_dict()
                     if match_id in existing_skipped:
                         del existing_skipped[match_id]
-                else:  # Incomplete match
-                    # Add to skipped list only if not already marked as complete
+                else:
                     if match_id not in existing_complete:
                         existing_skipped[match_id] = {
                             "match_id": match_id,
                             "reason": match.skip_reason or "unknown"
                         }
             
-            # Rebuild lists from dictionaries
             final_complete_list = list(existing_complete.values())
             final_skipped_list = list(existing_skipped.values())
+            print(f"[DEBUG] Saving {len(final_complete_list)} complete matches and {len(final_skipped_list)} skipped matches to {filepath}")
 
-            # Prepare the final data structure
             data['matches'] = final_complete_list
             data['metadata'].update({
                 'total_matches': len(final_complete_list),
@@ -117,7 +101,6 @@ class JSONStorage:
                 data['metadata']['file_info'] = {}
             data['metadata']['file_info']['filename'] = filepath.name
             
-            # Write data and then update file size info
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             
@@ -128,9 +111,11 @@ class JSONStorage:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
+            print(f"[DEBUG] JSON file updated for match {matches[0].match_id if matches else None}. Total complete: {len(final_complete_list)}, total skipped: {len(final_skipped_list)}.")
             logger.info(f"JSON file updated for match {matches[0].match_id}. Total complete: {len(final_complete_list)}, total skipped: {len(final_skipped_list)}.")
             return True
         except Exception as e:
+            print(f"[DEBUG] Error saving matches to {filepath}: {str(e)}")
             logger.error(f"Error saving matches to {filepath}: {str(e)}")
             return False
 
