@@ -3,6 +3,10 @@ from ..elements_model import H2HElements
 from src.utils.utils import format_date
 from src.data.verifier.h2h_data_verifier import H2HDataVerifier
 from src.config import MIN_H2H_MATCHES
+from src.core.exceptions import DataNotFoundError, DataParseError, DataValidationError, DataUnavailableWarning
+import logging
+
+logger = logging.getLogger(__name__)
 
 class H2HDataExtractor:
     def __init__(self, loader):

@@ -60,17 +60,22 @@ class FlashscoreScraper:
         self.network_monitor.start_monitoring()
         logger.info("Network monitoring started.")
 
-    def load_initial_data(self):
+    def load_initial_data(self, day="Today"):
         logger.info('--- Loading main page ---')
         self.match_loader = MatchDataLoader(self.driver, selenium_utils=self.selenium_utils)
         self.odds_loader = OddsDataLoader(self.driver, selenium_utils=self.selenium_utils)
         self.match_loader.load_main_page()
         logger.info('Main page loaded.')
         
-        match_ids = self.match_loader.get_today_match_ids()
-        if not match_ids:
-            logger.info("No matches found for today. Checking tomorrow's schedule.")
+        if day == "Tomorrow":
+            logger.info("Loading tomorrow's matches...")
             match_ids = self.match_loader.get_tomorrow_match_ids()
+        else:
+            logger.info("Loading today's matches...")
+            match_ids = self.match_loader.get_today_match_ids()
+            if not match_ids:
+                logger.info("No matches found for today. Checking tomorrow's schedule.")
+                match_ids = self.match_loader.get_tomorrow_match_ids()
         return match_ids
 
     def check_and_get_processed_matches(self):
@@ -200,12 +205,12 @@ class FlashscoreScraper:
         self.network_monitor.stop_monitoring()
         logger.info("Network monitoring stopped.")
 
-    def scrape(self, progress_callback=None):
+    def scrape(self, progress_callback=None, day="Today"):
         self.initialize()
         try:
             def main_scrape():
-                match_ids = self.load_initial_data()
-                logger.info(f'Found {len(match_ids)} scheduled matches.')
+                match_ids = self.load_initial_data(day)
+                logger.info(f'Found {len(match_ids)} scheduled matches for {day.lower()}.')
                 if not match_ids:
                     return
 
@@ -282,7 +287,7 @@ class FlashscoreScraper:
                         logger.warning(f'  - Failed to load/verify match page for {match_id}')
                         continue
 
-                logger.info(f"\n--- Summary: Collected {len(matches)} matches ---")
+                logger.info(f"\n--- Summary: Collected {len(matches)} matches for {day.lower()} ---")
                 for m in matches:
                     FlashscoreScraper.log_match_info(m)
 

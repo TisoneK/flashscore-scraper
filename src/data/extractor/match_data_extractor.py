@@ -27,32 +27,38 @@ class MatchDataExtractor:
         try:
             elements = elements or self._loader.elements
 
+            def normalize(value):
+                if value is None:
+                    return None
+                value = value.strip() if isinstance(value, str) else value
+                return value if value else None
+
             # Extract and verify each field
-            country = elements.country.text.strip() if elements.country and getattr(elements.country, 'text', None) else None
+            country = normalize(elements.country.text) if elements.country and getattr(elements.country, 'text', None) else None
             is_valid, error = self.match_data_verifier.verify_country(country)
             if not is_valid:
                 print(f"Error verifying country: {error}")
                 country = None
 
-            league = elements.league.text.strip() if elements.league and getattr(elements.league, 'text', None) else None
+            league = normalize(elements.league.text) if elements.league and getattr(elements.league, 'text', None) else None
             is_valid, error = self.match_data_verifier.verify_league(league)
             if not is_valid:
                 print(f"Error verifying league: {error}")
                 league = None
 
-            home_team = elements.home_team.text.strip() if elements.home_team and getattr(elements.home_team, 'text', None) else None
+            home_team = normalize(elements.home_team.text) if elements.home_team and getattr(elements.home_team, 'text', None) else None
             is_valid, error = self.match_data_verifier.verify_home_team(home_team)
             if not is_valid:
                 print(f"Error verifying home_team: {error}")
                 home_team = None
 
-            away_team = elements.away_team.text.strip() if elements.away_team and getattr(elements.away_team, 'text', None) else None
+            away_team = normalize(elements.away_team.text) if elements.away_team and getattr(elements.away_team, 'text', None) else None
             is_valid, error = self.match_data_verifier.verify_away_team(away_team)
             if not is_valid:
                 print(f"Error verifying away_team: {error}")
                 away_team = None
 
-            date_time_str = elements.date.text.strip() if elements.date and getattr(elements.date, 'text', None) else None
+            date_time_str = normalize(elements.date.text) if elements.date and getattr(elements.date, 'text', None) else None
             date, time = split_date_time(date_time_str) if date_time_str else (None, None)
 
             is_valid, error = self.match_data_verifier.verify_date(date)

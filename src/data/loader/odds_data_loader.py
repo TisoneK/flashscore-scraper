@@ -7,6 +7,7 @@ from ...core.retry_manager import NetworkRetryManager
 from selenium.webdriver.remote.webdriver import WebDriver
 from ..verifier.odds_data_verifier import OddsDataVerifier
 import logging
+from src.core.exceptions import DataNotFoundError, DataParseError, DataValidationError, DataUnavailableWarning
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,40 @@ class OddsDataLoader:
         home_away_success = self.load_home_away_odds(match_id)
         over_under_success = self.load_over_under_odds(match_id)
         return home_away_success and over_under_success
+
+    def load_odds_data(self, match_id):
+        try:
+            odds = self._extract_odds(match_id)
+            if odds is None:
+                logger.warning(
+                    f"No odds data found for match {match_id}.",
+                    DataUnavailableWarning()
+                )
+                raise DataNotFoundError(f"No odds data found for match {match_id}")
+            required_fields = ["home_odds", "away_odds", "match_total", "over_odds", "under_odds"]
+            if not isinstance(odds, dict):
+                logger.warning(
+                    f"Odds data for match {match_id} could not be parsed as a dict.",
+                    DataUnavailableWarning()
+                )
+                raise DataParseError(f"Odds data for match {match_id} could not be parsed as a dict")
+            missing = [field for field in required_fields if odds.get(field) is None]
+            if missing:
+                logger.warning(
+                    f"Missing odds fields for match {match_id}: {', '.join(missing)}. This is expected for some matches.",
+                    DataUnavailableWarning()
+                )
+                raise DataValidationError(f"Missing odds fields for match {match_id}: {', '.join(missing)}")
+            return {"status": "success", "odds": odds}
+        except (DataNotFoundError, DataParseError, DataValidationError) as e:
+            return {"status": "data_unavailable", "skip_reason": str(e)}
+        except Exception as e:
+            logger.error(f"Unexpected error in odds extraction for {match_id}: {e}")
+            raise DataParseError(f"Unexpected error in odds extraction for {match_id}: {e}")
+
+    def _extract_odds(self, match_id):
+        # ... actual extraction logic ...
+        pass
 
     def _safe_find_element(self, locator: str, value: str, index: Optional[int] = None):
         """Safely find and return a WebElement using selenium_utils with network resilience."""

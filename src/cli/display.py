@@ -27,6 +27,10 @@ class ConsoleDisplay:
         """Show immediate scraping start message."""
         self.console.print("\n[bold yellow]🚀 Starting scraper with current settings...[/bold yellow]")
 
+    def show_scraping_start_with_day(self, day):
+        """Show scraping start message with day information."""
+        self.console.print(f"\n[bold yellow]🚀 Starting scraping for {day.lower()}...[/bold yellow]")
+
     def show_scraping_start(self):
         """Show scraping start message."""
         self.console.print("\n[bold yellow]🚀 Starting scraping process...[/bold yellow]")

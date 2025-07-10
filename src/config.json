@@ -14,8 +14,8 @@
         "disable_javascript": false,
         "disable_css": false,
         "driver_path": null,
-        "chrome_binary_path": "C:\\Users\\PC\\OneDrive\\Documents\\Dev\\flashscore_scraper_1o\\drivers\\windows\\chrome\\138.0.7152.0\\chrome.exe",
-        "chromedriver_path": "C:\\Users\\PC\\OneDrive\\Documents\\Dev\\flashscore_scraper_1o\\drivers\\windows\\chrome\\138.0.7152.0\\chromedriver.exe"
+        "chrome_binary_path": "C:\\Users\\SKY TECH SOLUTIONS\\OneDrive\\Documents\\Dev\\flashscore-scraper\\drivers\\windows\\chrome\\138.0.7152.0\\chrome.exe",
+        "chromedriver_path": "C:\\Users\\SKY TECH SOLUTIONS\\OneDrive\\Documents\\Dev\\flashscore-scraper\\drivers\\windows\\chrome\\138.0.7152.0\\chromedriver.exe"
     },
     "tab": {
         "max_tabs": 1,

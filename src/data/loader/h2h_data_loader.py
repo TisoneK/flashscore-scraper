@@ -7,6 +7,7 @@ from ...core.network_monitor import NetworkMonitor
 from ...core.retry_manager import NetworkRetryManager
 from selenium.webdriver.remote.webdriver import WebDriver
 from ..verifier.h2h_data_verifier import H2HDataVerifier
+from src.core.exceptions import DataNotFoundError, DataParseError, DataValidationError, DataUnavailableWarning
 
 logger = logging.getLogger(__name__)
 

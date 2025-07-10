@@ -322,7 +322,7 @@ class CLIManager:
                 action = self.prompts.ask_main_action()
                 
                 if action == "Start Scraping":
-                    self.start_scraping_immediate()
+                    self.handle_scraping_selection()
                 elif action == "Configure Settings":
                     self.configure_settings()
                 elif action == "View Status":
@@ -339,6 +339,22 @@ class CLIManager:
         except Exception as e:
             self.display.show_error(str(e))
             sys.exit(1)
+
+    def handle_scraping_selection(self):
+        """Handle scraping day selection and start scraping."""
+        # Get user's preferred day from settings
+        default_day = self.user_settings.get('default_day', 'Today')
+        
+        # Ask user for day selection with their default
+        selected_day = self.prompts.ask_scraping_day()
+        
+        # Update user settings if they chose a different day
+        if selected_day != default_day:
+            self.user_settings['default_day'] = selected_day
+            self._save_user_settings(self.user_settings)
+        
+        # Start scraping with the selected day
+        self.start_scraping_with_day(selected_day)
 
     def run_prediction_menu(self):
         """Show the prediction sub-menu and handle user selection."""
@@ -535,6 +551,58 @@ class CLIManager:
             self.colored_display.console.print(f"  [bold]{k}:[/bold] {v}")
         print()
 
+    def start_scraping_with_day(self, day="Today"):
+        """Start scraping with the specified day."""
+        try:
+            # Reset results
+            self.scraping_results = {}
+            self.critical_messages = []
+            
+            # Show scraping start message with day info
+            self.display.show_scraping_start_with_day(day)
+            
+            # Setup logging with capture and noise filtering
+            CONFIG.logging.log_to_console = False
+            setup_logging()
+            
+            # Initialize scraper
+            self.scraper = FlashscoreScraper()
+            
+            # Start scraping with enhanced progress tracking
+            with self.progress.scraping_progress() as progress:
+                task = progress.add_task("Initializing...", total=1)
+                
+                # Start log monitoring in background with noise filtering
+                log_thread = threading.Thread(target=self._monitor_logs, daemon=True)
+                log_thread.start()
+                
+                def progress_callback(current, total):
+                    if current == 1:
+                        # First call - switch from "Initializing..." to "Processing match 1 of X"
+                        progress.update(task, description=f"Processing match {current} of {total}", total=total)
+                    else:
+                        # Update progress
+                        progress.update(task, description=f"Processing match {current} of {total}", completed=current)
+                
+                # Run scraper and capture results with complete output suppression
+                try:
+                    with self._suppress_all_output():
+                        self.scraper.scrape(progress_callback=progress_callback, day=day)
+                    progress.update(task, description="Scraping completed!", completed=progress.tasks[0].total)
+                except Exception as e:
+                    progress.update(task, description="Scraping failed!", completed=progress.tasks[0].total)
+                    raise e
+                
+                # Wait a moment for any final logs
+                time.sleep(0.5)
+            
+            # Show detailed results
+            self.display.show_scraping_results(self.scraping_results, self.critical_messages)
+            
+        except Exception as e:
+            self.display.show_error(f"Scraping failed: {str(e)}")
+            self.logger.error(f"Scraping error: {e}")
+
     def start_scraping_immediate(self):
         """Start scraping immediately with current settings."""
         try:
@@ -723,6 +791,13 @@ class CLIManager:
                         self.init_drivers("chrome")
                 return
             
+            # Handle day selection
+            if 'default_day' in settings:
+                self.user_settings['default_day'] = settings['default_day']
+                self._save_user_settings(self.user_settings)
+                self.display.show_settings_saved()
+                return
+            
             # Update configuration based on user input
             if settings.get('headless') is not None:
                 CONFIG.browser.headless = settings['headless']
@@ -735,11 +810,11 @@ class CLIManager:
             
             # Save configuration
             CONFIG.save()
-            self._save_user_settings(settings)
             self.display.show_settings_saved()
             
         except Exception as e:
-            self.display.show_error(f"Failed to save settings: {str(e)}")
+            self.display.show_error(f"Configuration failed: {str(e)}")
+            self.logger.error(f"Configuration error: {e}")
 
     def _load_user_settings(self):
         """Load user settings from file."""
@@ -945,6 +1020,15 @@ class CLIManager:
         except Exception as e:
             print(f"❌ Error listing installed drivers: {e}")
             return False
+
+    def clear_terminal(self):
+        """Clear the terminal screen for a clean CLI display."""
+        import os
+        os.system('cls' if os.name == 'nt' else 'clear')
+
+    def display_header(self):
+        """Display the standard CLI header after clearing the terminal."""
+        self.colored_display.show_welcome()
 
 def main():
     """Main entry point for the CLI application."""

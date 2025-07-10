@@ -16,6 +16,17 @@ class ScraperPrompts:
             default="Start Scraping"
         ).execute()
 
+    def ask_scraping_day(self):
+        """Ask user for which day to scrape."""
+        return inquirer.select(
+            message="Select day to scrape:",
+            choices=[
+                "Today",
+                "Tomorrow"
+            ],
+            default="Today"
+        ).execute()
+
     def ask_prediction_range(self):
         """Ask user for prediction date range."""
         return inquirer.select(
@@ -40,7 +51,8 @@ class ScraperPrompts:
                 "Browser Settings",
                 "Driver Management", 
                 "Output Settings",
-                "Logging Settings"
+                "Logging Settings",
+                "Day Selection"
             ],
             default="Browser Settings"
         ).execute()
@@ -80,6 +92,14 @@ class ScraperPrompts:
                 message="Log level:",
                 choices=["INFO", "DEBUG", "WARNING", "ERROR"],
                 default="INFO"
+            ).execute()
+            
+        elif category == "Day Selection":
+            # Day selection settings
+            settings['default_day'] = inquirer.select(
+                message="Default day for scraping:",
+                choices=["Today", "Tomorrow"],
+                default="Today"
             ).execute()
         
         return settings 
