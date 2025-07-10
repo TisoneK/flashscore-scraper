@@ -100,7 +100,7 @@ class ChromeDriverManager:
         return str(chrome_path) if chrome_path else None, str(chromedriver_path) if chromedriver_path else None
     
     def get_chrome_options(self) -> Options:
-        """Get Chrome options from config."""
+        """Get Chrome options from config, always including critical stability/sandbox flags."""
         options = Options()
         
         # Get browser config
@@ -116,10 +116,30 @@ class ChromeDriverManager:
         if browser_config.get('headless', False):
             options.add_argument('--headless=new')
         
-        # Add arguments from chrome_options config
+        # Always add critical flags for stability/sandboxing
+        critical_flags = [
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-infobars',
+            '--disable-popup-blocking',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-features=IsolateOrigins,site-per-process',
+        ]
+        for flag in critical_flags:
+            options.add_argument(flag)
+        
+        # Add window size from config if present
+        window_size = chrome_options.get('window_size') or browser_config.get('window_size')
+        if window_size:
+            options.add_argument(f'--window-size={window_size}')
+        
+        # Add any extra arguments from config (user can add more, but not remove essentials)
         arguments = chrome_options.get('arguments', [])
         for arg in arguments:
-            options.add_argument(arg)
+            if arg not in critical_flags:
+                options.add_argument(arg)
         
         # Add experimental options from config
         experimental_options = chrome_options.get('experimental_options', {})
