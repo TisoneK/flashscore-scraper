@@ -122,6 +122,7 @@ class ScraperControl:
         """Run the scraper in background thread"""
         try:
             # Setup logging
+            # TODO: Pass the correct log_file_path for dual logging if available
             setup_logging()
             
             # Initialize scraper

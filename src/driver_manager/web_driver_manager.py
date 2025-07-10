@@ -17,12 +17,12 @@ logger = logging.getLogger(__name__)
 class WebDriverManager:
     """Manages the WebDriver instance and its lifecycle."""
     
-    def __init__(self):
+    def __init__(self, chrome_log_path: str = None):
         """Initialize the WebDriver manager."""
         self.driver = None
         self._active = False
         self.logger = logging.getLogger(__name__)
-        self.chrome_driver = ChromeDriverManager(asdict(CONFIG))
+        self.chrome_driver = ChromeDriverManager(asdict(CONFIG), chrome_log_path=chrome_log_path)
         self.firefox_driver = FirefoxDriver()
         
     def initialize(self) -> None:

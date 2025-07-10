@@ -2,6 +2,7 @@ import sys
 import os
 import time
 import logging
+import datetime
 print("[DEBUG] Starting src/scraper.py...")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
@@ -20,7 +21,13 @@ from src.storage.json_storage import JSONStorage
 from src.core.network_monitor import NetworkMonitor
 from src.core.retry_manager import NetworkRetryManager
 from src.utils import setup_logging
-setup_logging()
+from datetime import datetime
+log_dir = CONFIG.logging.log_directory
+os.makedirs(log_dir, exist_ok=True)
+timestamp = datetime.now().strftime(CONFIG.logging.log_filename_date_format)
+scraper_log_path = os.path.join(log_dir, f"scraper_{timestamp}.log")
+chrome_log_path = os.path.join(log_dir, f"chrome_{timestamp}.log")
+setup_logging(scraper_log_path)
 
 # Test logging during scraper initialization
 logger = logging.getLogger(__name__)
@@ -33,7 +40,7 @@ logger = logging.getLogger(__name__)
 class FlashscoreScraper:
     def __init__(self):
         print("[DEBUG] FlashscoreScraper.__init__ called")
-        self.driver_manager = WebDriverManager()
+        self.driver_manager = WebDriverManager(chrome_log_path=chrome_log_path)
         self.driver = None
         self.selenium_utils = None
         self.url_verifier = None

@@ -11,8 +11,8 @@ from ..config import CONFIG, DEFAULT_OUTPUT_FILE
 
 logger = logging.getLogger(__name__)
 
-def setup_logging() -> None:
-    """Configure logging for the application."""
+def setup_logging(log_file_path: str = None) -> str:
+    """Configure logging for the application. Returns the log file path used."""
     logger.debug("setup_logging() called")
     
     # Create logs directory if it doesn't exist
@@ -21,8 +21,11 @@ def setup_logging() -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     
     # Generate log filename with date
-    log_filename = f"scraper_{datetime.now().strftime(CONFIG.logging.log_filename_date_format)}.log"
-    log_file_path = log_dir / log_filename
+    if log_file_path is None:
+        log_filename = f"scraper_{datetime.now().strftime(CONFIG.logging.log_filename_date_format)}.log"
+        log_file_path = log_dir / log_filename
+    else:
+        log_file_path = Path(log_file_path)
     logger.debug(f"Log file path: {log_file_path}")
     logger.debug(f"Log level: {CONFIG.logging.log_level}")
     logger.debug(f"Log format: {CONFIG.logging.log_format}")
@@ -61,6 +64,7 @@ def setup_logging() -> None:
         logging.getLogger(module).setLevel(logging.WARNING)
     
     logger.debug("setup_logging() completed")
+    return str(log_file_path)
 
 def save_matches_to_csv(matches: List[MatchModel], filename: str = DEFAULT_OUTPUT_FILE) -> None:
     """Save a list of matches to a CSV file.

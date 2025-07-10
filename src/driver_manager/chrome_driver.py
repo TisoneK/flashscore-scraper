@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 class ChromeDriverManager:
     """Manages Chrome WebDriver initialization and configuration."""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], chrome_log_path: str = None):
         self.config = config
+        self.chrome_log_path = chrome_log_path
         self.project_root = Path(__file__).parent.parent.parent
         self.drivers_dir = self.project_root / "drivers"
         self.system = platform.system().lower()
@@ -121,6 +122,7 @@ class ChromeDriverManager:
             '--no-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
+            '--disable-software-rasterizer',
             '--disable-extensions',
             '--disable-infobars',
             '--disable-popup-blocking',
@@ -154,28 +156,48 @@ class ChromeDriverManager:
         return options
     
     def create_driver(self) -> webdriver.Chrome:
-        """Create and configure Chrome WebDriver."""
+        """Create and configure Chrome WebDriver, redirecting all Chrome/ChromeDriver logs to the chrome log file."""
         try:
             # Get ChromeDriver path
             _, chromedriver_path = self.find_latest_driver_paths()
-            
             if not chromedriver_path:
                 raise WebDriverException("ChromeDriver not found. Run 'fss --init chrome' to install drivers.")
-            
-            # Create service
-            service = Service(executable_path=chromedriver_path)
-            
+
+            # Use the chrome_log_path passed to the manager
+            log_file_path = self.chrome_log_path
+            if not log_file_path:
+                raise Exception("chrome_log_path must be provided to ChromeDriverManager for dual logging.")
+
+            # Create service, redirecting ChromeDriver logs to the chrome log file
+            service = Service(executable_path=chromedriver_path, log_path=log_file_path)
+
+            # Monkey-patch Service.start to redirect ChromeDriver and Chrome browser stderr to chrome log file
+            orig_start = service.start
+            def patched_start(*args, **kwargs):
+                import subprocess
+                log_file = open(log_file_path, 'a', encoding='utf-8')
+                orig_popen = subprocess.Popen
+                def patched_popen(*popen_args, **popen_kwargs):
+                    popen_kwargs['stderr'] = log_file
+                    return orig_popen(*popen_args, **popen_kwargs)
+                subprocess.Popen, orig_popen_bak = patched_popen, subprocess.Popen
+                try:
+                    return orig_start(*args, **kwargs)
+                finally:
+                    subprocess.Popen = orig_popen_bak
+            service.start = patched_start
+
             # Get Chrome options
             options = self.get_chrome_options()
-            
+
             # Create driver
             driver = webdriver.Chrome(service=service, options=options)
-            
+
             logger.info(f"✅ Chrome WebDriver initialized successfully")
             logger.info(f"📁 ChromeDriver path: {chromedriver_path}")
-            
+
             return driver
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to create Chrome WebDriver: {e}")
             raise

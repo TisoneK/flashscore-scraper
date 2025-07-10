@@ -575,7 +575,11 @@ class CLIManager:
             
             # Setup logging with capture and noise filtering
             CONFIG.logging.log_to_console = False
-            setup_logging()
+            log_dir = CONFIG.logging.log_directory
+            os.makedirs(log_dir, exist_ok=True)
+            timestamp = datetime.now().strftime(CONFIG.logging.log_filename_date_format)
+            scraper_log_path = os.path.join(log_dir, f"scraper_{timestamp}.log")
+            setup_logging(scraper_log_path)
             
             # Initialize scraper
             self.scraper = FlashscoreScraper()
@@ -627,7 +631,11 @@ class CLIManager:
             
             # Setup logging with capture and noise filtering
             CONFIG.logging.log_to_console = False
-            setup_logging()
+            log_dir = CONFIG.logging.log_directory
+            os.makedirs(log_dir, exist_ok=True)
+            timestamp = datetime.now().strftime(CONFIG.logging.log_filename_date_format)
+            scraper_log_path = os.path.join(log_dir, f"scraper_{timestamp}.log")
+            setup_logging(scraper_log_path)
             
             # Initialize scraper
             self.scraper = FlashscoreScraper()
@@ -754,7 +762,7 @@ class CLIManager:
                 self.scraping_results['incomplete_matches'] = self.scraping_results.get('incomplete_matches', 0) + 1
             # Capture today's date for daily statistics
             if 'Created At:' in line:
-                today = datetime.datetime.now().strftime('%Y-%m-%d')
+                today = datetime.now().strftime('%Y-%m-%d')
                 if today in line:
                     self.scraping_results['matches_collected_today'] = self.scraping_results.get('matches_collected_today', 0) + 1
             # Capture skipped match reasons for better statistics
