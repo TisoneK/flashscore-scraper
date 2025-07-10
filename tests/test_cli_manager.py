@@ -12,9 +12,9 @@ class TestCLIManager(unittest.TestCase):
 
     def test_display_header(self):
         cli = CLIManager()
-        cli.colored_display = MagicMock()
-        cli.display_header()
-        cli.colored_display.show_welcome.assert_called_once()
+        cli.display = MagicMock()
+        cli.display.show_main_menu_header()
+        cli.display.show_main_menu_header.assert_called_once()
 
     def test_handle_scraping_selection(self):
         """Test the new day selection functionality."""

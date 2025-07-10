@@ -312,27 +312,11 @@ class CLIManager:
         except Exception as e:
             print(f"❌ Error launching UI: {e}")
             sys.exit(1)
-    
+
     def run_interactive_cli(self):
         """Run the interactive CLI interface."""
         try:
-            self.colored_display.show_welcome()
-            
-            while True:
-                action = self.prompts.ask_main_action()
-                
-                if action == "Start Scraping":
-                    self.handle_scraping_selection()
-                elif action == "Configure Settings":
-                    self.configure_settings()
-                elif action == "View Status":
-                    self.view_status()
-                elif action == "Prediction":
-                    self.run_prediction_menu()
-                elif action == "Exit":
-                    self.colored_display.show_goodbye()
-                    break
-                    
+            self.show_main_menu()
         except KeyboardInterrupt:
             self.display.show_interrupted()
             sys.exit(130)
@@ -340,28 +324,56 @@ class CLIManager:
             self.display.show_error(str(e))
             sys.exit(1)
 
+    def show_main_menu(self):
+        while True:
+            self._clear_and_header('main')
+            action = self.prompts.ask_main_action()
+            
+            if action == "Start Scraping":
+                self.handle_scraping_selection()
+            elif action == "Configure Settings":
+                self.configure_settings()
+            elif action == "View Status":
+                self.view_status()
+            elif action == "Prediction":
+                self.run_prediction_menu()
+            elif action == "Exit":
+                self.colored_display.show_goodbye()
+                break
+
+    def _clear_and_header(self, context):
+        if self.user_settings.get('clear_terminal', True):
+            self.clear_terminal()
+        if context == 'main':
+            self.display.show_main_menu_header()
+        elif context == 'scraping':
+            self.display.show_scraping_header()
+        elif context == 'settings':
+            self.display.show_settings_header()
+        elif context == 'prediction':
+            self.display.show_prediction_header()
+        elif context == 'status':
+            self.display.show_status_header()
+
     def handle_scraping_selection(self):
-        """Handle scraping day selection and start scraping."""
-        # Get user's preferred day from settings
+        self._clear_and_header('scraping')
         default_day = self.user_settings.get('default_day', 'Today')
-        
-        # Ask user for day selection with their default
         selected_day = self.prompts.ask_scraping_day()
-        
-        # Update user settings if they chose a different day
         if selected_day != default_day:
             self.user_settings['default_day'] = selected_day
             self._save_user_settings(self.user_settings)
-        
-        # Start scraping with the selected day
         self.start_scraping_with_day(selected_day)
+        self.prompts.ask_back()
+        # Do NOT clear after scraping; let user see results
+        # Return to main menu on next loop
 
     def run_prediction_menu(self):
-        """Show the prediction sub-menu and handle user selection."""
         while True:
+            self._clear_and_header('prediction')
             range_choice = self.prompts.ask_prediction_range()
             if range_choice == "Back":
-                return
+                # On back, break to return to main menu (which will clear)
+                break
             self.handle_prediction_range(range_choice)
 
     def handle_prediction_range(self, range_choice):
@@ -769,11 +781,9 @@ class CLIManager:
         return int(numbers[0]) if numbers else 0
 
     def configure_settings(self):
-        """Configure scraper settings interactively."""
+        self._clear_and_header('settings')
+        settings = self.prompts.ask_settings()
         try:
-            self.display.show_configuration_start()
-            settings = self.prompts.ask_settings()
-            
             # Handle driver management actions
             if 'driver_action' in settings:
                 driver_action = settings['driver_action']
@@ -789,6 +799,7 @@ class CLIManager:
                         self.init_drivers("chrome", version)
                     else:
                         self.init_drivers("chrome")
+                self.prompts.ask_back()
                 return
             
             # Handle day selection
@@ -796,6 +807,15 @@ class CLIManager:
                 self.user_settings['default_day'] = settings['default_day']
                 self._save_user_settings(self.user_settings)
                 self.display.show_settings_saved()
+                self.prompts.ask_back()
+                return
+            
+            # Handle terminal clearing setting
+            if 'clear_terminal' in settings:
+                self.user_settings['clear_terminal'] = settings['clear_terminal']
+                self._save_user_settings(self.user_settings)
+                self.display.show_settings_saved()
+                self.prompts.ask_back()
                 return
             
             # Update configuration based on user input
@@ -811,10 +831,14 @@ class CLIManager:
             # Save configuration
             CONFIG.save()
             self.display.show_settings_saved()
+            self.prompts.ask_back()
             
         except Exception as e:
             self.display.show_error(f"Configuration failed: {str(e)}")
             self.logger.error(f"Configuration error: {e}")
+            self.prompts.ask_back()
+        # Do NOT clear after settings; let user see confirmation
+        # Return to main menu on next loop
 
     def _load_user_settings(self):
         """Load user settings from file."""
@@ -876,7 +900,7 @@ class CLIManager:
             null_stream.close()
 
     def view_status(self):
-        """View current scraper status and statistics."""
+        self._clear_and_header('status')
         try:
             # Check output directory
             output_dir = Path(CONFIG.output.directory)
@@ -888,6 +912,9 @@ class CLIManager:
                 
         except Exception as e:
             self.display.show_error(f"Failed to get status: {str(e)}")
+        self.prompts.ask_back()
+        # Do NOT clear after status; let user see output
+        # Return to main menu on next loop
 
     def init_drivers(self, driver_type: str = "chrome", version: Optional[str] = None) -> bool:
         """Initialize drivers for the scraper."""
@@ -1025,10 +1052,6 @@ class CLIManager:
         """Clear the terminal screen for a clean CLI display."""
         import os
         os.system('cls' if os.name == 'nt' else 'clear')
-
-    def display_header(self):
-        """Display the standard CLI header after clearing the terminal."""
-        self.colored_display.show_welcome()
 
 def main():
     """Main entry point for the CLI application."""

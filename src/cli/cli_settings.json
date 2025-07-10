@@ -1,3 +1,4 @@
 {
-  "default_day": "Tomorrow"
+  "default_day": "Today",
+  "clear_terminal": true
 }

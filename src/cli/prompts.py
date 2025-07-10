@@ -52,7 +52,8 @@ class ScraperPrompts:
                 "Driver Management", 
                 "Output Settings",
                 "Logging Settings",
-                "Day Selection"
+                "Day Selection",
+                "Terminal Clearing"
             ],
             default="Browser Settings"
         ).execute()
@@ -100,6 +101,13 @@ class ScraperPrompts:
                 message="Default day for scraping:",
                 choices=["Today", "Tomorrow"],
                 default="Today"
+            ).execute()
+        
+        elif category == "Terminal Clearing":
+            # Terminal clearing settings
+            settings['clear_terminal'] = inquirer.confirm(
+                message="Clear terminal before showing main menu?",
+                default=True
             ).execute()
         
         return settings 
@@ -159,4 +167,12 @@ class ScraperPrompts:
                 "Back"
             ],
             default="View Details/Export"
+        ).execute() 
+
+    def ask_back(self):
+        """Prompt user with a single Back option."""
+        return inquirer.select(
+            message="Navigation:",
+            choices=["Back"],
+            default="Back"
         ).execute() 

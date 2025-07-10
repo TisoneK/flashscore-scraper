@@ -23,6 +23,42 @@ class ConsoleDisplay:
         """
         self.console.print(Panel(welcome_text, box=box.ROUNDED, expand=False))
 
+    def show_main_menu_header(self):
+        """Show main menu header."""
+        self.show_welcome()
+
+    def show_settings_header(self):
+        """Show settings menu header."""
+        settings_text = """
+[bold blue]⚙️  Settings Configuration[/bold blue]
+[dim]Configure your scraper settings and preferences[/dim]
+        """
+        self.console.print(Panel(settings_text, box=box.ROUNDED, expand=False))
+
+    def show_prediction_header(self):
+        """Show prediction menu header."""
+        prediction_text = """
+[bold purple]🔮 Match Predictions[/bold purple]
+[dim]Analyze match data and generate predictions[/dim]
+        """
+        self.console.print(Panel(prediction_text, box=box.ROUNDED, expand=False))
+
+    def show_status_header(self):
+        """Show status page header."""
+        status_text = """
+[bold yellow]📊 Scraper Status[/bold yellow]
+[dim]View current scraper status and statistics[/dim]
+        """
+        self.console.print(Panel(status_text, box=box.ROUNDED, expand=False))
+
+    def show_scraping_header(self):
+        """Show scraping page header."""
+        scraping_text = """
+[bold green]🚀 Scraping Mode[/bold green]
+[dim]Extract basketball match data from Flashscore[/dim]
+        """
+        self.console.print(Panel(scraping_text, box=box.ROUNDED, expand=False))
+
     def show_scraping_start_immediate(self):
         """Show immediate scraping start message."""
         self.console.print("\n[bold yellow]🚀 Starting scraper with current settings...[/bold yellow]")
