@@ -372,7 +372,7 @@ class CLIManager:
             self._clear_and_header('prediction')
             range_choice = self.prompts.ask_prediction_range()
             if range_choice == "Back":
-                # On back, break to return to main menu (which will clear)
+                # Return to main menu (will clear and show header in next loop)
                 break
             self.handle_prediction_range(range_choice)
 
@@ -414,8 +414,19 @@ class CLIManager:
                 total_matches = pred.total_matches
                 ratio = f"{matches_above}/{total_matches}"
                 
+                # Format date properly
+                date_str = match.date if match.date else "N/A"
+                time_str = match.time if match.time else ""
+                date_time = f"{date_str} ({time_str})" if time_str else date_str
+                
+                # Format country and league
+                country = match.country if match.country else "N/A"
+                league = match.league if match.league else "N/A"
+                
                 summary = {
-                    "date": match.date,
+                    "date": date_time,
+                    "country": country,
+                    "league": league,
                     "home": match.home_team,
                     "away": match.away_team,
                     "line": match.odds.match_total if match.odds else 0,
@@ -435,28 +446,55 @@ class CLIManager:
             self.colored_display.show_warning_message("No valid predictions for the selected range.")
             return
         
-        # Show prediction header
-        self.colored_display.show_prediction_header()
+        # Sort results by time by default
+        results = self.sort_results_by_time(results)
         
-        # Create and display colored table
-        table = self.colored_display.create_prediction_table(results)
-        self.colored_display.console.print(table)
+        # Separate actionable predictions (OVER/UNDER) from NO_BET predictions
+        actionable_results = [r for r in results if r['prediction'] in ['OVER', 'UNDER']]
+        no_bet_results = [r for r in results if r['prediction'] == 'NO_BET']
+        
+        # Clear console and show prediction header
+        self._clear_and_header('prediction')
+        
+        # Display dual tables - actionable predictions first, then NO_BET predictions
+        self.colored_display.show_dual_prediction_tables(actionable_results, no_bet_results)
         print()
 
-        # Ask if user wants to filter
+        # Ask if user wants to filter, sort, or proceed
         filter_choice = self.prompts.ask_filter_choice()
         if filter_choice == "Back":
+            # Return to prediction menu (will clear and show header in next loop)
             return
         elif filter_choice == "Filter Results":
             # Apply filters
-            filtered_results = self.apply_filters(results, match_id_map)
+            filtered_results = self.apply_prediction_filters(results, match_id_map)
             if filtered_results:
+                # Re-separate filtered results
+                filtered_actionable = [r for r in filtered_results if r['prediction'] in ['OVER', 'UNDER']]
+                filtered_no_bet = [r for r in filtered_results if r['prediction'] == 'NO_BET']
+                
+                # Clear console and show prediction header
+                self._clear_and_header('prediction')
+                
                 # Re-display filtered results
-                self.colored_display.show_prediction_header()
-                table = self.colored_display.create_prediction_table(filtered_results)
-                self.colored_display.console.print(table)
+                self.colored_display.show_dual_prediction_tables(filtered_actionable, filtered_no_bet)
                 print()
                 results = filtered_results  # Update results for post-actions
+        elif filter_choice == "Sort Results":
+            # Sort results
+            sorted_results = self.sort_prediction_results(results)
+            if sorted_results:
+                # Re-separate sorted results
+                sorted_actionable = [r for r in sorted_results if r['prediction'] in ['OVER', 'UNDER']]
+                sorted_no_bet = [r for r in sorted_results if r['prediction'] == 'NO_BET']
+                
+                # Clear console and show prediction header
+                self._clear_and_header('prediction')
+                
+                # Re-display sorted results
+                self.colored_display.show_dual_prediction_tables(sorted_actionable, sorted_no_bet)
+                print()
+                results = sorted_results  # Update results for post-actions
 
         # Post-summary actions
         match_choices = [f"{r['date']} | {r['home']} vs {r['away']} | {r['match_id']}" for r in results]
@@ -530,6 +568,147 @@ class CLIManager:
                 return []
 
         return results
+
+    def apply_prediction_filters(self, results, match_id_map):
+        """Apply comprehensive prediction filters."""
+        filter_choice = self.prompts.ask_prediction_filter()
+        
+        if filter_choice == "Back":
+            return results
+            
+        filtered_results = []
+        
+        for r in results:
+            include = True
+            
+            if filter_choice == "OVER predictions only":
+                include = r['prediction'] == 'OVER'
+            elif filter_choice == "UNDER predictions only":
+                include = r['prediction'] == 'UNDER'
+            elif filter_choice == "NO_BET predictions only":
+                include = r['prediction'] == 'NO_BET'
+            elif filter_choice == "HIGH confidence only":
+                include = r['confidence'] == 'HIGH'
+            elif filter_choice == "MEDIUM confidence only":
+                include = r['confidence'] == 'MEDIUM'
+            elif filter_choice == "LOW confidence only":
+                include = r['confidence'] == 'LOW'
+            elif filter_choice == "HOME_TEAM winners only":
+                include = r['winner'] == 'HOME_TEAM'
+            elif filter_choice == "AWAY_TEAM winners only":
+                include = r['winner'] == 'AWAY_TEAM'
+            elif filter_choice == "NO_BET winners only":
+                include = r['winner'] == 'NO_BET'
+            elif filter_choice == "Custom filter":
+                custom_filter = self.prompts.ask_custom_filter()
+                include = self._apply_custom_filter(r, custom_filter, match_id_map)
+            
+            if include:
+                filtered_results.append(r)
+        
+        if not filtered_results:
+            self.colored_display.show_warning_message(f"No matches found for filter: {filter_choice}")
+            return []
+            
+        return filtered_results
+
+    def _apply_custom_filter(self, result, custom_filter, match_id_map):
+        """Apply custom filter to a single result."""
+        if custom_filter['type'] == 'league':
+            match = match_id_map[result['match_id']]
+            return custom_filter['value'].lower() in match.league.lower()
+        elif custom_filter['type'] == 'team':
+            return (custom_filter['value'].lower() in result['home'].lower() or 
+                   custom_filter['value'].lower() in result['away'].lower())
+        elif custom_filter['type'] == 'date_range':
+            # Parse date from result['date'] format "12.07.2025 (12:00)"
+            try:
+                date_str = result['date'].split(' (')[0]  # Extract "12.07.2025"
+                from datetime import datetime
+                result_date = datetime.strptime(date_str, '%d.%m.%Y')
+                start_date = datetime.strptime(custom_filter['start'], '%d.%m.%Y')
+                end_date = datetime.strptime(custom_filter['end'], '%d.%m.%Y')
+                return start_date <= result_date <= end_date
+            except:
+                return False
+        elif custom_filter['type'] == 'rate_range':
+            try:
+                avg_rate = float(result['avg_rate'])
+                min_rate = float(custom_filter['min'])
+                max_rate = float(custom_filter['max'])
+                return min_rate <= avg_rate <= max_rate
+            except:
+                return False
+        elif custom_filter['type'] == 'line_range':
+            try:
+                line = float(result['line'])
+                min_line = float(custom_filter['min'])
+                max_line = float(custom_filter['max'])
+                return min_line <= line <= max_line
+            except:
+                return False
+        return True
+
+    def sort_prediction_results(self, results):
+        """Sort prediction results based on user choice."""
+        sort_choice = self.prompts.ask_prediction_sort()
+        
+        if sort_choice == "No Sorting":
+            return results
+            
+        # Create a copy to avoid modifying original
+        sorted_results = results.copy()
+        
+        if sort_choice == "Time (Earliest First)":
+            sorted_results = self.sort_results_by_time(sorted_results)
+        elif sort_choice == "Time (Latest First)":
+            sorted_results = self.sort_results_by_time(sorted_results)
+            sorted_results.reverse()  # Reverse to get latest first
+        elif sort_choice == "Date (Newest First)":
+            sorted_results.sort(key=lambda x: x['date'], reverse=True)
+        elif sort_choice == "Date (Oldest First)":
+            sorted_results.sort(key=lambda x: x['date'])
+        elif sort_choice == "Confidence (High to Low)":
+            confidence_order = {'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
+            sorted_results.sort(key=lambda x: confidence_order.get(x['confidence'], 0), reverse=True)
+        elif sort_choice == "Confidence (Low to High)":
+            confidence_order = {'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
+            sorted_results.sort(key=lambda x: confidence_order.get(x['confidence'], 0))
+        elif sort_choice == "Prediction (OVER/UNDER/NO_BET)":
+            prediction_order = {'OVER': 3, 'UNDER': 2, 'NO_BET': 1}
+            sorted_results.sort(key=lambda x: prediction_order.get(x['prediction'], 0), reverse=True)
+        elif sort_choice == "Winner (HOME/AWAY/NO_BET)":
+            winner_order = {'HOME_TEAM': 3, 'AWAY_TEAM': 2, 'NO_BET': 1}
+            sorted_results.sort(key=lambda x: winner_order.get(x['winner'], 0), reverse=True)
+        elif sort_choice == "Average Rate (High to Low)":
+            sorted_results.sort(key=lambda x: float(x['avg_rate']), reverse=True)
+        elif sort_choice == "Average Rate (Low to High)":
+            sorted_results.sort(key=lambda x: float(x['avg_rate']))
+        elif sort_choice == "Line (High to Low)":
+            sorted_results.sort(key=lambda x: float(x['line']), reverse=True)
+        elif sort_choice == "Line (Low to High)":
+            sorted_results.sort(key=lambda x: float(x['line']))
+            
+        return sorted_results
+
+    def sort_results_by_time(self, results):
+        """Sort results by time (earliest first)."""
+        def extract_time(result):
+            """Extract time from date string like '12.07.2025 (12:00)'."""
+            try:
+                # Extract time part from "12.07.2025 (12:00)" -> "12:00"
+                time_part = result['date'].split(' (')[1].rstrip(')')
+                # Convert "12:00" to minutes for sorting
+                hours, minutes = map(int, time_part.split(':'))
+                return hours * 60 + minutes
+            except (IndexError, ValueError):
+                # If time parsing fails, return 0 (will sort to beginning)
+                return 0
+        
+        # Create a copy to avoid modifying original
+        sorted_results = results.copy()
+        sorted_results.sort(key=extract_time)
+        return sorted_results
 
     def display_prediction_details(self, match, pred):
         """Display detailed prediction information with colors."""

@@ -163,11 +163,85 @@ class ScraperPrompts:
             message="What would you like to do?",
             choices=[
                 "Filter Results",
+                "Sort Results",
                 "View Details/Export",
                 "Back"
             ],
             default="View Details/Export"
-        ).execute() 
+        ).execute()
+
+    def ask_prediction_sort(self):
+        """Ask user how to sort prediction results."""
+        return inquirer.select(
+            message="Sort predictions by:",
+            choices=[
+                "Time (Earliest First)",
+                "Time (Latest First)",
+                "Date (Newest First)",
+                "Date (Oldest First)",
+                "Confidence (High to Low)",
+                "Confidence (Low to High)",
+                "Prediction (OVER/UNDER/NO_BET)",
+                "Winner (HOME/AWAY/NO_BET)",
+                "Average Rate (High to Low)",
+                "Average Rate (Low to High)",
+                "Line (High to Low)",
+                "Line (Low to High)",
+                "No Sorting"
+            ],
+            default="Time (Earliest First)"
+        ).execute()
+
+    def ask_prediction_filter(self):
+        """Ask user to filter prediction results."""
+        return inquirer.select(
+            message="Filter predictions by:",
+            choices=[
+                "All Predictions",
+                "OVER predictions only",
+                "UNDER predictions only", 
+                "NO_BET predictions only",
+                "HIGH confidence only",
+                "MEDIUM confidence only",
+                "LOW confidence only",
+                "HOME_TEAM winners only",
+                "AWAY_TEAM winners only",
+                "NO_BET winners only",
+                "Custom filter"
+            ],
+            default="All Predictions"
+        ).execute()
+
+    def ask_custom_filter(self):
+        """Ask user for custom filter criteria."""
+        filter_type = inquirer.select(
+            message="Custom filter by:",
+            choices=[
+                "League",
+                "Team",
+                "Date Range",
+                "Rate Range",
+                "Line Range"
+            ],
+            default="League"
+        ).execute()
+        
+        if filter_type == "League":
+            return {"type": "league", "value": inquirer.text(message="Enter league name:").execute()}
+        elif filter_type == "Team":
+            return {"type": "team", "value": inquirer.text(message="Enter team name:").execute()}
+        elif filter_type == "Date Range":
+            start_date = inquirer.text(message="Start date (dd.mm.yyyy):").execute()
+            end_date = inquirer.text(message="End date (dd.mm.yyyy):").execute()
+            return {"type": "date_range", "start": start_date, "end": end_date}
+        elif filter_type == "Rate Range":
+            min_rate = inquirer.text(message="Minimum rate:").execute()
+            max_rate = inquirer.text(message="Maximum rate:").execute()
+            return {"type": "rate_range", "min": min_rate, "max": max_rate}
+        elif filter_type == "Line Range":
+            min_line = inquirer.text(message="Minimum line:").execute()
+            max_line = inquirer.text(message="Maximum line:").execute()
+            return {"type": "line_range", "min": min_line, "max": max_line} 
 
     def ask_back(self):
         """Prompt user with a single Back option."""

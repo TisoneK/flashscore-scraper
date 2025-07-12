@@ -1,163 +1,135 @@
 # Prediction Table Example
 
-## Enhanced ScoreWise Algorithm Results
+This document shows the format and structure of the prediction results table displayed in the CLI.
 
-This document shows an example of how the prediction table would look with the enhanced ScoreWise algorithm that includes team winner predictions and improved confidence logic.
+## Table Structure
 
----
+The prediction system now displays results in **two separate tables** for better clarity:
 
-## Example Prediction Table
+### 1. Actionable Predictions Table (OVER/UNDER)
+- **Purpose**: Shows predictions you can act on immediately
+- **Color**: Green header with green/red prediction colors
+- **Contains**: Only OVER and UNDER predictions
 
+### 2. NO_BET Predictions Table (Team Winner Analysis)
+- **Purpose**: Shows predictions where you should check team winners instead
+- **Color**: Yellow header with yellow prediction colors
+- **Contains**: Only NO_BET predictions with team winner suggestions
+
+## Table Format
+
+Both tables use the same column structure but with different styling:
+
+| Column | Description | Example | Color |
+|--------|-------------|---------|-------|
+| NO. | Row number | 1, 2, 3... | Cyan |
+| MATCH_ID | Unique match identifier | 12345678 | Cyan |
+| DATE/TIME | Match date and time | 15.01.2025 (20:30) | Cyan |
+| COUNTRY/LEAGUE | Country and league name | Spain<br>La Liga | White |
+| HOME | Home team name | Real Madrid | White |
+| AWAY | Away team name | Barcelona | White |
+| LINE | Bookmaker total line | 185.5 | Yellow |
+| AVG | Average H2H total | 182.3 | Green |
+| RATIO | Over/Under ratio | 3/5 | Blue |
+| PRED. | Prediction recommendation | OVER/UNDER/NO_BET | Green/Red/Yellow |
+| WINNER | Team winner prediction | HOME_TEAM/AWAY_TEAM/NO_BET | Green/Red/Yellow |
+| CONF. | Confidence level | HIGH/MEDIUM/LOW | Bright Green/Yellow/Red |
+| AVGRATE | Average rate calculation | +12.45 | Green |
+
+## Example Display
+
+### Actionable Predictions Table
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                            Prediction Results                                                        │
-├─────────────┬──────────────┬──────────────┬──────┬──────┬────────┬──────────┬──────────┬──────────┬──────────┬──────────┤
-│ Date/Time   │ Home         │ Away         │ Line │ AVG  │ RATIO  │ Prediction│ Winner   │ Conf.    │ AvgRate  │ Match ID │
-├─────────────┼──────────────┼──────────────┼──────┼──────┼────────┼──────────┼──────────┼──────────┼──────────┼──────────┤
-│ 15/01/2024  │ Lakers       │ Warriors     │ 225  │ 237  │ 5/6    │ OVER     │ HOME_TEAM│ HIGH     │ +12.5    │ LAK_001  │
-│ (14:00)     │              │              │      │      │        │          │          │          │          │          │
-├─────────────┼──────────────┼──────────────┼──────┼──────┼────────┼──────────┼──────────┼──────────┼──────────┼──────────┤
-│ 15/01/2024  │ Celtics      │ Heat         │ 218  │ 207  │ 4/6    │ UNDER    │ AWAY_TEAM│ HIGH     │ -11.2    │ CEL_002  │
-│ (16:30)     │              │              │      │      │        │          │          │          │          │          │
-├─────────────┼──────────────┼──────────────┼──────┼──────┼────────┼──────────┼──────────┼──────────┼──────────┼──────────┤
-│ 15/01/2024  │ Bulls        │ Nets         │ 212  │ 216  │ 3/6    │ NO_BET   │ NO_BET   │ LOW      │ +3.8     │ BUL_003  │
-│ (19:00)     │              │              │      │      │        │          │          │          │          │          │
-├─────────────┼──────────────┼──────────────┼──────┼──────┼────────┼──────────┼──────────┼──────────┼──────────┼──────────┤
-│ 15/01/2024  │ Suns         │ Clippers     │ 220  │ 229  │ 4/6    │ OVER     │ HOME_TEAM│ MEDIUM   │ +9.3     │ SUN_004  │
-│ (20:30)     │              │              │      │      │        │          │          │          │          │          │
-├─────────────┼──────────────┼──────────────┼──────┼──────┼────────┼──────────┼──────────┼──────────┼──────────┼──────────┤
-│ 15/01/2024  │ Nuggets      │ Jazz         │ 215  │ 196  │ 5/6    │ UNDER    │ NO_BET   │ LOW      │ -18.7    │ NUG_005  │
-│ (22:00)     │              │              │      │      │        │          │          │          │          │          │
-├─────────────┼──────────────┼──────────────┼──────┼──────┼────────┼──────────┼──────────┼──────────┼──────────┼──────────┤
-│ 15/01/2024  │ Bucks        │ 76ers        │ 222  │ 230  │ 4/6    │ OVER     │ AWAY_TEAM│ MEDIUM   │ +8.1     │ BUC_006  │
-│ (23:30)     │              │              │      │      │        │          │          │          │          │          │
-├─────────────┼──────────────┼──────────────┼──────┼──────┼────────┼──────────┼──────────┼──────────┼──────────┼──────────┤
-│ 15/01/2024  │ Mavericks    │ Rockets      │ 210  │ 212  │ 3/6    │ NO_BET   │ HOME_TEAM│ LOW      │ +2.4     │ MAV_007  │
-│ (01:00)     │              │              │      │      │        │          │          │          │          │          │
-├─────────────┼──────────────┼──────────────┼──────┼──────┼────────┼──────────┼──────────┼──────────┼──────────┼──────────┤
-│ 15/01/2024  │ Trail Blazers│ Thunder      │ 208  │ 194  │ 5/6    │ UNDER    │ AWAY_TEAM│ HIGH     │ -13.8    │ TRA_008  │
-│ (03:30)     │              │              │      │      │        │          │          │          │          │          │
-└─────────────┴──────────────┴──────────────┴──────┴──────┴────────┴──────────┴──────────┴──────────┴──────────┴──────────┘
+🎯 ACTIONABLE PREDICTIONS (OVER/UNDER)
+┌─────┬──────────┬─────────────────┬─────────────────┬──────────────┬──────────────┬──────┬─────┬──────┬──────┬──────────┬──────┬─────────┐
+│ NO. │ MATCH_ID │   DATE/TIME     │ COUNTRY/LEAGUE │     HOME     │     AWAY     │ LINE │ AVG │RATIO │ PRED.│  WINNER  │ CONF.│ AVGRATE │
+├─────┼──────────┼─────────────────┼─────────────────┼──────────────┼──────────────┼──────┼─────┼──────┼──────┼──────────┼──────┼─────────┤
+│  1  │ 12345678 │ 15.01.2025     │ Spain           │ Real Madrid  │ Barcelona    │185.5 │182.3│ 3/5  │ OVER │HOME_TEAM │ HIGH │ +12.45  │
+│     │          │    (20:30)      │ La Liga         │              │              │      │     │      │      │          │      │         │
+├─────┼──────────┼─────────────────┼─────────────────┼──────────────┼──────────────┼──────┼─────┼──────┼──────┼──────────┼──────┼─────────┤
+│  2  │ 12345679 │ 15.01.2025     │ Italy           │ Juventus     │ Inter Milan  │178.0 │185.2│ 4/6  │UNDER │AWAY_TEAM │MEDIUM│ -8.75   │
+│     │          │    (21:45)      │ Serie A         │              │              │      │     │      │      │          │      │         │
+└─────┴──────────┴─────────────────┴─────────────────┴──────────────┴──────────────┴──────┴─────┴──────┴──────┴──────────┴──────┴─────────┘
+
+📊 Found 2 actionable predictions
 ```
 
----
+### NO_BET Predictions Table
+```
+⏸️  NO_BET PREDICTIONS (For Team Winner Analysis)
+┌─────┬──────────┬─────────────────┬─────────────────┬──────────────┬──────────────┬──────┬─────┬──────┬──────┬──────────┬──────┬─────────┐
+│ NO. │ MATCH_ID │   DATE/TIME     │ COUNTRY/LEAGUE │     HOME     │     AWAY     │ LINE │ AVG │RATIO │ PRED.│  WINNER  │ CONF.│ AVGRATE │
+├─────┼──────────┼─────────────────┼─────────────────┼──────────────┼──────────────┼──────┼─────┼──────┼──────┼──────────┼──────┼─────────┤
+│  1  │ 12345680 │ 15.01.2025     │ England         │ Manchester   │ Liverpool    │182.5 │181.8│ 2/4  │NO_BET│HOME_TEAM │ HIGH │ +2.15   │
+│     │          │    (19:00)      │ Premier League  │ United       │              │      │     │      │      │          │      │         │
+├─────┼──────────┼─────────────────┼─────────────────┼──────────────┼──────────────┼──────┼─────┼──────┼──────┼──────────┼──────┼─────────┤
+│  2  │ 12345681 │ 15.01.2025     │ Germany         │ Bayern       │ Dortmund     │175.0 │174.5│ 3/5  │NO_BET│AWAY_TEAM │MEDIUM│ +1.25   │
+│     │          │    (20:15)      │ Bundesliga      │ Munich       │              │      │     │      │      │          │      │         │
+└─────┴──────────┴─────────────────┴─────────────────┴──────────────┴──────────────┴──────┴─────┴──────┴──────┴──────────┴──────┴─────────┘
 
-## Color Coding Legend
+📊 Found 2 NO_BET predictions (check team winners)
+```
 
-### Prediction Colors:
-- **🟢 OVER** - Green (strong over signal)
-- **🔴 UNDER** - Red (strong under signal)  
-- **🟡 NO_BET** - Yellow (weak signals)
+### Summary
+```
+📈 SUMMARY: 2/4 predictions are actionable (50.0%)
+```
 
-### Winner Colors:
-- **🟢 HOME_TEAM** - Green (home team predicted to win)
-- **🔴 AWAY_TEAM** - Red (away team predicted to win)
-- **🟡 NO_BET** - Yellow (no clear winner prediction)
+## Benefits of Dual-Table System
 
-### Confidence Colors:
-- **🟢 HIGH** - Bright Green (strong signals + winning patterns)
-- **🟡 MEDIUM** - Yellow (good signals with one weakness)
-- **🔴 LOW** - Red (weak or extreme signals)
+1. **Clear Separation**: Actionable predictions are immediately visible
+2. **Reduced Clutter**: NO_BET games don't crowd the actionable table
+3. **Team Winner Focus**: NO_BET table highlights team winner predictions
+4. **Better Decision Making**: Users can quickly identify what to bet on
+5. **Improved UX**: Less overwhelming display with logical grouping
 
----
+## Color Coding
 
-## Example Analysis
+### Actionable Predictions Table
+- **Header**: Bold green with 🎯 emoji
+- **OVER predictions**: Green text
+- **UNDER predictions**: Red text
+- **High confidence**: Bright green
+- **Medium confidence**: Yellow
+- **Low confidence**: Red
 
-### Row 1: Lakers vs Warriors
-- **Prediction**: OVER 225
-- **Winner**: HOME_TEAM (Lakers)
-- **Confidence**: HIGH
-- **Line**: 225, **AVG**: 237, **RATIO**: 5/6, **AvgRate**: +12.5
-- **Analysis**: 5 out of 6 H2H matches went OVER, strong historical pattern
+### NO_BET Predictions Table
+- **Header**: Bold yellow with ⏸️ emoji
+- **NO_BET predictions**: Yellow text
+- **Team winners**: Green (HOME_TEAM) / Red (AWAY_TEAM)
+- **Same confidence colors**: Bright green/Yellow/Red
 
-### Row 2: Celtics vs Heat  
-- **Prediction**: UNDER 218
-- **Winner**: AWAY_TEAM (Heat)
-- **Confidence**: HIGH
-- **Line**: 218, **AVG**: 207, **RATIO**: 4/6, **AvgRate**: -11.2
-- **Analysis**: 4 out of 6 H2H matches went UNDER, consistent under pattern
+## Usage Notes
 
-### Row 3: Bulls vs Nets
-- **Prediction**: NO_BET
-- **Winner**: NO_BET
-- **Confidence**: LOW
-- **Line**: 212, **AVG**: 216, **RATIO**: 3/6, **AvgRate**: +3.8
-- **Analysis**: Only 3 out of 6 H2H matches went OVER, mixed pattern
+- **Actionable Table**: Focus on these predictions for immediate betting decisions
+- **NO_BET Table**: Check team winner predictions for alternative betting opportunities
+- **Summary**: Shows percentage of actionable predictions for quick assessment
+- **Filtering**: Both tables maintain separate filtering and sorting capabilities
+- **Export**: Can export both tables separately or combined
 
-### Row 4: Suns vs Clippers
-- **Prediction**: OVER 220
-- **Winner**: HOME_TEAM (Suns)
-- **Confidence**: MEDIUM
-- **Line**: 220, **AVG**: 229, **RATIO**: 4/6, **AvgRate**: +9.3
-- **Analysis**: 4 out of 6 H2H matches went OVER, good over pattern
+## Console Clearing Strategy
 
-### Row 5: Nuggets vs Jazz
-- **Prediction**: UNDER 215
-- **Winner**: NO_BET
-- **Confidence**: LOW
-- **Line**: 215, **AVG**: 196, **RATIO**: 5/6, **AvgRate**: -18.7
-- **Analysis**: 5 out of 6 H2H matches went UNDER, but rate too extreme
+The CLI implements a strategic console clearing approach to maintain clean, uncluttered output:
 
----
+### When Console is Cleared:
+- ✅ **Initial prediction display** - Clean start when showing prediction results
+- ✅ **After filtering** - Clear display before showing filtered results
+- ✅ **After sorting** - Clear display before showing sorted results
+- ✅ **Navigation between menus** - Clean transitions between different sections
 
-## Confidence Logic Examples
+### When Console is NOT Cleared:
+- ❌ **During prediction details** - Details are shown in context with the table
+- ❌ **After export operations** - Export messages appear below current content
+- ❌ **Error messages** - Errors are shown without clearing to maintain context
+- ❌ **User input prompts** - Prompts appear without clearing to maintain flow
 
-### HIGH Confidence Cases:
-1. **OVER + HIGH**: Rate 7-15 + winning streak ≥3 + ≥4 H2H wins
-2. **UNDER + HIGH**: Rate -7 to -15 + winning streak ≥3 + ≥4 H2H wins
-3. **Team Winner + HIGH**: ≥4 H2H wins + winning streak ≥3
+### Header Display:
+- **Always shown after clearing** - Appropriate headers are displayed after each console clear
+- **Context-aware headers** - Different headers for different sections (prediction, settings, etc.)
+- **Consistent styling** - Headers use consistent color scheme and formatting
 
-### MEDIUM Confidence Cases:
-1. **OVER + MEDIUM**: Rate 7-15 but missing streak or H2H wins
-2. **UNDER + MEDIUM**: Rate -7 to -15 but missing streak or H2H wins
-3. **Team Winner + MEDIUM**: ≥4 H2H wins but winning streak < 3
-
-### LOW Confidence Cases:
-1. **OVER + LOW**: Rate 16-20 (too extreme)
-2. **UNDER + LOW**: Rate -16 to -20 (too extreme)
-3. **NO_BET + LOW**: Rate -6 to +6 (weak signals)
-
----
-
-## Table Features
-
-### **Columns:**
-- **Date/Time**: Match date and time (15/01/2024 (14:00) format)
-- **Home**: Home team name
-- **Away**: Away team name  
-- **Line**: Bookmaker total line
-- **AVG**: Average H2H total score (calculated from historical matches)
-- **RATIO**: Ratio of times teams went over/under in H2H matches (e.g., 5/6 for OVER, 4/6 for UNDER)
-- **Prediction**: OVER/UNDER/NO_BET
-- **Winner**: HOME_TEAM/AWAY_TEAM/NO_BET
-- **Confidence**: HIGH/MEDIUM/LOW
-- **AvgRate**: Average rate value (formatted to 1 decimal)
-- **Match ID**: Unique match identifier
-
-### **Filtering Options:**
-- Filter by prediction type (OVER/UNDER/NO_BET)
-- Filter by confidence level (HIGH/MEDIUM/LOW)
-- Filter by team winner prediction
-- Filter by league or team
-- Sort by confidence, rate, or date
-
-### **Interactive Features:**
-- Click on any row to see detailed analysis
-- Export results to CSV/JSON
-- Save favorite predictions
-- Track prediction accuracy over time
-
----
-
-## Implementation Notes
-
-This table is generated by the enhanced ScoreWise algorithm that:
-
-1. **Analyzes H2H Patterns**: Counts wins/losses between teams
-2. **Calculates Rate Values**: Difference between H2H totals and bookmaker line
-3. **Considers Winning Streaks**: Recent form analysis
-4. **Applies Rate Thresholds**: Precise ranges for different predictions
-5. **Determines Confidence**: Based on signal strength and patterns
-6. **Predicts Team Winners**: Based on H2H dominance and streaks
-
-The table provides a comprehensive view of all prediction aspects in an easy-to-read format with clear color coding for quick decision making. 
+### Benefits:
+1. **Clean transitions** - Smooth navigation between different sections
+2. **Context preservation** - Important information remains visible when needed
+3. **User-friendly flow** - Natural progression through the interface
+4. **Reduced clutter** - No unnecessary clearing that disrupts user experience 
