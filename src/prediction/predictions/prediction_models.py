@@ -17,11 +17,30 @@ class PredictionRecommendation(Enum):
     NO_BET = "NO_BET"
 
 
+class TeamWinnerPrediction(Enum):
+    """Enumeration for team winner predictions."""
+    HOME_TEAM = "HOME_TEAM"
+    AWAY_TEAM = "AWAY_TEAM"
+    NO_WINNER_PREDICTION = "NO_WINNER_PREDICTION"
+
+
 class ConfidenceLevel(Enum):
     """Enumeration for confidence levels."""
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
     LOW = "LOW"
+
+
+@dataclass
+class WinningStreakData:
+    """Data about winning streaks and patterns."""
+    home_team_h2h_wins: int
+    away_team_h2h_wins: int
+    home_team_recent_wins: int  # Last 3 games
+    away_team_recent_wins: int  # Last 3 games
+    home_team_winning_streak: int  # Current streak
+    away_team_winning_streak: int  # Current streak
+    total_h2h_matches: int
 
 
 @dataclass
@@ -31,6 +50,7 @@ class ScoreWisePrediction:
     # Basic prediction info
     match_id: str
     recommendation: PredictionRecommendation
+    team_winner: TeamWinnerPrediction
     confidence: ConfidenceLevel
     
     # Algorithm calculations
@@ -42,6 +62,9 @@ class ScoreWisePrediction:
     # Test adjustments
     decrement_test: int
     increment_test: int
+    
+    # Winning streak data
+    winning_streak_data: WinningStreakData
     
     # Input data
     bookmaker_line: float
@@ -57,6 +80,7 @@ class ScoreWisePrediction:
         return {
             'match_id': self.match_id,
             'recommendation': self.recommendation.value,
+            'team_winner': self.team_winner.value,
             'confidence': self.confidence.value,
             'average_rate': self.average_rate,
             'matches_above_line': self.matches_above_line,
@@ -64,6 +88,15 @@ class ScoreWisePrediction:
             'total_matches': self.total_matches,
             'decrement_test': self.decrement_test,
             'increment_test': self.increment_test,
+            'winning_streak_data': {
+                'home_team_h2h_wins': self.winning_streak_data.home_team_h2h_wins,
+                'away_team_h2h_wins': self.winning_streak_data.away_team_h2h_wins,
+                'home_team_recent_wins': self.winning_streak_data.home_team_recent_wins,
+                'away_team_recent_wins': self.winning_streak_data.away_team_recent_wins,
+                'home_team_winning_streak': self.winning_streak_data.home_team_winning_streak,
+                'away_team_winning_streak': self.winning_streak_data.away_team_winning_streak,
+                'total_h2h_matches': self.winning_streak_data.total_h2h_matches
+            },
             'bookmaker_line': self.bookmaker_line,
             'h2h_totals': self.h2h_totals,
             'rate_values': self.rate_values,
@@ -75,7 +108,8 @@ class ScoreWisePrediction:
         """Get a human-readable summary of the prediction."""
         return (
             f"ScoreWise Prediction: {self.recommendation.value} "
-            f"(Confidence: {self.confidence.value}, "
+            f"(Team Winner: {self.team_winner.value}, "
+            f"Confidence: {self.confidence.value}, "
             f"Avg Rate: {self.average_rate:.2f})"
         )
 

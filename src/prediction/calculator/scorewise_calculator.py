@@ -3,7 +3,7 @@ ScoreWise Calculator Implementation
 
 This module implements the core ScoreWise prediction algorithm as documented in docs/index.md.
 The algorithm analyzes historical head-to-head (H2H) matchup data and bookmaker alternatives
-to provide recommendations for Over/Under bets.
+to provide recommendations for Over/Under bets and team winner predictions.
 """
 
 import logging
@@ -15,7 +15,9 @@ from ..predictions.prediction_models import (
     ScoreWisePrediction, 
     PredictionResult, 
     PredictionRecommendation, 
-    ConfidenceLevel
+    TeamWinnerPrediction,
+    ConfidenceLevel,
+    WinningStreakData
 )
 
 logger = logging.getLogger(__name__)
@@ -25,12 +27,18 @@ logger = logging.getLogger(__name__)
 class ScoreWiseConfig:
     """Configuration for ScoreWise calculator."""
     min_h2h_matches: int = 6
-    over_rate_min: float = 7.0
-    over_rate_max: float = 20.0
-    under_rate_min: float = -20.0
+    # Exact rate thresholds as specified
+    over_rate_min: float = 7.0  # OVER bets need rate between +7 and +15
+    over_rate_max: float = 15.0
+    under_rate_min: float = -15.0  # UNDER bets need rate between -15 and -7
     under_rate_max: float = -7.0
-    test_adjustment: float = 7.0
-    min_matches_above_threshold: int = 4
+    test_adjustment: float = 5.0  # Reduced from 7.0 for more sensitivity
+    min_matches_above_threshold: int = 3  # Reduced from 4 for more flexibility
+    
+    # Team winner prediction thresholds
+    min_h2h_wins_for_winner: int = 4  # Minimum wins out of 6 H2H games
+    min_recent_wins_for_streak: int = 3  # Minimum wins in last 3 games
+    min_winning_streak: int = 3  # Minimum current winning streak
 
 
 class ScoreWiseCalculator:
@@ -42,6 +50,8 @@ class ScoreWiseCalculator:
     2. Statistical Analysis: Calculate rate values and averages
     3. Test Adjustments: Apply ±7 point adjustments
     4. Prediction Rules: Apply ScoreWise prediction rules
+    5. Team Winner Analysis: Analyze H2H winning patterns and streaks
+    6. Enhanced Confidence: Consider winning streaks and patterns
     """
     
     def __init__(self, config: Optional[ScoreWiseConfig] = None):
@@ -71,7 +81,14 @@ class ScoreWiseCalculator:
             
             # Extract required data
             h2h_matches = match.h2h_matches
-            bookmaker_line = match.odds.match_total
+            bookmaker_line = match.odds.match_total if match.odds else None
+            
+            # Ensure bookmaker_line is not None (should be caught by validation, but double-check)
+            if bookmaker_line is None:
+                return PredictionResult(
+                    success=False,
+                    error_message="Bookmaker line is None"
+                )
             
             # Calculate H2H totals
             h2h_totals = self._calculate_h2h_totals(h2h_matches)
@@ -91,21 +108,29 @@ class ScoreWiseCalculator:
                 h2h_totals, bookmaker_line
             )
             
+            # Analyze winning streaks and patterns
+            winning_streak_data = self._analyze_winning_patterns(h2h_matches, match)
+            
             # Determine recommendation
             recommendation = self._determine_recommendation(
                 average_rate, matches_above, matches_below, 
                 decrement_test, increment_test
             )
             
-            # Determine confidence level
-            confidence = self._determine_confidence(
-                average_rate, matches_above, matches_below
+            # Determine team winner
+            team_winner = self._determine_team_winner(winning_streak_data)
+            
+            # Determine confidence level with enhanced logic
+            confidence = self._determine_enhanced_confidence(
+                average_rate, matches_above, matches_below,
+                recommendation, winning_streak_data
             )
             
             # Create prediction
             prediction = ScoreWisePrediction(
                 match_id=match.match_id,
                 recommendation=recommendation,
+                team_winner=team_winner,
                 confidence=confidence,
                 average_rate=average_rate,
                 matches_above_line=matches_above,
@@ -113,12 +138,13 @@ class ScoreWiseCalculator:
                 total_matches=len(h2h_totals),
                 decrement_test=decrement_test,
                 increment_test=increment_test,
+                winning_streak_data=winning_streak_data,
                 bookmaker_line=bookmaker_line,
                 h2h_totals=h2h_totals,
                 rate_values=rate_values,
                 calculation_details={
                     'config': self.config.__dict__,
-                    'algorithm_version': '1.0.0'
+                    'algorithm_version': '2.0.0'
                 }
             )
             
@@ -304,31 +330,165 @@ class ScoreWiseCalculator:
                        f"Conditions not met for OVER or UNDER")
             return PredictionRecommendation.NO_BET
     
-    def _determine_confidence(self, average_rate: float, matches_above: int, 
-                            matches_below: int) -> ConfidenceLevel:
+    def _analyze_winning_patterns(self, h2h_matches: List[H2HMatchModel], match: MatchModel) -> WinningStreakData:
         """
-        Determine confidence level based on prediction strength.
+        Analyze winning patterns for both teams.
+        
+        Args:
+            h2h_matches: List of H2H match models
+            match: Current match model
+            
+        Returns:
+            WinningStreakData with analysis results
+        """
+        home_team = match.home_team
+        away_team = match.away_team
+        
+        # Count H2H wins for each team
+        home_team_h2h_wins = 0
+        away_team_h2h_wins = 0
+        
+        for h2h_match in h2h_matches:
+            if h2h_match.home_team == home_team:
+                if h2h_match.home_score > h2h_match.away_score:
+                    home_team_h2h_wins += 1
+                else:
+                    away_team_h2h_wins += 1
+            else:  # h2h_match.home_team == away_team
+                if h2h_match.home_score > h2h_match.away_score:
+                    away_team_h2h_wins += 1
+                else:
+                    home_team_h2h_wins += 1
+        
+        # Analyze recent form (last 3 games) - This would need recent form data
+        # For now, we'll use H2H data as a proxy, but this should be enhanced
+        # with actual recent form data from the scraper
+        home_team_recent_wins = min(home_team_h2h_wins, 3)  # Placeholder
+        away_team_recent_wins = min(away_team_h2h_wins, 3)  # Placeholder
+        
+        # Calculate winning streaks (simplified - would need actual streak data)
+        home_team_winning_streak = min(home_team_h2h_wins, 3)  # Placeholder
+        away_team_winning_streak = min(away_team_h2h_wins, 3)  # Placeholder
+        
+        logger.debug(f"Winning pattern analysis - Home: {home_team_h2h_wins}/{len(h2h_matches)} wins, "
+                    f"Away: {away_team_h2h_wins}/{len(h2h_matches)} wins")
+        
+        return WinningStreakData(
+            home_team_h2h_wins=home_team_h2h_wins,
+            away_team_h2h_wins=away_team_h2h_wins,
+            home_team_recent_wins=home_team_recent_wins,
+            away_team_recent_wins=away_team_recent_wins,
+            home_team_winning_streak=home_team_winning_streak,
+            away_team_winning_streak=away_team_winning_streak,
+            total_h2h_matches=len(h2h_matches)
+        )
+    
+    def _determine_team_winner(self, winning_streak_data: WinningStreakData) -> TeamWinnerPrediction:
+        """
+        Determine team winner prediction based on H2H patterns and winning streaks.
+        
+        Args:
+            winning_streak_data: Analysis of winning patterns
+            
+        Returns:
+            TeamWinnerPrediction
+        """
+        home_wins = winning_streak_data.home_team_h2h_wins
+        away_wins = winning_streak_data.away_team_h2h_wins
+        home_streak = winning_streak_data.home_team_winning_streak
+        away_streak = winning_streak_data.away_team_winning_streak
+        
+        # Check if home team has strong H2H dominance
+        if (home_wins >= self.config.min_h2h_wins_for_winner and 
+            home_streak >= self.config.min_winning_streak):
+            logger.info(f"HOME_TEAM prediction - H2H wins: {home_wins}, Streak: {home_streak}")
+            return TeamWinnerPrediction.HOME_TEAM
+        
+        # Check if away team has strong H2H dominance
+        elif (away_wins >= self.config.min_h2h_wins_for_winner and 
+              away_streak >= self.config.min_winning_streak):
+            logger.info(f"AWAY_TEAM prediction - H2H wins: {away_wins}, Streak: {away_streak}")
+            return TeamWinnerPrediction.AWAY_TEAM
+        
+        # No clear winner prediction
+        else:
+            logger.info(f"NO_WINNER_PREDICTION - Home wins: {home_wins}, Away wins: {away_wins}")
+            return TeamWinnerPrediction.NO_WINNER_PREDICTION
+    
+    def _determine_team_winner_confidence(self, winning_streak_data: WinningStreakData) -> ConfidenceLevel:
+        """Determine confidence for team winner predictions."""
+        home_wins = winning_streak_data.home_team_h2h_wins
+        away_wins = winning_streak_data.away_team_h2h_wins
+        home_streak = winning_streak_data.home_team_winning_streak
+        away_streak = winning_streak_data.away_team_winning_streak
+        
+        # High confidence: winning streak ≥3 and ≥4 H2H wins
+        if ((home_wins >= 4 and home_streak >= 3) or 
+            (away_wins >= 4 and away_streak >= 3)):
+            return ConfidenceLevel.HIGH
+        
+        # Medium confidence: ≥4 H2H wins but no strong streak
+        elif home_wins >= 4 or away_wins >= 4:
+            return ConfidenceLevel.MEDIUM
+        
+        # Low confidence: weak signals
+        else:
+            return ConfidenceLevel.LOW
+    
+    def _determine_enhanced_confidence(self, average_rate: float, matches_above: int, 
+                                     matches_below: int, recommendation: PredictionRecommendation,
+                                     winning_streak_data: WinningStreakData) -> ConfidenceLevel:
+        """
+        Determine confidence level with enhanced logic considering winning streaks.
         
         Args:
             average_rate: Average rate value
             matches_above: Number of matches above line
             matches_below: Number of matches below line
+            recommendation: Current prediction recommendation
+            winning_streak_data: Winning streak analysis
             
         Returns:
             ConfidenceLevel
         """
-        total_matches = matches_above + matches_below
-        
-        # High confidence: strong rate and clear majority
-        if (abs(average_rate) >= 15 and 
-            (matches_above >= 5 or matches_below >= 5)):
+        # Enhanced confidence logic based on recommendation type
+        if recommendation == PredictionRecommendation.OVER:
+            return self._determine_over_confidence(average_rate, matches_above, winning_streak_data)
+        elif recommendation == PredictionRecommendation.UNDER:
+            return self._determine_under_confidence(average_rate, matches_below, winning_streak_data)
+        else:  # NO_BET
+            return ConfidenceLevel.LOW
+    
+    def _determine_over_confidence(self, average_rate: float, matches_above: int, 
+                                 winning_streak_data: WinningStreakData) -> ConfidenceLevel:
+        """Determine confidence for OVER predictions."""
+        # High confidence: rate 7-15, winning streak ≥3, and ≥4 H2H wins
+        if (7.0 <= average_rate <= 15.0 and 
+            winning_streak_data.home_team_winning_streak >= 3 and
+            winning_streak_data.home_team_h2h_wins >= 4):
             return ConfidenceLevel.HIGH
         
-        # Medium confidence: moderate rate and majority
-        elif (abs(average_rate) >= 10 and 
-              (matches_above >= 4 or matches_below >= 4)):
-            return ConfidenceLevel.MEDIUM
+        # Low confidence: rate 16-20
+        elif 16.0 <= average_rate <= 20.0:
+            return ConfidenceLevel.LOW
         
-        # Low confidence: weak signals
+        # Medium confidence: other cases
         else:
-            return ConfidenceLevel.LOW 
+            return ConfidenceLevel.MEDIUM
+    
+    def _determine_under_confidence(self, average_rate: float, matches_below: int, 
+                                  winning_streak_data: WinningStreakData) -> ConfidenceLevel:
+        """Determine confidence for UNDER predictions."""
+        # High confidence: rate -7 to -15, winning streak ≥3, and ≥4 H2H wins
+        if (-15.0 <= average_rate <= -7.0 and 
+            winning_streak_data.away_team_winning_streak >= 3 and
+            winning_streak_data.away_team_h2h_wins >= 4):
+            return ConfidenceLevel.HIGH
+        
+        # Low confidence: rate -16 to -20
+        elif -20.0 <= average_rate <= -16.0:
+            return ConfidenceLevel.LOW
+        
+        # Medium confidence: other cases
+        else:
+            return ConfidenceLevel.MEDIUM 

@@ -410,6 +410,7 @@ class CLIManager:
                     "away": match.away_team,
                     "line": match.odds.match_total,
                     "prediction": pred.recommendation.value,
+                    "winner": pred.team_winner.value,
                     "confidence": pred.confidence.value,
                     "avg_rate": f"{pred.average_rate:.2f}",
                     "match_id": match.match_id

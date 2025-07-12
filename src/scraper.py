@@ -147,16 +147,14 @@ class FlashscoreScraper:
 
     def validate_odds_data(self, odds):
         missing_odds_fields = []
-        if odds.home_odds is None:
-            missing_odds_fields.append('home_odds')
-        if odds.away_odds is None:
-            missing_odds_fields.append('away_odds')
+        # Only these are required:
         if odds.match_total is None:
             missing_odds_fields.append('match_total')
         if odds.over_odds is None:
             missing_odds_fields.append('over_odds')
         if odds.under_odds is None:
             missing_odds_fields.append('under_odds')
+        # home_odds and away_odds are optional
         return bool(missing_odds_fields), missing_odds_fields
 
     def compose_skip_reason(self, odds_incomplete, missing_odds_fields, h2h_count):
