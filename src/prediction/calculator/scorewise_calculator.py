@@ -144,7 +144,10 @@ class ScoreWiseCalculator:
                 rate_values=rate_values,
                 calculation_details={
                     'config': self.config.__dict__,
-                    'algorithm_version': '2.0.0'
+                    'algorithm_version': '2.0.0',
+                    'avg_h2h_total': sum(h2h_totals) / len(h2h_totals) if h2h_totals else 0,
+                    'ratio_over_under': f"{matches_above}/{len(h2h_totals)}",
+                    'bookmaker_line': bookmaker_line
                 }
             )
             

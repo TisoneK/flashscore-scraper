@@ -101,10 +101,12 @@ class ColoredDisplay:
         )
         
         # Add columns with colors
-        table.add_column("Date", style="cyan", header_style=self.colors.TABLE_HEADER)
+        table.add_column("Date/Time", style="cyan", header_style=self.colors.TABLE_HEADER)
         table.add_column("Home", style="white", header_style=self.colors.TABLE_HEADER)
         table.add_column("Away", style="white", header_style=self.colors.TABLE_HEADER)
         table.add_column("Line", style="yellow", header_style=self.colors.TABLE_HEADER)
+        table.add_column("AVG", style="green", header_style=self.colors.TABLE_HEADER)
+        table.add_column("RATIO", style="blue", header_style=self.colors.TABLE_HEADER)
         table.add_column("Prediction", style="magenta", header_style=self.colors.TABLE_HEADER)
         table.add_column("Winner", style="green", header_style=self.colors.TABLE_HEADER)
         table.add_column("Conf.", style="blue", header_style=self.colors.TABLE_HEADER)
@@ -121,7 +123,7 @@ class ColoredDisplay:
             
             # Determine winner color
             winner_color = self.colors.PREDICTION_NO_BET
-            winner_value = result.get('winner', 'NO_WINNER')
+            winner_value = result.get('winner', 'NO_BET')
             if winner_value == 'HOME_TEAM':
                 winner_color = self.colors.PREDICTION_OVER
             elif winner_value == 'AWAY_TEAM':
@@ -142,6 +144,8 @@ class ColoredDisplay:
                 result['home'],
                 result['away'],
                 str(result['line']),
+                str(result.get('avg', 'N/A')),
+                str(result.get('ratio', 'N/A')),
                 f"[{pred_color}]{result['prediction']}[/{pred_color}]",
                 f"[{winner_color}]{winner_value}[/{winner_color}]",
                 f"[{conf_color}]{result['confidence']}[/{conf_color}]",

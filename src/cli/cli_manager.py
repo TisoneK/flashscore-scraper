@@ -404,11 +404,23 @@ class CLIManager:
             result = prediction_service.generate_prediction(match)
             if result.success and result.prediction:
                 pred = result.prediction
+                
+                # Calculate AVG (average H2H total)
+                h2h_totals = pred.h2h_totals
+                avg_h2h = sum(h2h_totals) / len(h2h_totals) if h2h_totals else 0
+                
+                # Calculate RATIO (how many times went over/under)
+                matches_above = pred.matches_above_line
+                total_matches = pred.total_matches
+                ratio = f"{matches_above}/{total_matches}"
+                
                 summary = {
                     "date": match.date,
                     "home": match.home_team,
                     "away": match.away_team,
-                    "line": match.odds.match_total,
+                    "line": match.odds.match_total if match.odds else 0,
+                    "avg": round(avg_h2h, 1),
+                    "ratio": ratio,
                     "prediction": pred.recommendation.value,
                     "winner": pred.team_winner.value,
                     "confidence": pred.confidence.value,
