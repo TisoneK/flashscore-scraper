@@ -5,6 +5,7 @@ Launcher script for the Flashscore Scraper UI
 
 import sys
 import os
+import logging
 from pathlib import Path
 
 # Add the project root to Python path
@@ -13,17 +14,19 @@ sys.path.insert(0, str(project_root))
 
 def main():
     """Launch the UI application"""
+    logger = logging.getLogger(__name__)
+    
     try:
         # Import and run the UI
         from src.ui.main import main as ui_main
         ui_main()
     except ImportError as e:
-        print(f"Error importing UI modules: {e}")
-        print("Make sure all dependencies are installed:")
-        print("pip install -r requirements.txt")
+        logger.error(f"Error importing UI modules: {e}")
+        logger.error("Make sure all dependencies are installed:")
+        logger.error("pip install -r requirements.txt")
         sys.exit(1)
     except Exception as e:
-        print(f"Error launching UI: {e}")
+        logger.error(f"Error launching UI: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

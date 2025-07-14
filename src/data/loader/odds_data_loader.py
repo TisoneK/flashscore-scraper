@@ -1,11 +1,11 @@
-from ..elements_model import OddsElements
+from src.data.elements_model import OddsElements
 from typing import Optional
-from ...config import CONFIG, SELECTORS, ODDS_URL_HOME_AWAY, ODDS_URL_OVER_UNDER
-from ...core.url_verifier import URLVerifier
-from ...core.network_monitor import NetworkMonitor
-from ...core.retry_manager import NetworkRetryManager
+from src.config import CONFIG, SELECTORS, ODDS_URL_HOME_AWAY, ODDS_URL_OVER_UNDER
+from src.core.url_verifier import URLVerifier
+from src.core.network_monitor import NetworkMonitor
+from src.core.retry_manager import NetworkRetryManager
 from selenium.webdriver.remote.webdriver import WebDriver
-from ..verifier.odds_data_verifier import OddsDataVerifier
+from src.data.verifier.odds_data_verifier import OddsDataVerifier
 import logging
 from src.core.exceptions import DataNotFoundError, DataParseError, DataValidationError, DataUnavailableWarning
 
@@ -65,28 +65,46 @@ class OddsDataLoader:
             logger.warning(f"Failed to extract all totals: {e}")
             return []
 
-    def load_home_away_odds(self, match_id: str) -> bool:
+    def load_home_away_odds(self, match_id: str, status_callback=None) -> bool:
         """Load home/away odds with network resilience."""
+        logger.info(f"[OddsDataLoader] Starting to load home/away odds for match {match_id}")
+        if status_callback:
+            status_callback(f"Loading home/away odds for match {match_id}...")
         def _load_operation():
             url = ODDS_URL_HOME_AWAY.format(match_id=match_id)
+            logger.info(f"[OddsDataLoader] Loading odds URL: {url}")
             success, error = self.url_verifier.load_and_verify_url(url)
+            logger.info(f"[OddsDataLoader] URL load result: success={success}, error={error}")
             if not success:
+                logger.error(f"[OddsDataLoader] Error loading home/away odds page for {match_id}: {error}")
                 raise Exception(f"Error loading home/away odds page for {match_id}: {error}")
             if self.selenium_utils:
+                logger.info(f"[OddsDataLoader] Waiting for dynamic content for match {match_id}")
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+            logger.info(f"[OddsDataLoader] Extracting home odds for match {match_id}")
             self.elements.home_odds = self.get_home_odds()
+            logger.info(f"[OddsDataLoader] Extracting away odds for match {match_id}")
             self.elements.away_odds = self.get_away_odds()
-            # home_odds and away_odds are optional, do not fail if missing
+            logger.info(f"[OddsDataLoader] Odds extraction complete for match {match_id}")
             return True
-
         try:
-            return self.retry_manager.retry_network_operation(_load_operation)
+            logger.info(f"[OddsDataLoader] Entering retry operation for match {match_id}")
+            result = self.retry_manager.retry_network_operation(_load_operation)
+            logger.info(f"[OddsDataLoader] Retry operation result for match {match_id}: {result}")
+            if status_callback:
+                status_callback(f"Home/away odds loaded for match {match_id}.")
+            logger.info(f"[OddsDataLoader] Successfully loaded home/away odds for match {match_id}")
+            return result
         except Exception as e:
-            logger.error(f"Failed to load home/away odds page for {match_id} after retries: {e}")
+            logger.error(f"[OddsDataLoader] Failed to load home/away odds page for {match_id} after retries: {e}")
+            if status_callback:
+                status_callback(f"Failed to load home/away odds for match {match_id}.")
             return False
 
-    def load_over_under_odds(self, match_id: str) -> bool:
+    def load_over_under_odds(self, match_id: str, status_callback=None) -> bool:
         """Load over/under odds with network resilience."""
+        if status_callback:
+            status_callback(f"Loading over/under odds for match {match_id}...")
         def _load_operation():
             url = ODDS_URL_OVER_UNDER.format(match_id=match_id)
             success, error = self.url_verifier.load_and_verify_url(url)
@@ -94,33 +112,32 @@ class OddsDataLoader:
                 raise Exception(f"Error loading over/under odds page for {match_id}: {error}")
             if self.selenium_utils:
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
-            
             self.elements.all_totals = self.get_all_totals()
             is_valid, error = self.odds_data_verifier.verify_all_totals(self.elements.all_totals)
             if not is_valid:
                 raise Exception(f"Error verifying all_totals for {match_id}: {error}")
-            
             self.elements.match_total = self.get_match_total(self.elements.all_totals)
             is_valid, error = self.odds_data_verifier.verify_match_total(self.elements.match_total)
             if not is_valid:
                 raise Exception(f"Error verifying match_total for {match_id}: {error}")
-            
             self.elements.over_odds = self.get_over_odds(self.elements.all_totals)
             is_valid, error = self.odds_data_verifier.verify_over_odds(self.elements.over_odds)
             if not is_valid:
                 raise Exception(f"Error verifying over_odds for {match_id}: {error}")
-            
             self.elements.under_odds = self.get_under_odds(self.elements.all_totals)
             is_valid, error = self.odds_data_verifier.verify_under_odds(self.elements.under_odds)
             if not is_valid:
                 raise Exception(f"Error verifying under_odds for {match_id}: {error}")
-            
             return True
-
         try:
-            return self.retry_manager.retry_network_operation(_load_operation)
+            result = self.retry_manager.retry_network_operation(_load_operation)
+            if status_callback:
+                status_callback(f"Over/under odds loaded for match {match_id}.")
+            return result
         except Exception as e:
             logger.error(f"Failed to load over/under odds page for {match_id} after retries: {e}")
+            if status_callback:
+                status_callback(f"Failed to load over/under odds for match {match_id}: {e}")
             return False
 
     def load_odds(self, match_id: str) -> bool:

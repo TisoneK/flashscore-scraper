@@ -13,6 +13,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
+from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 class ChromeDriverManager:
     """Manages Chrome WebDriver initialization and configuration."""
     
-    def __init__(self, config: Dict[str, Any], chrome_log_path: str = None):
+    def __init__(self, config: Dict[str, Any], chrome_log_path: Optional[str] = None):
         self.config = config
         self.chrome_log_path = chrome_log_path
         self.project_root = Path(__file__).parent.parent.parent
@@ -117,17 +118,56 @@ class ChromeDriverManager:
         if browser_config.get('headless', False):
             options.add_argument('--headless=new')
         
-        # Always add critical flags for stability/sandboxing
+        # Always add critical flags for stability/sandboxing and performance
         critical_flags = [
+            # Core stability flags
             '--no-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
             '--disable-software-rasterizer',
+            '--disable-gpu-sandbox',
+            
+            # Browser features
             '--disable-extensions',
             '--disable-infobars',
             '--disable-popup-blocking',
             '--disable-blink-features=AutomationControlled',
             '--disable-features=IsolateOrigins,site-per-process',
+            
+            # Performance optimizations
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-background-networking',
+            '--disable-default-apps',
+            '--disable-sync',
+            '--disable-translate',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-ipc-flooding-protection',
+            
+            # Memory optimizations
+            '--memory-pressure-off',
+            '--max_old_space_size=4096',
+            '--js-flags=--max-old-space-size=4096',
+            '--disable-javascript-harmony-shipping',
+            '--disable-v8-idle-tasks',
+            
+            # Network optimizations
+            '--disable-component-extensions-with-background-pages',
+            '--no-first-run',
+            '--no-default-browser-check',
+            
+            # Security and stability
+            '--allow-running-insecure-content',
+            '--disable-site-isolation-trials',
+            '--disable-features=TranslateUI',
+            '--disable-features=BlinkGenPropertyTrees',
+            
+            # Logging suppression
+            '--log-level=3',
+            '--silent',
+            '--disable-logging',
         ]
         for flag in critical_flags:
             options.add_argument(flag)
@@ -147,6 +187,11 @@ class ChromeDriverManager:
         experimental_options = chrome_options.get('experimental_options', {})
         for key, value in experimental_options.items():
             options.add_experimental_option(key, value)
+        
+        # Add logging suppression experimental options
+        options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        options.add_experimental_option('useAutomationExtension', False)
+        options.add_experimental_option('detach', True)
         
         # Add preferences from config
         preferences = chrome_options.get('preferences', {})
@@ -169,7 +214,10 @@ class ChromeDriverManager:
                 raise Exception("chrome_log_path must be provided to ChromeDriverManager for dual logging.")
 
             # Create service, redirecting ChromeDriver logs to the chrome log file
-            service = Service(executable_path=chromedriver_path, log_path=log_file_path)
+            service_kwargs = {"executable_path": chromedriver_path}
+            if log_file_path:
+                service_kwargs["log_path"] = str(log_file_path)
+            service = Service(**service_kwargs)
 
             # Monkey-patch Service.start to redirect ChromeDriver and Chrome browser stderr to chrome log file
             orig_start = service.start
@@ -190,11 +238,24 @@ class ChromeDriverManager:
             # Get Chrome options
             options = self.get_chrome_options()
 
-            # Create driver
-            driver = webdriver.Chrome(service=service, options=options)
-
-            logger.info(f"✅ Chrome WebDriver initialized successfully")
-            logger.info(f"📁 ChromeDriver path: {chromedriver_path}")
+            # Create driver with timeout handling
+            import time
+            start_time = time.time()
+            timeout = 60  # 60 seconds timeout
+            
+            logger.info("🔄 Creating Chrome WebDriver...")
+            
+            # Create driver with timeout
+            driver = None
+            try:
+                driver = webdriver.Chrome(service=service, options=options)
+                elapsed_time = time.time() - start_time
+                logger.info(f"✅ Chrome WebDriver initialized successfully in {elapsed_time:.2f}s")
+                logger.info(f"📁 ChromeDriver path: {chromedriver_path}")
+            except Exception as driver_error:
+                elapsed_time = time.time() - start_time
+                logger.error(f"❌ Failed to create Chrome WebDriver after {elapsed_time:.2f}s: {driver_error}")
+                raise
 
             return driver
 

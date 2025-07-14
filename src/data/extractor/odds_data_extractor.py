@@ -1,6 +1,6 @@
 import logging
 from typing import Optional, Dict
-from ..elements_model import OddsElements
+from src.data.elements_model import OddsElements
 from src.data.verifier.odds_data_verifier import OddsDataVerifier
 from src.core.exceptions import DataNotFoundError, DataParseError, DataValidationError, DataUnavailableWarning
 
@@ -20,9 +20,20 @@ class OddsDataExtractor:
             self._loader = None
             self._last_extracted_data = None
 
-    def extract_home_away_odds(self, elements: Optional[OddsElements] = None) -> Dict[str, Optional[str]]:
+    def extract_home_away_odds(self, elements: Optional[OddsElements] = None, status_callback=None) -> Dict[str, Optional[str]]:
         try:
-            elements = elements or self._loader.elements
+            if status_callback:
+                status_callback("Extracting home/away odds...")
+            
+            elements = elements or (self._loader.elements if self._loader else None)
+            
+            if elements is None:
+                logger.error("No elements available for home/away odds extraction")
+                return {
+                    'home_odds': None,
+                    'away_odds': None,
+                }
+            
             # Extract and verify only home_odds and away_odds
             home_odds = elements.home_odds.text.strip() if elements.home_odds and getattr(elements.home_odds, 'text', None) else None
             self.home_odds = home_odds
@@ -33,6 +44,10 @@ class OddsDataExtractor:
                 'away_odds': self.away_odds,
             }
             self._last_extracted_data = data
+            
+            if status_callback:
+                status_callback("Home/away odds extraction completed.")
+            
             return data
         except Exception as e:
             logger.error(f"Error extracting home/away odds data: {e}")
@@ -42,9 +57,21 @@ class OddsDataExtractor:
                 'away_odds': None,
             }
 
-    def extract_over_under_odds(self, elements: Optional[OddsElements] = None) -> Dict[str, Optional[str]]:
+    def extract_over_under_odds(self, elements: Optional[OddsElements] = None, status_callback=None) -> Dict[str, Optional[str]]:
         try:
-            elements = elements or self._loader.elements
+            if status_callback:
+                status_callback("Extracting over/under odds...")
+            
+            elements = elements or (self._loader.elements if self._loader else None)
+            
+            if elements is None:
+                logger.error("No elements available for over/under odds extraction")
+                return {
+                    'match_total': None,
+                    'over_odds': None,
+                    'under_odds': None,
+                }
+            
             # Extract and verify only match_total, over_odds, under_odds
             match_total = elements.match_total.text.strip() if elements.match_total and getattr(elements.match_total, 'text', None) else None
             is_valid, error = self.odds_data_verifier.verify_match_total(match_total)
@@ -73,6 +100,10 @@ class OddsDataExtractor:
                 'under_odds': self.under_odds,
             }
             self._last_extracted_data = data
+            
+            if status_callback:
+                status_callback("Over/under odds extraction completed.")
+            
             return data
         except Exception as e:
             logger.error(f"Error extracting over/under odds data: {e}")
@@ -83,16 +114,32 @@ class OddsDataExtractor:
                 'under_odds': None,
             }
 
-    def extract_odds_data(self, elements: Optional[OddsElements] = None) -> Dict[str, Optional[str]]:
+    def extract_odds_data(self, elements: Optional[OddsElements] = None, status_callback=None) -> Dict[str, Optional[str]]:
         """
         Extracts odds data from the loader's elements or from a provided elements object.
         :param elements: Optionally, an OddsElements object to extract from.
+        :param status_callback: Optional callback function for status updates.
         :return: Dictionary with odds data.
         """
         try:
-            elements = elements or self._loader.elements
+            if status_callback:
+                status_callback("Extracting complete odds data...")
+            
+            elements = elements or (self._loader.elements if self._loader else None)
+            
+            if elements is None:
+                logger.error("No elements available for complete odds extraction")
+                return {
+                    'home_odds': None,
+                    'away_odds': None,
+                    'match_total': None,
+                    'over_odds': None,
+                    'under_odds': None,
+                }
 
             # Extract and verify each field, then assign via property setter
+            if status_callback:
+                status_callback("Extracting home/away odds...")
             home_odds = elements.home_odds.text.strip() if elements.home_odds and getattr(elements.home_odds, 'text', None) else None
             # home_odds is optional
             self.home_odds = home_odds
@@ -101,6 +148,8 @@ class OddsDataExtractor:
             # away_odds is optional
             self.away_odds = away_odds
 
+            if status_callback:
+                status_callback("Extracting over/under odds...")
             match_total = elements.match_total.text.strip() if elements.match_total and getattr(elements.match_total, 'text', None) else None
             is_valid, error = self.odds_data_verifier.verify_match_total(match_total)
             if not is_valid:
@@ -131,6 +180,10 @@ class OddsDataExtractor:
                 'under_odds': self.under_odds,
             }
             self._last_extracted_data = data
+            
+            if status_callback:
+                status_callback("Complete odds data extraction finished.")
+            
             return data
         except Exception as e:
             logger.error(f"Error extracting odds data: {e}")

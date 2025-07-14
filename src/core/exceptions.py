@@ -41,4 +41,8 @@ class PredictionError(FlashscoreScraperError):
 
 class UIError(FlashscoreScraperError):
     """Raised for UI-related errors (CLI, GUI, display, etc)."""
+    pass
+
+class WorkerPoolError(FlashscoreScraperError):
+    """Raised for worker pool errors (startup, shutdown, task submission, etc)."""
     pass 

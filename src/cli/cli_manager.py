@@ -17,12 +17,13 @@ import json
 from datetime import datetime, timedelta
 import csv
 import json as pyjson
+import psutil
 
 # Suppress Python warnings about platform independent libraries
 warnings.filterwarnings("ignore", message="Could not find platform independent libraries")
 
 from src.config import CONFIG
-from src.utils import setup_logging
+from src.utils import setup_logging, ensure_logging_configured, get_logging_status, get_scraping_date
 from src.scraper import FlashscoreScraper
 from .prompts import ScraperPrompts
 from .display import ConsoleDisplay
@@ -31,6 +32,8 @@ from .progress import ProgressManager
 from src.prediction import PredictionService
 from src.models import MatchModel, OddsModel, H2HMatchModel
 from src.prediction.prediction_data_loader import load_matches
+from .performance_display import PerformanceDisplay
+from src.core.performance_monitor import PerformanceMonitor
 
 class CLIManager:
     def __init__(self):
@@ -38,6 +41,7 @@ class CLIManager:
         self.display = ConsoleDisplay()
         self.colored_display = ColoredDisplay()
         self.progress = ProgressManager()
+        self.performance_display = PerformanceDisplay()
         self.logger = logging.getLogger("cli")
         self.scraper: Optional[FlashscoreScraper] = None
         self.user_settings = self._load_user_settings()
@@ -69,6 +73,10 @@ class CLIManager:
             r'google_apis.*registration_request.*'
         ]
         self.debug = False
+        self._should_stop_scraper = False
+        self._scraper_thread = None
+        self.performance_display.set_stop_callback(self._stop_scraper)
+        self.performance_monitor = PerformanceMonitor()
         
     def run(self, args=None):
         """Main CLI entry point."""
@@ -127,8 +135,8 @@ class CLIManager:
             self.run_interactive_cli()
             return
         
-        # Default: show help
-        parser.print_help()
+        # Default: launch CLI (no arguments needed)
+        self.run_interactive_cli()
     
     def initialize_project(self, browser='chrome', version=None):
         """Initialize the project and install drivers."""
@@ -359,6 +367,8 @@ class CLIManager:
         self._clear_and_header('scraping')
         default_day = self.user_settings.get('default_day', 'Today')
         selected_day = self.prompts.ask_scraping_day()
+        if selected_day == "Back":
+            return  # Go back to main menu
         if selected_day != default_day:
             self.user_settings['default_day'] = selected_day
             self._save_user_settings(self.user_settings)
@@ -380,20 +390,37 @@ class CLIManager:
         from datetime import datetime, timedelta
         from src.prediction import PredictionService
         from src.prediction.prediction_data_loader import load_matches
+        from src.utils import get_scraping_date
 
         today = datetime.now().strftime('%d.%m.%Y')
         yesterday = (datetime.now() - timedelta(days=1)).strftime('%d.%m.%Y')
         date_filter = None
         if range_choice == "Today":
             date_filter = today
+            day_for_file = "Today"
         elif range_choice == "Yesterday":
             date_filter = yesterday
+            day_for_file = "Yesterday"
+        elif range_choice == "Tomorrow":
+            date_filter = (datetime.now() + timedelta(days=1)).strftime('%d.%m.%Y')
+            day_for_file = "Tomorrow"
+        else:
+            day_for_file = "Today"
         # else: All (no filter)
 
         # Load all matches with debug flag
         match_models = load_matches(date_filter=date_filter, status="complete", debug=self.debug)
         if not match_models:
-            self.colored_display.show_warning_message("No completed matches found for the selected range.")
+            if range_choice == "Tomorrow":
+                self.colored_display.show_warning_message("No completed matches found for tomorrow. Try scraping tomorrow's matches first, then run predictions.")
+            elif range_choice == "Today":
+                self.colored_display.show_warning_message("No completed matches found for today. Try scraping today's matches first, then run predictions.")
+            elif range_choice == "Yesterday":
+                self.colored_display.show_warning_message("No completed matches found for yesterday. Try scraping yesterday's matches first, then run predictions.")
+            else:
+                self.colored_display.show_warning_message("No completed matches found for the selected range.")
+            # Wait for user to read the message
+            input("\nPress Enter to continue...")
             return
 
         # Run predictions first
@@ -514,7 +541,8 @@ class CLIManager:
                 fmt = self.prompts.ask_export_format()
                 if fmt == "Back":
                     continue
-                filename = f"output/predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt.lower()}"
+                file_date = get_scraping_date(day_for_file)
+                filename = f"output/predictions_{file_date}.{fmt.lower()}"
                 try:
                     if fmt == "CSV":
                         with open(filename, "w", newline='', encoding="utf-8") as f:
@@ -755,114 +783,196 @@ class CLIManager:
             self.colored_display.console.print(f"  [bold]{k}:[/bold] {v}")
         print()
 
+    def _show_log_file_info(self, log_path):
+        """Display information about where logs are being written."""
+        print(f"[blue]📝 Logs are being written to: {log_path}[/blue]")
+        print(f"[blue]📊 Status updates will appear below:[/blue]")
+        print("-" * 60)
+
     def start_scraping_with_day(self, day="Today"):
-        """Start scraping with the specified day."""
         try:
-            # Reset results
             self.scraping_results = {}
             self.critical_messages = []
-            
-            # Show scraping start message with day info
             self.display.show_scraping_start_with_day(day)
-            
-            # Setup logging with capture and noise filtering
             CONFIG.logging.log_to_console = False
             log_dir = CONFIG.logging.log_directory
             os.makedirs(log_dir, exist_ok=True)
-            timestamp = datetime.now().strftime(CONFIG.logging.log_filename_date_format)
-            scraper_log_path = os.path.join(log_dir, f"scraper_{timestamp}.log")
-            setup_logging(scraper_log_path)
-            
-            # Initialize scraper
-            self.scraper = FlashscoreScraper()
-            
-            # Start scraping with enhanced progress tracking
-            with self.progress.scraping_progress() as progress:
-                task = progress.add_task("Initializing...", total=1)
-                
-                # Start log monitoring in background with noise filtering
-                log_thread = threading.Thread(target=self._monitor_logs, daemon=True)
-                log_thread.start()
-                
-                def progress_callback(current, total):
-                    if current == 1:
-                        # First call - switch from "Initializing..." to "Processing match 1 of X"
-                        progress.update(task, description=f"Processing match {current} of {total}", total=total)
-                    else:
-                        # Update progress
-                        progress.update(task, description=f"Processing match {current} of {total}", completed=current)
-                
-                # Run scraper and capture results with complete output suppression
+            file_date = get_scraping_date(day)
+            scraper_log_path = os.path.join(log_dir, f"scraper_{file_date}.log")
+            self.output_filename = f"matches_{file_date}.json"
+            ensure_logging_configured(scraper_log_path)
+            self._show_log_file_info(scraper_log_path)
+            logging_status = get_logging_status()
+            if logging_status['configured']:
+                self.logger.info(f"✅ Logging configured: {logging_status['log_file']}")
+            else:
+                self.logger.warning("⚠️ Logging not properly configured")
+            self.scraper = FlashscoreScraper(status_callback=self._status_update)
+            self._should_stop_scraper = False
+            self.performance_display.set_stop_callback(self._stop_scraper)
+
+            def progress_callback(current, total):
+                stats = self.performance_monitor.get_stats()
+                self.performance_display.update_progress(current, total, f"Processing match {current} of {total}")
+                self.performance_display.update_current_task(f"Match {current}/{total}")
+                metrics = {
+                    "tasks_processed": current,
+                    "success_rate": (current / max(total, 1)) * 100 if total > 0 else 0,
+                    "active_workers": 1,
+                    "memory_usage": stats.get("memory_usage", 0),
+                    "cpu_usage": stats.get("cpu_usage", 0),
+                    "average_processing_time": stats.get("average_match_time", 0)
+                }
+                self.performance_display.update_metrics(metrics)
+
+            log_thread = threading.Thread(target=self._monitor_logs, daemon=True)
+            log_thread.start()
+
+            scraping_result = []
+            scraping_exception = []
+            def run_scraper():
                 try:
-                    with self._suppress_all_output():
-                        self.scraper.scrape(progress_callback=progress_callback, day=day)
-                    progress.update(task, description="Scraping completed!", completed=progress.tasks[0].total)
+                    with self._allow_status_messages():
+                        self.scraper.scrape(progress_callback=progress_callback, day=day, status_callback=self._status_update)
+                    scraping_result.append(True)
                 except Exception as e:
-                    progress.update(task, description="Scraping failed!", completed=progress.tasks[0].total)
-                    raise e
-                
-                # Wait a moment for any final logs
-                time.sleep(0.5)
+                    scraping_exception.append(e)
+            self._scraper_thread = threading.Thread(target=run_scraper)
+            self._scraper_thread.daemon = True
+            self._scraper_thread.start()
+
+            try:
+                self.performance_display.start()  # This now runs in the main thread and handles controls
+            except KeyboardInterrupt:
+                print("\nExiting on Ctrl+C")
+                self._should_stop_scraper = True
+                if self._scraper_thread.is_alive():
+                    self._scraper_thread.join(timeout=2)
+                sys.exit(0)
+            # After performance_display exits, join scraper thread if still running
+            if self._scraper_thread.is_alive():
+                self._should_stop_scraper = True
+                self._scraper_thread.join(timeout=2)
+            if scraping_exception:
+                self.performance_display.show_alert("Scraping failed!", alert_type="error")
+                raise scraping_exception[0]
+            elif scraping_result:
+                self.performance_display.show_alert("Scraping completed!", alert_type="success")
             
-            # Show detailed results
-            self.display.show_scraping_results(self.scraping_results, self.critical_messages)
+            # Wait 5 seconds, then clear screen and show summary
+            import time
+            time.sleep(5)
+            self.clear_terminal()
             
+            # Check if any matches were found and processed
+            total_matches = self.scraping_results.get('total_collected', 0)
+            new_matches = self.scraping_results.get('new_matches', 0)
+            skipped_matches = self.scraping_results.get('skipped_matches', 0)
+            
+            if total_matches > 0:
+                self.display_show_scraping_results(self.scraping_results, self.critical_messages)
+            elif new_matches == 0 and skipped_matches == 0:
+                # No matches found to process
+                self.display.show_no_matches_found()
+            else:
+                # Show summary even if no new matches but some were skipped
+                self.display_show_scraping_results(self.scraping_results, self.critical_messages)
+            
+            self.logger.info("Returning to main menu...")
+            time.sleep(1.2)
         except Exception as e:
             self.display.show_error(f"Scraping failed: {str(e)}")
             self.logger.error(f"Scraping error: {e}")
 
     def start_scraping_immediate(self):
-        """Start scraping immediately with current settings."""
         try:
-            # Reset results
             self.scraping_results = {}
             self.critical_messages = []
-            
-            # Use current settings (defaults or user-configured)
             self.display.show_scraping_start_immediate()
-            
-            # Setup logging with capture and noise filtering
             CONFIG.logging.log_to_console = False
             log_dir = CONFIG.logging.log_directory
             os.makedirs(log_dir, exist_ok=True)
             timestamp = datetime.now().strftime(CONFIG.logging.log_filename_date_format)
             scraper_log_path = os.path.join(log_dir, f"scraper_{timestamp}.log")
-            setup_logging(scraper_log_path)
-            
-            # Initialize scraper
-            self.scraper = FlashscoreScraper()
-            
-            # Start scraping with enhanced progress tracking
-            with self.progress.scraping_progress() as progress:
-                task = progress.add_task("Initializing...", total=1)
-                
-                # Start log monitoring in background with noise filtering
-                log_thread = threading.Thread(target=self._monitor_logs, daemon=True)
-                log_thread.start()
-                
-                def progress_callback(current, total):
-                    if current == 1:
-                        # First call - switch from "Initializing..." to "Processing match 1 of X"
-                        progress.update(task, description=f"Processing match {current} of {total}", total=total)
-                    else:
-                        # Update progress
-                        progress.update(task, description=f"Processing match {current} of {total}", completed=current)
-                
-                # Run scraper and capture results with complete output suppression
+            ensure_logging_configured(scraper_log_path)
+            self._show_log_file_info(scraper_log_path)
+            logging_status = get_logging_status()
+            if logging_status['configured']:
+                self.logger.info(f"✅ Logging configured: {logging_status['log_file']}")
+            else:
+                self.logger.warning("⚠️ Logging not properly configured")
+            self.scraper = FlashscoreScraper(status_callback=self._status_update)
+            self._should_stop_scraper = False
+            self.performance_display.set_stop_callback(self._stop_scraper)
+
+            def progress_callback(current, total):
+                self.performance_display.update_progress(current, total, f"Processing match {current} of {total}")
+                self.performance_display.update_current_task(f"Match {current}/{total}")
+                metrics = {
+                    "tasks_processed": current,
+                    "success_rate": (current / max(total, 1)) * 100 if total > 0 else 0,
+                    "active_workers": 1,
+                    "memory_usage": 0,
+                    "cpu_usage": 0,
+                    "average_processing_time": 0
+                }
+                self.performance_display.update_metrics(metrics)
+
+            log_thread = threading.Thread(target=self._monitor_logs, daemon=True)
+            log_thread.start()
+
+            scraping_result = []
+            scraping_exception = []
+            def run_scraper():
                 try:
-                    with self._suppress_all_output():
-                        self.scraper.scrape(progress_callback=progress_callback)
-                    progress.update(task, description="Scraping completed!", completed=progress.tasks[0].total)
+                    with self._allow_status_messages():
+                        self.scraper.scrape(progress_callback=progress_callback, status_callback=self._status_update)
+                    scraping_result.append(True)
                 except Exception as e:
-                    progress.update(task, description="Scraping failed!", completed=progress.tasks[0].total)
-                    raise e
-                
-                # Wait a moment for any final logs
-                time.sleep(0.5)
+                    scraping_exception.append(e)
+            self._scraper_thread = threading.Thread(target=run_scraper)
+            self._scraper_thread.daemon = True
+            self._scraper_thread.start()
+
+            try:
+                self.performance_display.start()  # This now runs in the main thread and handles controls
+            except KeyboardInterrupt:
+                print("\nExiting on Ctrl+C")
+                self._should_stop_scraper = True
+                if self._scraper_thread.is_alive():
+                    self._scraper_thread.join(timeout=2)
+                sys.exit(0)
+            # After performance_display exits, join scraper thread if still running
+            if self._scraper_thread.is_alive():
+                self._should_stop_scraper = True
+                self._scraper_thread.join(timeout=2)
+            if scraping_exception:
+                self.performance_display.show_alert("Scraping failed!", alert_type="error")
+                raise scraping_exception[0]
+            elif scraping_result:
+                self.performance_display.show_alert("Scraping completed!", alert_type="success")
             
-            # Show detailed results
-            self.display.show_scraping_results(self.scraping_results, self.critical_messages)
+            # Wait 5 seconds, then clear screen and show summary
+            import time
+            time.sleep(5)
+            self.clear_terminal()
             
+            # Check if any matches were found and processed
+            total_matches = self.scraping_results.get('total_collected', 0)
+            new_matches = self.scraping_results.get('new_matches', 0)
+            skipped_matches = self.scraping_results.get('skipped_matches', 0)
+            
+            if total_matches > 0:
+                self.display_show_scraping_results(self.scraping_results, self.critical_messages)
+            elif new_matches == 0 and skipped_matches == 0:
+                # No matches found to process
+                self.display.show_no_matches_found()
+            else:
+                # Show summary even if no new matches but some were skipped
+                self.display_show_scraping_results(self.scraping_results, self.critical_messages)
+            
+            self.logger.info("Returning to main menu...")
+            time.sleep(1.2)
         except Exception as e:
             self.display.show_error(f"Scraping failed: {str(e)}")
             self.logger.error(f"Scraping error: {e}")
@@ -874,17 +984,46 @@ class CLIManager:
                 return True
         return False
 
+    def _display_log_update(self, message):
+        """Display important log messages in real-time."""
+        # Show important messages immediately
+        if any(keyword in message.lower() for keyword in [
+            'error:', 'warning:', 'failed', 'success', 'completed', 'found', 'processing'
+        ]):
+            print(f"[yellow]📋 {message}[/yellow]")
+
     def _monitor_logs(self):
         """Monitor logs in background thread to capture all errors/warnings for summary display."""
         try:
-            # Capture logs from the scraper
+            # Create a custom log handler that captures to memory without console output
             log_capture = io.StringIO()
-            log_handler = logging.StreamHandler(log_capture)
-            log_handler.setLevel(logging.INFO)
             
-            # Add handler to root logger
+            class CaptureHandler(logging.Handler):
+                def __init__(self, capture_stream, display_callback=None):
+                    super().__init__()
+                    self.capture_stream = capture_stream
+                    self.display_callback = display_callback
+                
+                def emit(self, record):
+                    try:
+                        msg = self.format(record)
+                        self.capture_stream.write(msg + '\n')
+                        # Display important messages in real-time
+                        if self.display_callback:
+                            self.display_callback(msg)
+                    except Exception:
+                        pass
+            
+            log_handler = CaptureHandler(log_capture, self._display_log_update)
+            log_handler.setLevel(logging.INFO)
+            log_handler.setFormatter(logging.Formatter('%(message)s'))
+            
+            # Add handler to root logger (don't clear existing handlers)
             root_logger = logging.getLogger()
-            root_logger.addHandler(log_handler)
+            # Only add if we don't already have this type of handler
+            existing_capture_handlers = [h for h in root_logger.handlers if isinstance(h, CaptureHandler)]
+            if not existing_capture_handlers:
+                root_logger.addHandler(log_handler)
             
             # Also capture stderr to catch browser/system messages
             original_stderr = sys.stderr
@@ -912,6 +1051,8 @@ class CLIManager:
             finally:
                 # Restore original stderr
                 sys.stderr = original_stderr
+                # Remove our custom handler
+                root_logger.removeHandler(log_handler)
         except Exception as e:
             self.logger.error(f"Log monitoring error: {e}")
 
@@ -1064,7 +1205,7 @@ class CLIManager:
 
     @contextlib.contextmanager
     def _suppress_logging(self):
-        """Context manager to suppress logging output during interactive mode."""
+        """Context manager to suppress logging output during scraping."""
         # Store original handlers
         root_logger = logging.getLogger()
         original_handlers = root_logger.handlers.copy()
@@ -1079,25 +1220,25 @@ class CLIManager:
             root_logger.handlers = original_handlers
 
     @contextlib.contextmanager
-    def _suppress_all_output(self):
-        """Context manager to suppress ALL output during scraping."""
-        # Store original streams
-        original_stdout = sys.stdout
-        original_stderr = sys.stderr
+    def _allow_status_messages(self):
+        """Context manager that allows status messages while suppressing verbose logging."""
+        # Store original handlers
+        root_logger = logging.getLogger()
+        original_handlers = root_logger.handlers.copy()
         
-        # Redirect to null
-        null_fd = os.open(os.devnull, os.O_RDWR)
-        null_stream = os.fdopen(null_fd, 'w')
+        # Remove console handlers to suppress verbose logging
+        root_logger.handlers = [h for h in root_logger.handlers if not isinstance(h, logging.StreamHandler)]
+        
+        # Store original stdout to restore later
+        original_stdout = sys.stdout
         
         try:
-            sys.stdout = null_stream
-            sys.stderr = null_stream
+            # Allow status messages to go through
             yield
         finally:
-            # Restore original streams
+            # Restore original handlers and stdout
+            root_logger.handlers = original_handlers
             sys.stdout = original_stdout
-            sys.stderr = original_stderr
-            null_stream.close()
 
     def view_status(self):
         self._clear_and_header('status')
@@ -1252,6 +1393,32 @@ class CLIManager:
         """Clear the terminal screen for a clean CLI display."""
         import os
         os.system('cls' if os.name == 'nt' else 'clear')
+
+    def _status_update(self, message):
+        """Display status messages to the user."""
+        # Log the message to file only (no console output)
+        self.logger.info(message)
+        # Also update the performance display if available
+        if hasattr(self, 'performance_display'):
+            self.performance_display.update_current_task(message)
+
+    def _stop_scraper(self):
+        self._should_stop_scraper = True
+        self.logger.warning("Stop requested by user (s/Ctrl+C)")
+        if self._scraper_thread and self._scraper_thread.is_alive():
+            # Optionally, join the thread or set a stop flag in the scraper
+            # If scraper supports a stop method, call it here
+            pass
+
+    def display_show_scraping_results(self, results, critical_messages):
+        # Save results to the correct output file
+        from src.storage.json_storage import JSONStorage
+        storage = JSONStorage()
+        # results is a dict of match_id: MatchModel
+        matches = list(results.values()) if isinstance(results, dict) else results
+        storage.save_matches(matches, filename=self.output_filename)
+        # Then display as before
+        self.display.show_scraping_results(results, critical_messages)
 
 def main():
     """Main entry point for the CLI application."""

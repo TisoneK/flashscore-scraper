@@ -1,23 +1,18 @@
+#!/usr/bin/env python3
 """
-Example Usage of ScoreWise Prediction Module
-
-This file demonstrates how to use the ScoreWise prediction algorithm
-with the data models from your flashscore scraper.
+Example usage of the ScoreWise prediction algorithm.
 """
 
 import logging
-from src.models import MatchModel, H2HMatchModel, OddsModel
-from src.prediction import PredictionService, ScoreWiseCalculator, ScoreWiseConfig
+from src.models import MatchModel, OddsModel, H2HMatchModel
+from src.prediction.predictions.prediction_service import PredictionService
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 def create_example_match() -> MatchModel:
     """Create an example match with H2H data and odds for testing."""
     
-    # Create H2H matches (example data)
+    # Create H2H matches
     h2h_matches = [
         H2HMatchModel(
             match_id="h2h_1",
@@ -209,11 +204,11 @@ if __name__ == "__main__":
     try:
         # Demonstrate basic prediction
         demonstrate_prediction()
-        print("\n" + "="*50 + "\n")
+        logger.info("\n" + "="*50 + "\n")
         
         # Demonstrate batch predictions
         demonstrate_batch_predictions()
-        print("\n" + "="*50 + "\n")
+        logger.info("\n" + "="*50 + "\n")
         
         # Demonstrate service features
         demonstrate_service_features()

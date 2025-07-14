@@ -154,7 +154,6 @@ class SettingsPage:
             if config_path.exists():
                 self.config = ScraperConfig.load("src/config.json")
         except Exception as e:
-            print(f"Error loading config: {e}")
             # Use default config
     
     def _on_save_click(self, e):

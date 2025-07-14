@@ -1,6 +1,7 @@
 import glob
 import json
 import os
+import logging
 from typing import List, Optional
 from src.models import MatchModel, OddsModel, H2HMatchModel
 
@@ -10,13 +11,15 @@ def load_matches(date_filter: Optional[str] = None, status: str = "complete", de
     Optionally filter by date (format: 'dd.mm.yyyy') and status (default: 'complete').
     Returns a list of MatchModel objects.
     """
+    logger = logging.getLogger(__name__)
+    
     # Always resolve path relative to project root
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     json_dir = os.path.join(base_dir, "output", "json")
     
     if debug:
-        print(f"[DEBUG] date_filter: {date_filter}")
-        print(f"[DEBUG] status: {status}")
+        logger.debug(f"date_filter: {date_filter}")
+        logger.debug(f"status: {status}")
     
     # Pre-filter files by date if date_filter is provided
     if date_filter:
@@ -26,16 +29,16 @@ def load_matches(date_filter: Optional[str] = None, status: str = "complete", de
             file_pattern = f"matches_{day.zfill(2)}{month.zfill(2)}{year[-2:]}.json"
             match_files = glob.glob(os.path.join(json_dir, file_pattern))
             if debug:
-                print(f"[DEBUG] Looking for files matching pattern: {file_pattern}")
+                logger.debug(f"Looking for files matching pattern: {file_pattern}")
         except ValueError:
-            print(f"Invalid date format: {date_filter}. Expected format: dd.mm.yyyy")
+            logger.error(f"Invalid date format: {date_filter}. Expected format: dd.mm.yyyy")
             return []
     else:
         # Load all files if no date filter
         match_files = glob.glob(os.path.join(json_dir, "matches_*.json"))
     
     if debug:
-        print(f"[DEBUG] Found files: {match_files}")
+        logger.info(f"Found files: {match_files}")
     
     all_matches = []
     for file in match_files:
@@ -44,12 +47,12 @@ def load_matches(date_filter: Optional[str] = None, status: str = "complete", de
                 data = json.load(f)
                 matches = data.get("matches", [])
                 if debug:
-                    print(f"[DEBUG] {file}: {len(matches)} matches loaded")
+                    logger.debug(f"{file}: {len(matches)} matches loaded")
                 
                 # Filter matches by status and date
                 for m in matches:
                     if debug:
-                        print(f"[DEBUG] Match {m.get('match_id')}: date={m.get('date')}, status={m.get('status')}")
+                        logger.debug(f"Match {m.get('match_id')}: date={m.get('date')}, status={m.get('status')}")
                     
                     # Check status first
                     if m.get("status") != status:
@@ -62,12 +65,12 @@ def load_matches(date_filter: Optional[str] = None, status: str = "complete", de
                     all_matches.append(m)
                     
         except Exception as e:
-            print(f"Error loading {file}: {e}")
+            logger.error(f"Error loading {file}: {e}")
     
     if debug:
-        print(f"[DEBUG] Total matches after filtering: {len(all_matches)}")
+        logger.debug(f"Total matches after filtering: {len(all_matches)}")
         if all_matches:
-            print(f"[DEBUG] Dates of filtered matches: {[m.get('date') for m in all_matches]}")
+            logger.debug(f"Dates of filtered matches: {[m.get('date') for m in all_matches]}")
     
     # Convert to MatchModel objects
     match_models = []
@@ -107,6 +110,6 @@ def load_matches(date_filter: Optional[str] = None, status: str = "complete", de
             )
             match_models.append(match)
         except Exception as e:
-            print(f"Error parsing match {m.get('match_id')}: {e}")
+            logger.error(f"Error parsing match {m.get('match_id')}: {e}")
     
     return match_models 

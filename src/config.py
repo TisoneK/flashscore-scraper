@@ -97,7 +97,7 @@ class LoggingConfig:
     log_format: str = "%(asctime)s,%(msecs)03d %(levelname)s: %(message)s"
     log_date_format: str = "%Y-%m-%d %H:%M:%S"
     log_filename_date_format: str = "%y%m%d"
-    log_to_console: bool = True
+    log_to_console: bool = False
     log_to_file: bool = True
     max_log_size: int = 10 * 1024 * 1024  # 10MB
     backup_count: int = 5
@@ -402,6 +402,17 @@ class ScraperConfig:
                 'player_stats': 'div.stat__row',
                 'team_fouls': 'div.stat__row',
                 'timeouts': 'div.stat__row'
+            },
+            'calendar': {
+                'navigation': {
+                    'tomorrow_button': '[data-day-picker-arrow=\'next\']',
+                    'tomorrow_button_alt': '[aria-label=\'Next day\']',
+                    'tomorrow_button_class': '.wcl-arrow_8k9lP',
+                    'yesterday_button': '[data-day-picker-arrow=\'prev\']',
+                    'yesterday_button_alt': '[aria-label=\'Previous day\']',
+                    'today_button': '[data-day-picker-arrow=\'today\']',
+                    'today_button_alt': '[aria-label=\'Today\']'
+                }
             },
             'loading_indicator': 'loader'
         }

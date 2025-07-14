@@ -353,7 +353,7 @@ class DriverInstaller:
         # Check if version directory already exists before installing
         version_dir = self._get_clean_installation_paths(platform_key, version_str)
         if version_dir.exists():
-            print(f"⚠️ Chrome version {version_str} already exists at {version_dir}")
+            logger.warning(f"⚠️ Chrome version {version_str} already exists at {version_dir}")
             resp = input("Do you want to [r]einstall (overwrite) or [c]ancel? [r/c]: ").strip().lower()
             if resp == 'c':
                 logger.info(f"User cancelled installation")
@@ -390,22 +390,22 @@ class DriverInstaller:
         versions = self.get_available_versions()
         
         if not versions:
-            print("❌ Failed to fetch available versions")
+            logger.error("❌ Failed to fetch available versions")
             return
         
-        print(f"📋 Available Chrome for Testing versions ({len(versions)} total):")
-        print("-" * 80)
+        logger.info(f"📋 Available Chrome for Testing versions ({len(versions)} total):")
+        logger.info("-" * 80)
         
         for i, version_info in enumerate(versions[:20]):  # Show first 20 versions
             version = version_info['version']
             revision = version_info['revision']
-            print(f"{i+1:2d}. {version} (revision: {revision})")
+            logger.info(f"{i+1:2d}. {version} (revision: {revision})")
         
         if len(versions) > 20:
-            print(f"... and {len(versions) - 20} more versions")
+            logger.info(f"... and {len(versions) - 20} more versions")
         
-        print(f"\n💡 Use: fss --init chrome <major_version> to install a specific version")
-        print(f"💡 Example: fss --init chrome 138")
+        logger.info(f"\n💡 Use: fss --init chrome <major_version> to install a specific version")
+        logger.info(f"💡 Example: fss --init chrome 138")
     
     def check_installation(self) -> Dict[str, Any]:
         """Check the current driver installation status."""
@@ -495,9 +495,9 @@ class DriverInstaller:
                 return self.set_default_driver_version(version)
             
             # Multiple versions, let user choose
-            print(f"📋 Installed Chrome versions:")
+            logger.info(f"📋 Installed Chrome versions:")
             for i, version in enumerate(chrome_versions, 1):
-                print(f"  {i}. {version}")
+                logger.info(f"  {i}. {version}")
             
             while True:
                 try:
@@ -507,11 +507,11 @@ class DriverInstaller:
                         selected_version = chrome_versions[choice_idx]
                         return self.set_default_driver_version(selected_version)
                     else:
-                        print(f"Invalid choice. Please enter 1-{len(chrome_versions)}")
+                        logger.warning(f"Invalid choice. Please enter 1-{len(chrome_versions)}")
                 except ValueError:
-                    print("Invalid input. Please enter a number.")
+                    logger.warning("Invalid input. Please enter a number.")
                 except KeyboardInterrupt:
-                    print("\nCancelled")
+                    logger.info("\nCancelled")
                     return False
             
         except Exception as e:
@@ -535,27 +535,34 @@ def main():
     
     if args.check:
         status = installer.check_installation()
-        print(f"Platform: {status['platform']}")
-        print(f"Chrome installed: {status['chrome_installed']}")
-        print(f"ChromeDriver installed: {status['chromedriver_installed']}")
-        print(f"All installed: {status['all_installed']}")
+        logger.info(f"Platform: {status['platform']}")
+        logger.info(f"Chrome installed: {status['chrome_installed']}")
+        logger.info(f"ChromeDriver installed: {status['chromedriver_installed']}")
+        logger.info(f"All installed: {status['all_installed']}")
         if status['chrome_path']:
-            print(f"Chrome path: {status['chrome_path']}")
+            logger.info(f"Chrome path: {status['chrome_path']}")
         if status['chromedriver_path']:
-            print(f"ChromeDriver path: {status['chromedriver_path']}")
+            logger.info(f"ChromeDriver path: {status['chromedriver_path']}")
     
     elif args.list_versions:
         installer.list_available_versions()
     
     elif args.install:
-        results = installer.install_all(args.version)
-        if results:
-            print(f"Installation completed:")
-            print(f"  Chrome: {results.get('chrome', 'Not installed')}")
-            print(f"  ChromeDriver: {results.get('chromedriver', 'Not installed')}")
-            print(f"  Version: {results.get('version', 'Unknown')}")
+        if args.version:
+            logger.info(f"Installing Chrome version {args.version}...")
+            results = installer.install_all(version=args.version)
         else:
-            print("Installation failed")
+            logger.info("Installing latest Chrome version...")
+            results = installer.install_all()
+        
+        if results:
+            logger.info(f"Installation completed:")
+            logger.info(f"  Chrome: {results.get('chrome', 'Not installed')}")
+            logger.info(f"  ChromeDriver: {results.get('chromedriver', 'Not installed')}")
+            logger.info(f"  Version: {results.get('version', 'Unknown')}")
+            logger.info(f"  Platform: {results.get('platform', 'Unknown')}")
+        else:
+            logger.error("Installation failed")
     
     else:
         parser.print_help()

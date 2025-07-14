@@ -170,7 +170,7 @@ class HomePage:
                 self.page.update()
             
         except Exception as e:
-            print(f"Error refreshing stats: {e}")
+            pass
     
     def _update_activity_list(self, data: Dict[str, Any]):
         """Update the recent activity list"""

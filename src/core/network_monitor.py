@@ -53,6 +53,7 @@ class NetworkMonitor:
             'average_response_time': 0.0,
             'last_response_time': 0.0
         }
+        self.status_callback = None
 
     def is_connected(self) -> bool:
         """
@@ -101,27 +102,36 @@ class NetworkMonitor:
             time.sleep(1)
         return False
 
-    def start_monitoring(self):
+    def start_monitoring(self, status_callback: Optional[Callable[[str], None]] = None):
         """Start real-time network monitoring in background thread."""
         if self.monitoring:
             self.logger.debug("Network monitoring already started")
+            if status_callback:
+                status_callback("Network monitoring already started")
             return
             
         self.monitoring = True
+        self.status_callback = status_callback
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
         self.logger.info("🔍 Started real-time connection monitoring")
+        if status_callback:
+            status_callback("🔍 Started real-time connection monitoring")
 
     def stop_monitoring(self):
         """Stop network monitoring."""
         if not self.monitoring:
             self.logger.debug("Network monitoring already stopped")
+            if self.status_callback:
+                self.status_callback("Network monitoring already stopped")
             return
             
         self.monitoring = False
         if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_thread.join(timeout=2)
         self.logger.info("🛑 Stopped real-time connection monitoring")
+        if self.status_callback:
+            self.status_callback("🛑 Stopped real-time connection monitoring")
 
     def _monitor_loop(self):
         """Background monitoring loop."""
@@ -132,9 +142,11 @@ class NetworkMonitor:
                 # Detect status changes
                 if current_status != self.connection_status:
                     if current_status:
-                        self.logger.info("✅ Network connection restored")
+                        msg = "✅ Network connection restored"
+                        self.logger.info(msg)
                     else:
-                        self.logger.warning("⚠️ Network connection lost")
+                        msg = "⚠️ Network connection lost"
+                        self.logger.warning(msg)
                     
                     self.connection_status = current_status
                     
@@ -144,11 +156,16 @@ class NetworkMonitor:
                             callback(current_status)
                         except Exception as e:
                             self.logger.error(f"Error in network alert callback: {e}")
+                    # Also notify status_callback
+                    if self.status_callback:
+                        self.status_callback(msg)
                 
                 time.sleep(self.check_interval)
                 
             except Exception as e:
                 self.logger.error(f"Error in network monitoring loop: {e}")
+                if self.status_callback:
+                    self.status_callback(f"Error in network monitoring loop: {e}")
                 time.sleep(self.check_interval)
 
     def add_alert_callback(self, callback: Callable[[bool], None]):

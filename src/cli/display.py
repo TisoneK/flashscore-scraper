@@ -208,4 +208,17 @@ class ConsoleDisplay:
 
     def show_goodbye(self):
         """Show goodbye message."""
-        self.console.print("\n[bold blue]👋 Goodbye![/bold blue]") 
+        self.console.print("\n[bold blue]👋 Goodbye![/bold blue]")
+
+    def show_no_matches_found(self):
+        """Show message when no matches are found to scrape."""
+        self.console.print("\n" + "="*60)
+        self.console.print("[bold blue]📊 SCRAPING RESULTS[/bold blue]")
+        self.console.print("="*60)
+        self.console.print("\n[bold yellow]ℹ️  No matches found to process.[/bold yellow]")
+        self.console.print("[dim]This could mean:[/dim]")
+        self.console.print("[dim]• No matches are scheduled for the selected day[/dim]")
+        self.console.print("[dim]• All matches have already been processed[/dim]")
+        self.console.print("[dim]• The website may not have updated data yet[/dim]")
+        self.console.print("\n[dim]Try selecting a different day or check back later.[/dim]")
+        self.console.print("="*60) 

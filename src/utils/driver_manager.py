@@ -292,19 +292,19 @@ class DriverManager:
         """List all available Chrome versions."""
         versions = self.get_available_versions()
         
-        print("📋 Available Chrome for Testing versions:")
-        print("=" * 50)
+        logger.info("📋 Available Chrome for Testing versions:")
+        logger.info("=" * 50)
         
         for i, version_info in enumerate(versions[:10]):  # Show first 10 versions
             version = version_info['version']
             revision = version_info['revision']
-            print(f"{i+1:2d}. {version} (revision: {revision})")
+            logger.info(f"{i+1:2d}. {version} (revision: {revision})")
         
         if len(versions) > 10:
-            print(f"... and {len(versions) - 10} more versions")
+            logger.info(f"... and {len(versions) - 10} more versions")
         
-        print(f"\n💡 Use: fss --install-drivers chrome <major_version>")
-        print(f"   Example: fss --install-drivers chrome 138")
+        logger.info(f"\n💡 Use: fss --install-drivers chrome <major_version>")
+        logger.info(f"   Example: fss --install-drivers chrome 138")
     
     def check_installation(self) -> Dict[str, Any]:
         """Check if Chrome and ChromeDriver are properly installed."""
@@ -365,9 +365,9 @@ def main():
         driver_manager.install_all(args.version)
     elif args.check:
         status = driver_manager.check_installation()
-        print(f"Platform: {status['platform']}")
-        print(f"Chrome installed: {status['chrome_installed']}")
-        print(f"ChromeDriver installed: {status['chromedriver_installed']}")
+        logger.info(f"Platform: {status['platform']}")
+        logger.info(f"Chrome installed: {status['chrome_installed']}")
+        logger.info(f"ChromeDriver installed: {status['chromedriver_installed']}")
     else:
         parser.print_help()
 

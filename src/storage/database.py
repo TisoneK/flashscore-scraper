@@ -5,7 +5,7 @@ from datetime import datetime
 import sqlite3
 from pathlib import Path
 
-from ..models import MatchModel
+from src.models import MatchModel
 
 logger = logging.getLogger(__name__)
 

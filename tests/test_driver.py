@@ -85,23 +85,26 @@ def test_driver_manager_lifecycle():
 
 
 if __name__ == "__main__":
-    print("Testing cross-platform WebDriver configuration...")
-    print(f"Current OS: {platform.system()}")
-    print(f"Current browser config: {CONFIG.browser.browser_name}")
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info("Testing cross-platform WebDriver configuration...")
+    logger.info(f"Current OS: {platform.system()}")
+    logger.info(f"Current browser config: {CONFIG.browser.browser_name}")
     
     # Run basic initialization test
     test_driver_initialization()
-    print("✓ Basic driver initialization test passed")
+    logger.info("✓ Basic driver initialization test passed")
     
     # Run OS detection test
     test_os_detection()
-    print("✓ OS detection test passed")
+    logger.info("✓ OS detection test passed")
     
     # Run browser-specific tests
     test_chrome_driver_selection()
-    print("✓ Chrome driver selection test passed")
+    logger.info("✓ Chrome driver selection test passed")
     
     test_firefox_driver_selection()
-    print("✓ Firefox driver selection test passed")
+    logger.info("✓ Firefox driver selection test passed")
     
-    print("✓ All tests passed!") 
+    logger.info("✓ All tests passed!") 

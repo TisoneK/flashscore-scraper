@@ -42,36 +42,41 @@ def run_specific_test(test_module):
         
         return result.wasSuccessful()
     except ImportError as e:
-        print(f"Error: Could not import test module '{test_module}': {e}")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error: Could not import test module '{test_module}': {e}")
         return False
 
 
 def list_available_tests():
     """List all available test modules"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     test_dir = os.path.dirname(__file__)
     test_files = [f for f in os.listdir(test_dir) if f.startswith('test_') and f.endswith('.py')]
     
-    print("Available test modules:")
+    logger.info("Available test modules:")
     for test_file in sorted(test_files):
         module_name = test_file[:-3]  # Remove .py extension
-        print(f"  - {module_name}")
+        logger.info(f"  - {module_name}")
     
-    print(f"\nTotal: {len(test_files)} test modules")
+    logger.info(f"\nTotal: {len(test_files)} test modules")
     
     # Group tests by category
-    print("\nTest Categories:")
-    print("  📊 Data Models:")
-    print("    - test_models")
-    print("    - test_elements_model")
-    print("  🔄 Data Loaders:")
-    print("    - test_data_loaders")
-    print("  📈 Data Extractors:")
-    print("    - test_odds_data_extractor")
-    print("    - test_data_extractors")
-    print("  ✅ Data Verifiers:")
-    print("    - test_data_verifiers")
-    print("  🕷️  Scraper:")
-    print("    - test_scraper")
+    logger.info("\nTest Categories:")
+    logger.info("  📊 Data Models:")
+    logger.info("    - test_models")
+    logger.info("    - test_elements_model")
+    logger.info("  🔄 Data Loaders:")
+    logger.info("    - test_data_loaders")
+    logger.info("  📈 Data Extractors:")
+    logger.info("    - test_odds_data_extractor")
+    logger.info("    - test_data_extractors")
+    logger.info("  ✅ Data Verifiers:")
+    logger.info("    - test_data_verifiers")
+    logger.info("  🕷️  Scraper:")
+    logger.info("    - test_scraper")
 
 
 def run_test_category(category):
@@ -86,16 +91,21 @@ def run_test_category(category):
     }
     
     if category not in categories:
-        print(f"Error: Unknown category '{category}'")
-        print("Available categories:", list(categories.keys()))
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error: Unknown category '{category}'")
+        logger.error("Available categories:", list(categories.keys()))
         return False
     
     if category == 'all':
         return run_all_tests()
     
+    import logging
+    logger = logging.getLogger(__name__)
+    
     success = True
     for test_module in categories[category]:
-        print(f"\nRunning {test_module}...")
+        logger.info(f"\nRunning {test_module}...")
         if not run_specific_test(test_module):
             success = False
     
@@ -116,21 +126,24 @@ def main():
         list_available_tests()
         return
     
+    import logging
+    logger = logging.getLogger(__name__)
+    
     if args.category:
-        print(f"Running tests for category: {args.category}")
+        logger.info(f"Running tests for category: {args.category}")
         success = run_test_category(args.category)
     elif args.module:
-        print(f"Running test module: {args.module}")
+        logger.info(f"Running test module: {args.module}")
         success = run_specific_test(args.module)
     else:
-        print("Running all tests...")
+        logger.info("Running all tests...")
         success = run_all_tests()
     
     if success:
-        print("\n✅ All tests passed!")
+        logger.info("\n✅ All tests passed!")
         sys.exit(0)
     else:
-        print("\n❌ Some tests failed!")
+        logger.info("\n❌ Some tests failed!")
         sys.exit(1)
 
 

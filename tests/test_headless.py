@@ -11,42 +11,45 @@ import time
 
 def test_headless_mode():
     """Test if headless mode is properly configured."""
-    print("🔍 Testing headless mode configuration...")
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info("🔍 Testing headless mode configuration...")
     
     # Check current config
-    print(f"📋 Current headless setting: {CONFIG.browser.headless}")
+    logger.info(f"📋 Current headless setting: {CONFIG.browser.headless}")
     
     # Initialize driver
     driver_manager = WebDriverManager()
     
     try:
-        print("🚀 Initializing WebDriver...")
+        logger.info("🚀 Initializing WebDriver...")
         driver_manager.initialize()
         
         driver = driver_manager.get_driver()
         if driver:
-            print("✅ WebDriver initialized successfully")
+            logger.info("✅ WebDriver initialized successfully")
             
             # Check if headless mode is active
             capabilities = driver.capabilities
-            print(f"📊 Browser capabilities: {capabilities}")
+            logger.info(f"📊 Browser capabilities: {capabilities}")
             
             # Navigate to a simple page to test
-            print("🌐 Navigating to test page...")
+            logger.info("🌐 Navigating to test page...")
             driver.get("https://www.google.com")
             time.sleep(2)
             
             title = driver.title
-            print(f"📄 Page title: {title}")
+            logger.info(f"📄 Page title: {title}")
             
-            print("✅ Headless mode test completed successfully")
+            logger.info("✅ Headless mode test completed successfully")
             
     except Exception as e:
-        print(f"❌ Error during headless test: {e}")
+        logger.error(f"❌ Error during headless test: {e}")
     finally:
         if driver_manager.driver:
             driver_manager.close()
-            print("🔒 WebDriver closed")
+            logger.info("🔒 WebDriver closed")
 
 if __name__ == "__main__":
     test_headless_mode() 

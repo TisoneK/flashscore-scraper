@@ -22,7 +22,8 @@ class ScraperPrompts:
             message="Select day to scrape:",
             choices=[
                 "Today",
-                "Tomorrow"
+                "Tomorrow",
+                "Back"
             ],
             default="Today"
         ).execute()
@@ -34,6 +35,7 @@ class ScraperPrompts:
             choices=[
                 "Yesterday",
                 "Today",
+                "Tomorrow",
                 "All",
                 "Back"
             ],

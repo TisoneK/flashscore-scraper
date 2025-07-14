@@ -238,6 +238,17 @@
         },
         "loading_indicator": "loader"
     },
+    "calendar": {
+        "navigation": {
+            "tomorrow_button": "[data-day-picker-arrow='next']",
+            "tomorrow_button_alt": "[aria-label='Next day']",
+            "tomorrow_button_class": ".wcl-arrow_8k9lP",
+            "yesterday_button": "[data-day-picker-arrow='prev']",
+            "yesterday_button_alt": "[aria-label='Previous day']",
+            "today_button": "[data-day-picker-arrow='today']",
+            "today_button_alt": "[aria-label='Today']"
+        }
+    },
     "scraping": {
         "max_matches": 3,
         "min_h2h_matches": 6,

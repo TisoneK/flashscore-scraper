@@ -178,7 +178,6 @@ class ResultsView:
                     
                     matches.append(match)
                 except Exception as e:
-                    print(f"Error loading match {match_data.get('match_id', 'unknown')}: {e}")
                     continue
             
             return matches
@@ -373,12 +372,12 @@ class ResultsView:
     def _show_error(self, message: str):
         """Show error message"""
         # This could be enhanced with a proper notification system
-        print(f"ERROR: {message}")
+        pass
     
     def _show_success(self, message: str):
         """Show success message"""
         # This could be enhanced with a proper notification system
-        print(f"SUCCESS: {message}")
+        pass
     
     def build(self):
         return ft.Container(

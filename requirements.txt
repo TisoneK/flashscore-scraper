@@ -17,4 +17,7 @@ pytest>=7.0.0
 # Additional utilities
 pathlib2>=2.3.7
 typing-extensions>=4.8.0 
-ping3 
+ping3
+
+# Performance monitoring
+psutil>=5.9.0 

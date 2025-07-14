@@ -1,8 +1,8 @@
 from typing import Optional, Dict
-from ..elements_model import MatchElements
+from src.data.elements_model import MatchElements
 from src.utils.utils import format_date, split_date_time
 from src.data.verifier.match_data_verifier import MatchDataVerifier
-from ...models import MatchModel
+from src.models import MatchModel
 
 class MatchDataExtractor:
     def __init__(self, loader):
@@ -18,14 +18,22 @@ class MatchDataExtractor:
             self._loader = None
             self._last_extracted_data = None
 
-    def extract_match_data(self, elements: Optional[MatchElements] = None) -> MatchModel:
+    def extract_match_data(self, elements: Optional[MatchElements] = None, status_callback=None) -> MatchModel:
         """
         Extracts match data from the loader's elements or from a provided elements object.
         :param elements: Optionally, a MatchElements object to extract from.
+        :param status_callback: Optional callback function for status updates.
         :return: A MatchModel object with the extracted data.
         """
         try:
-            elements = elements or self._loader.elements
+            if status_callback:
+                status_callback("Extracting match data...")
+            
+            elements = elements or (self._loader.elements if self._loader else None)
+            
+            if elements is None:
+                print("Error: No elements available for extraction")
+                return MatchModel(match_id="", country="", league="", home_team="", away_team="", date="", time="")
 
             def normalize(value):
                 if value is None:
@@ -34,18 +42,24 @@ class MatchDataExtractor:
                 return value if value else None
 
             # Extract and verify each field
+            if status_callback:
+                status_callback("Extracting country information...")
             country = normalize(elements.country.text) if elements.country and getattr(elements.country, 'text', None) else None
             is_valid, error = self.match_data_verifier.verify_country(country)
             if not is_valid:
                 print(f"Error verifying country: {error}")
                 country = None
 
+            if status_callback:
+                status_callback("Extracting league information...")
             league = normalize(elements.league.text) if elements.league and getattr(elements.league, 'text', None) else None
             is_valid, error = self.match_data_verifier.verify_league(league)
             if not is_valid:
                 print(f"Error verifying league: {error}")
                 league = None
 
+            if status_callback:
+                status_callback("Extracting team information...")
             home_team = normalize(elements.home_team.text) if elements.home_team and getattr(elements.home_team, 'text', None) else None
             is_valid, error = self.match_data_verifier.verify_home_team(home_team)
             if not is_valid:
@@ -58,6 +72,8 @@ class MatchDataExtractor:
                 print(f"Error verifying away_team: {error}")
                 away_team = None
 
+            if status_callback:
+                status_callback("Extracting date and time information...")
             date_time_str = normalize(elements.date.text) if elements.date and getattr(elements.date, 'text', None) else None
             date, time = split_date_time(date_time_str) if date_time_str else (None, None)
 
@@ -77,25 +93,31 @@ class MatchDataExtractor:
                 print(f"Error verifying match_id: {error}")
                 match_id = None
 
+            if status_callback:
+                status_callback("Creating match model...")
+
             # Create a MatchModel instance
             match_data = MatchModel(
-                country=country,
-                league=league,
-                home_team=home_team,
-                away_team=away_team,
-                date=date,
-                time=time,
-                match_id=match_id
+                country=country or "",
+                league=league or "",
+                home_team=home_team or "",
+                away_team=away_team or "",
+                date=date or "",
+                time=time or "",
+                match_id=match_id or ""
             )
             
             # For compatibility with existing property setters, we can store the dict representation
             self._last_extracted_data = match_data.to_dict()
 
+            if status_callback:
+                status_callback("Match data extraction completed.")
+
             return match_data
         except Exception as e:
             print(f"Error extracting match data: {e}")
             self._last_extracted_data = None
-            return MatchModel() # Return an empty model on error
+            return MatchModel(match_id="", country="", league="", home_team="", away_team="", date="", time="") # Return an empty model on error
 
     def get_last_extracted_data(self) -> Optional[Dict[str, Optional[str]]]:
         """Returns the last extracted match data, or None if not extracted yet."""

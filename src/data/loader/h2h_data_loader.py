@@ -1,12 +1,12 @@
 import logging
-from ..elements_model import H2HElements
+from src.data.elements_model import H2HElements
 from typing import Optional
-from ...config import CONFIG, SELECTORS, H2H_URL, MIN_H2H_MATCHES
-from ...core.url_verifier import URLVerifier
-from ...core.network_monitor import NetworkMonitor
-from ...core.retry_manager import NetworkRetryManager
+from src.config import CONFIG, SELECTORS, H2H_URL, MIN_H2H_MATCHES
+from src.core.url_verifier import URLVerifier
+from src.core.network_monitor import NetworkMonitor
+from src.core.retry_manager import NetworkRetryManager
 from selenium.webdriver.remote.webdriver import WebDriver
-from ..verifier.h2h_data_verifier import H2HDataVerifier
+from src.data.verifier.h2h_data_verifier import H2HDataVerifier
 from src.core.exceptions import DataNotFoundError, DataParseError, DataValidationError, DataUnavailableWarning
 
 logger = logging.getLogger(__name__)
@@ -59,8 +59,10 @@ class H2HDataLoader:
     def get_h2h_row_count(self, h2h_rows):
         return len(h2h_rows)
 
-    def load_h2h(self, match_id: str) -> bool:
+    def load_h2h(self, match_id: str, status_callback=None) -> bool:
         """Load the H2H page for a match and extract all required elements with network resilience."""
+        if status_callback:
+            status_callback(f"Loading H2H data for match {match_id}...")
         def _load_operation():
             url = H2H_URL.format(match_id=match_id)
             success, error = self.url_verifier.load_and_verify_url(url)
@@ -68,44 +70,40 @@ class H2HDataLoader:
                 raise Exception(f"Error loading H2H page for {match_id}: {error}")
             if self.selenium_utils:
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
-            
             self.elements.h2h_section = self.get_h2h_section()
             is_valid, error = self.h2h_data_verifier.verify_h2h_section(self.elements.h2h_section)
             if not is_valid:
                 raise Exception(f"Error verifying h2h_section for {match_id}: {error}")
-            
-            # Try to click 'show more' in the third section
             show_more_selector = SELECTORS['h2h']['show_more']
             show_more_btn = self._safe_find_element('css', show_more_selector, parent=self.elements.h2h_section)
             if show_more_btn and show_more_btn.is_displayed():
                 show_more_btn.click()
                 if self.selenium_utils:
                     self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+                if status_callback:
+                    status_callback(f"Clicked 'show more' for H2H data on match {match_id}.")
             else:
                 logger.warning(f"'Show more' button not present in H2H section for {match_id}. Insufficient H2H data likely.")
-            
             self.elements.h2h_rows = self.get_h2h_rows(self.elements.h2h_section)
             self.elements.h2h_row_count = self.get_h2h_row_count(self.elements.h2h_rows)
-            
             is_valid, error = self.h2h_data_verifier.verify_h2h_rows(self.elements.h2h_rows)
             if not is_valid:
                 raise Exception(f"Error verifying h2h_rows for {match_id}: {error}")
-            
             is_valid, error = self.h2h_data_verifier.verify_h2h_row_count(self.elements.h2h_row_count)
             if not is_valid:
                 raise Exception(f"Error verifying h2h_row_count for {match_id}: {error}")
-            
             return True
-
         try:
-            # Execute with retry logic
             result = self.retry_manager.retry_network_operation(_load_operation)
+            if status_callback:
+                status_callback(f"H2H data loaded for match {match_id}.")
             return result
-            
         except Exception as e:
             logger.error(f"Failed to load H2H page for {match_id} after retries: {e}")
             self.elements.h2h_rows = []
             self.elements.h2h_row_count = 0
+            if status_callback:
+                status_callback(f"Failed to load H2H data for match {match_id}: {e}")
             return False
 
     def _safe_find_element(self, locator: str, value: str, parent: Optional[object] = None):

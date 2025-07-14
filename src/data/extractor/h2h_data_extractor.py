@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict
-from ..elements_model import H2HElements
+from src.data.elements_model import H2HElements
 from src.utils.utils import format_date
 from src.data.verifier.h2h_data_verifier import H2HDataVerifier
 from src.config import MIN_H2H_MATCHES
@@ -23,22 +23,32 @@ class H2HDataExtractor:
             self._last_extracted_data = None
 
     def _extract_date(self, row) -> Optional[str]:
+        if self._loader is None:
+            return None
         el = self._loader.get_date(row)
         return el.text.strip() if el and hasattr(el, 'text') else None
 
     def _extract_home_team(self, row) -> Optional[str]:
+        if self._loader is None:
+            return None
         el = self._loader.get_home_team(row)
         return el.text.strip() if el and hasattr(el, 'text') else None
 
     def _extract_away_team(self, row) -> Optional[str]:
+        if self._loader is None:
+            return None
         el = self._loader.get_away_team(row)
         return el.text.strip() if el and hasattr(el, 'text') else None
 
     def _extract_result(self, row) -> Optional[str]:
+        if self._loader is None:
+            return None
         el = self._loader.get_result(row)
         return el.text.strip() if el and hasattr(el, 'text') else None
 
     def _extract_competition(self, row) -> Optional[str]:
+        if self._loader is None:
+            return None
         el = self._loader.get_competition(row) if hasattr(self._loader, 'get_competition') else row.get('competition')
         return el.text.strip() if el and hasattr(el, 'text') else None
 
@@ -50,18 +60,26 @@ class H2HDataExtractor:
         el = row.get('away_score')
         return el.text.strip() if el and hasattr(el, 'text') else None
 
-    def extract_h2h_data(self, elements: Optional[H2HElements] = None) -> List[Dict[str, Optional[str]]]:
-        """
-        Extracts h2h data from the loader's elements or from a provided elements object.
-        :param elements: Optionally, a H2HElements object to extract from.
-        :return: List of dictionaries with h2h match data.
-        """
+    def extract_h2h_data(self, elements: Optional[H2HElements] = None, status_callback=None) -> List[Dict[str, Optional[str]]]:
         try:
-            elements = elements or self._loader.elements
+            if status_callback:
+                status_callback("Extracting H2H data...")
+            
+            elements = elements or (self._loader.elements if self._loader else None)
+            if elements is None:
+                print("Error: No elements available for H2H extraction")
+                return []
+            
             h2h_matches = []
             if elements.h2h_rows:
+                if status_callback:
+                    status_callback(f"Processing {len(elements.h2h_rows)} H2H matches...")
+                
                 for row in elements.h2h_rows[:MIN_H2H_MATCHES]:
                     try:
+                        if status_callback:
+                            status_callback("Extracting H2H match details...")
+                        
                         date = self._extract_date(row)
                         date = format_date(date)
                         home_team = self._extract_home_team(row)
@@ -91,6 +109,10 @@ class H2HDataExtractor:
                         print(f"Error extracting h2h row: {e}")
                         continue
             self._last_extracted_data = h2h_matches
+            
+            if status_callback:
+                status_callback(f"H2H data extraction completed. Found {len(h2h_matches)} matches.")
+            
             return h2h_matches
         except Exception as e:
             print(f"Error extracting h2h data: {e}")

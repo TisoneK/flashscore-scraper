@@ -7,6 +7,7 @@ This script can be used to run the scraper without manually activating the venv.
 import os
 import sys
 import subprocess
+import logging
 from pathlib import Path
 
 def find_venv_activate():
@@ -23,11 +24,12 @@ def find_venv_activate():
 
 def run_in_venv(command_args):
     """Run a command in the virtual environment."""
+    logger = logging.getLogger(__name__)
     activate_script = find_venv_activate()
     
     if not activate_script:
-        print("❌ Virtual environment not found!")
-        print("💡 Please run: flashscore-scraper --init")
+        logger.error("❌ Virtual environment not found!")
+        logger.info("💡 Please run: flashscore-scraper --init")
         return 1
     
     if sys.platform == "win32":
@@ -43,13 +45,15 @@ def run_in_venv(command_args):
 
 def main():
     """Main entry point."""
+    logger = logging.getLogger(__name__)
+    
     if len(sys.argv) < 2:
-        print("Usage: python activate_and_run.py [command] [args...]")
-        print("Commands:")
-        print("  init    - Initialize project")
-        print("  ui      - Launch GUI")
-        print("  cli     - Launch CLI")
-        print("  help    - Show help")
+        logger.info("Usage: python activate_and_run.py [command] [args...]")
+        logger.info("Commands:")
+        logger.info("  init    - Initialize project")
+        logger.info("  ui      - Launch GUI")
+        logger.info("  cli     - Launch CLI")
+        logger.info("  help    - Show help")
         return 1
     
     command = sys.argv[1]
@@ -64,8 +68,8 @@ def main():
     }
     
     if command not in command_map:
-        print(f"❌ Unknown command: {command}")
-        print("Available commands: init, ui, cli, help")
+        logger.error(f"❌ Unknown command: {command}")
+        logger.info("Available commands: init, ui, cli, help")
         return 1
     
     return run_in_venv(command_map[command] + args)

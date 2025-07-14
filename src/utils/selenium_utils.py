@@ -7,7 +7,7 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.webdriver import WebDriver
 import time
 import logging
-from ..config import CONFIG, SELECTORS
+from src.config import CONFIG, SELECTORS
 
 logger = logging.getLogger(__name__)
 
@@ -302,7 +302,7 @@ class SeleniumUtils:
             try:
                 self.driver.quit()
             except Exception as e:
-                print(f"Error closing WebDriver: {e}")
+                self.logger.error(f"Error closing WebDriver: {e}")
             finally:
                 self.driver = None
 

@@ -2,8 +2,8 @@
 import logging
 from typing import Optional, Tuple
 
-from ..config import CONFIG, SELECTORS
-from ..utils import SeleniumUtils
+from src.config import CONFIG, SELECTORS
+from src.utils import SeleniumUtils
 
 logger = logging.getLogger(__name__)
 

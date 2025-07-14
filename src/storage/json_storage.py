@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Set
 from pathlib import Path
 
-from ..models import MatchModel
+from src.models import MatchModel
 from src.config import MIN_H2H_MATCHES
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ class JSONStorage:
             return {}
             
     def save_matches(self, matches: List[MatchModel], filename: Optional[str] = None) -> bool:
-        print(f"[DEBUG] JSONStorage.save_matches called with {len(matches)} match(es). First match_id: {getattr(matches[0], 'match_id', None) if matches else None}")
+        logger.debug(f"JSONStorage.save_matches called with {len(matches)} match(es). First match_id: {getattr(matches[0], 'match_id', None) if matches else None}")
         try:
             filepath = self._get_daily_filepath() if filename is None else self.base_dir / filename
 
@@ -72,7 +72,7 @@ class JSONStorage:
 
             for match in matches:
                 match_id = match.match_id
-                print(f"[DEBUG] Processing match for JSON output: match_id={match_id}, status={getattr(match, 'status', None)}")
+                logger.debug(f"Processing match for JSON output: match_id={match_id}, status={getattr(match, 'status', None)}")
                 if match.status == "complete":
                     existing_complete[match_id] = match.to_dict()
                     if match_id in existing_skipped:
@@ -86,7 +86,7 @@ class JSONStorage:
             
             final_complete_list = list(existing_complete.values())
             final_skipped_list = list(existing_skipped.values())
-            print(f"[DEBUG] Saving {len(final_complete_list)} complete matches and {len(final_skipped_list)} skipped matches to {filepath}")
+            logger.debug(f"Saving {len(final_complete_list)} complete matches and {len(final_skipped_list)} skipped matches to {filepath}")
 
             data['matches'] = final_complete_list
             data['metadata'].update({
@@ -111,11 +111,11 @@ class JSONStorage:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
-            print(f"[DEBUG] JSON file updated for match {matches[0].match_id if matches else None}. Total complete: {len(final_complete_list)}, total skipped: {len(final_skipped_list)}.")
+            logger.debug(f"JSON file updated for match {matches[0].match_id if matches else None}. Total complete: {len(final_complete_list)}, total skipped: {len(final_skipped_list)}.")
             logger.info(f"JSON file updated for match {matches[0].match_id}. Total complete: {len(final_complete_list)}, total skipped: {len(final_skipped_list)}.")
             return True
         except Exception as e:
-            print(f"[DEBUG] Error saving matches to {filepath}: {str(e)}")
+            logger.debug(f"Error saving matches to {filepath}: {str(e)}")
             logger.error(f"Error saving matches to {filepath}: {str(e)}")
             return False
 

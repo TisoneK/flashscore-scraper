@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Platform-independent setup script for FlashScore Scraper.
-Detects the current platform and sets up appropriate drivers and Chrome installation.
+Platform setup script for FlashScore Scraper
 """
 
 import os
@@ -12,6 +11,7 @@ import urllib.request
 import zipfile
 import tarfile
 import shutil
+import logging
 from pathlib import Path
 import warnings
 
@@ -27,11 +27,13 @@ class PlatformSetup:
         
     def detect_platform(self):
         """Detect the current platform and architecture."""
-        print(f"🔍 Detecting platform...")
-        print(f"   System: {platform.system()}")
-        print(f"   Machine: {platform.machine()}")
-        print(f"   Platform: {platform.platform()}")
-        print(f"   Python: {sys.version}")
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"🔍 Detecting platform...")
+        logger.info(f"   System: {platform.system()}")
+        logger.info(f"   Machine: {platform.machine()}")
+        logger.info(f"   Platform: {platform.platform()}")
+        logger.info(f"   Python: {sys.version}")
         
         if self.system == 'windows':
             if '64' in self.machine or 'x86_64' in self.machine:
@@ -51,11 +53,13 @@ class PlatformSetup:
             else:
                 return 'macos-x64'
         else:
-            print(f"⚠️  Unknown platform: {self.system}")
+            logger.warning(f"⚠️  Unknown platform: {self.system}")
             return 'unknown'
     
     def get_chrome_version(self):
         """Get the installed Chrome version."""
+        logger = logging.getLogger(__name__)
+        
         try:
             if self.system == 'windows':
                 # Try to get Chrome version from registry or executable
@@ -72,10 +76,10 @@ class PlatformSetup:
                                                  capture_output=True, text=True, timeout=10)
                             if result.returncode == 0:
                                 version = result.stdout.strip().split()[-1]
-                                print(f"   Found Chrome version: {version}")
+                                logger.debug(f"   Found Chrome version: {version}")
                                 return version
                         except Exception as e:
-                            print(f"   Could not get version from {path}: {e}")
+                            logger.debug(f"   Could not get version from {path}: {e}")
                             continue
                             
             elif self.system == 'linux':
@@ -93,20 +97,22 @@ class PlatformSetup:
                     return version
                     
         except Exception as e:
-            print(f"⚠️  Could not detect Chrome version: {e}")
+            logger.warning(f"⚠️  Could not detect Chrome version: {e}")
             
         return None
     
     def download_chromedriver(self, chrome_version=None):
         """Download the appropriate ChromeDriver version."""
+        logger = logging.getLogger(__name__)
+        
         if not chrome_version:
             chrome_version = self.get_chrome_version()
             
         if not chrome_version:
-            print("⚠️  Could not detect Chrome version, using Chrome 138.* compatible version")
+            logger.warning("⚠️  Could not detect Chrome version, using Chrome 138.* compatible version")
             chrome_version = "138.0.7044.0"  # Chrome 138.* compatible version
         
-        print(f"📥 Downloading ChromeDriver for Chrome {chrome_version}...")
+        logger.info(f"📥 Downloading ChromeDriver for Chrome {chrome_version}...")
         
         # Determine the platform-specific ChromeDriver URL
         platform_map = {
@@ -128,7 +134,7 @@ class PlatformSetup:
                 with urllib.request.urlopen(base_url) as response:
                     chrome_version = response.read().decode('utf-8').strip()
             except Exception as e:
-                print(f"⚠️  Could not get latest version: {e}")
+                logger.warning(f"⚠️  Could not get latest version: {e}")
                 chrome_version = "138.0.7044.0"  # Fallback version
         
         driver_url = f"https://chromedriver.storage.googleapis.com/{chrome_version}/chromedriver_{driver_platform}.zip"
@@ -140,12 +146,12 @@ class PlatformSetup:
         # Check if ChromeDriver already exists
         driver_file = platform_dir / f"chromedriver{'.exe' if self.system == 'windows' else ''}"
         if driver_file.exists():
-            print(f"✅ ChromeDriver already exists at: {driver_file}")
+            logger.info(f"✅ ChromeDriver already exists at: {driver_file}")
             return str(driver_file)
         
         # Download and extract ChromeDriver
         try:
-            print(f"   Downloading from: {driver_url}")
+            logger.info(f"   Downloading from: {driver_url}")
             urllib.request.urlretrieve(driver_url, driver_file.with_suffix('.zip'))
             
             # Extract the zip file
@@ -159,17 +165,19 @@ class PlatformSetup:
             # Clean up zip file
             driver_file.with_suffix('.zip').unlink()
             
-            print(f"✅ ChromeDriver downloaded to: {driver_file}")
+            logger.info(f"✅ ChromeDriver downloaded to: {driver_file}")
             return str(driver_file)
             
         except Exception as e:
-            print(f"❌ Failed to download ChromeDriver: {e}")
-            print(f"   This is normal if ChromeDriver already exists or network issues occur")
+            logger.error(f"❌ Failed to download ChromeDriver: {e}")
+            logger.info(f"   This is normal if ChromeDriver already exists or network issues occur")
             return None
     
     def setup_chrome_installation(self):
         """Set up Chrome installation for the current platform."""
-        print(f"🔧 Setting up Chrome installation for {self.system}...")
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"🔧 Setting up Chrome installation for {self.system}...")
         
         platform_dir = self.drivers_dir / self.system
         
@@ -177,41 +185,43 @@ class PlatformSetup:
             # For Windows, we already have chrome-win64 directory
             chrome_dir = platform_dir / "chrome-win64"
             if chrome_dir.exists():
-                print(f"✅ Chrome installation found at: {chrome_dir}")
+                logger.info(f"✅ Chrome installation found at: {chrome_dir}")
                 return str(chrome_dir / "chrome.exe")
             else:
-                print("⚠️  Chrome installation not found, will use system Chrome")
+                logger.warning("⚠️  Chrome installation not found, will use system Chrome")
                 return None
                 
         elif self.system == 'linux':
             # For Linux, we can use system Chrome or download portable version
             chrome_binary = platform_dir / "chrome"
             if chrome_binary.exists():
-                print(f"✅ Chrome binary found at: {chrome_binary}")
+                logger.info(f"✅ Chrome binary found at: {chrome_binary}")
                 return str(chrome_binary)
             else:
-                print("⚠️  Chrome binary not found, will use system Chrome")
+                logger.warning("⚠️  Chrome binary not found, will use system Chrome")
                 return None
                 
         elif self.system == 'darwin':
             # For macOS, we can use system Chrome or download portable version
             chrome_binary = platform_dir / "chrome"
             if chrome_binary.exists():
-                print(f"✅ Chrome binary found at: {chrome_binary}")
+                logger.info(f"✅ Chrome binary found at: {chrome_binary}")
                 return str(chrome_binary)
             else:
-                print("⚠️  Chrome binary not found, will use system Chrome")
+                logger.warning("⚠️  Chrome binary not found, will use system Chrome")
                 return None
         
         return None
     
     def update_config(self):
         """Update the configuration file with platform-specific settings."""
-        print("⚙️  Updating configuration...")
+        logger = logging.getLogger(__name__)
+        
+        logger.info("⚙️  Updating configuration...")
         
         config_file = self.project_root / "src" / "config.json"
         if not config_file.exists():
-            print("⚠️  config.json not found, creating default configuration")
+            logger.warning("⚠️  config.json not found, creating default configuration")
             return
         
         try:
@@ -225,19 +235,21 @@ class PlatformSetup:
             with open(config_file, 'w') as f:
                 json.dump(config, f, indent=4)
             
-            print("✅ Configuration updated successfully")
+            logger.info("✅ Configuration updated successfully")
             
         except Exception as e:
-            print(f"❌ Failed to update configuration: {e}")
+            logger.error(f"❌ Failed to update configuration: {e}")
     
     def run(self):
         """Run the complete platform setup."""
-        print("🚀 FlashScore Scraper - Platform Setup")
-        print("=" * 50)
+        logger = logging.getLogger(__name__)
+        
+        logger.info("🚀 FlashScore Scraper - Platform Setup")
+        logger.info("=" * 50)
         
         # Detect platform
         platform_key = self.detect_platform()
-        print(f"✅ Detected platform: {platform_key}")
+        logger.info(f"✅ Detected platform: {platform_key}")
         
         # Create drivers directory structure
         self.drivers_dir.mkdir(exist_ok=True)
@@ -252,18 +264,18 @@ class PlatformSetup:
         # Update configuration
         self.update_config()
         
-        print("\n" + "=" * 50)
-        print("✅ Platform Setup Completed!")
-        print(f"\n📋 Summary:")
-        print(f"   • Platform: {platform_key}")
-        print(f"   • ChromeDriver: {'✅ Found' if driver_path else '❌ Missing'}")
-        print(f"   • Chrome Binary: {'✅ Found' if chrome_path else '⚠️  Using System'}")
-        print(f"   • Configuration: ✅ Updated")
+        logger.info("\n" + "=" * 50)
+        logger.info("✅ Platform Setup Completed!")
+        logger.info(f"\n📋 Summary:")
+        logger.info(f"   • Platform: {platform_key}")
+        logger.info(f"   • ChromeDriver: {'✅ Found' if driver_path else '❌ Missing'}")
+        logger.info(f"   • Chrome Binary: {'✅ Found' if chrome_path else '⚠️  Using System'}")
+        logger.info(f"   • Configuration: ✅ Updated")
         
-        print(f"\n🚀 Your scraper is ready to use!")
-        print(f"   Run: python main.py --cli")
-        print(f"   Run: python main.py --ui")
-        print(f"   Run: python run_cli.py --cli")
+        logger.info(f"\n🚀 Your scraper is ready to use!")
+        logger.info(f"   Run: python main.py --cli")
+        logger.info(f"   Run: python main.py --ui")
+        logger.info(f"   Run: python run_cli.py --cli")
 
 if __name__ == "__main__":
     setup = PlatformSetup()

@@ -1,4 +1,4 @@
-"""Core components for the Flashscore scraper."""
+# src.core package init
 
 from .performance_monitor import PerformanceMonitor
 from .error_handler import ErrorHandler
