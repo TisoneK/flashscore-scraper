@@ -347,11 +347,13 @@ class ScoreWiseCalculator:
         home_team = match.home_team
         away_team = match.away_team
         
+        # Sort H2H matches by date (most recent first)
+        h2h_matches_sorted = sorted(h2h_matches, key=lambda m: getattr(m, 'date', ''), reverse=True)
+
         # Count H2H wins for each team
         home_team_h2h_wins = 0
         away_team_h2h_wins = 0
-        
-        for h2h_match in h2h_matches:
+        for h2h_match in h2h_matches_sorted:
             if h2h_match.home_team == home_team:
                 if h2h_match.home_score > h2h_match.away_score:
                     home_team_h2h_wins += 1
@@ -362,28 +364,57 @@ class ScoreWiseCalculator:
                     away_team_h2h_wins += 1
                 else:
                     home_team_h2h_wins += 1
-        
-        # Analyze recent form (last 3 games) - This would need recent form data
-        # For now, we'll use H2H data as a proxy, but this should be enhanced
-        # with actual recent form data from the scraper
-        home_team_recent_wins = min(home_team_h2h_wins, 3)  # Placeholder
-        away_team_recent_wins = min(away_team_h2h_wins, 3)  # Placeholder
-        
-        # Calculate winning streaks (simplified - would need actual streak data)
-        home_team_winning_streak = min(home_team_h2h_wins, 3)  # Placeholder
-        away_team_winning_streak = min(away_team_h2h_wins, 3)  # Placeholder
-        
-        logger.debug(f"Winning pattern analysis - Home: {home_team_h2h_wins}/{len(h2h_matches)} wins, "
-                    f"Away: {away_team_h2h_wins}/{len(h2h_matches)} wins")
-        
+
+        # Count last 3 games' winners for each team (recent wins)
+        recent_home_wins = 0
+        recent_away_wins = 0
+        for h2h_match in h2h_matches_sorted[:3]:
+            if h2h_match.home_team == home_team:
+                if h2h_match.home_score > h2h_match.away_score:
+                    recent_home_wins += 1
+                else:
+                    recent_away_wins += 1
+            else:  # h2h_match.home_team == away_team
+                if h2h_match.home_score > h2h_match.away_score:
+                    recent_away_wins += 1
+                else:
+                    recent_home_wins += 1
+
+        # Calculate current winning streak for each team (from most recent, as long as wins continue)
+        home_streak = 0
+        away_streak = 0
+        for h2h_match in h2h_matches_sorted:
+            if h2h_match.home_team == home_team:
+                if h2h_match.home_score > h2h_match.away_score:
+                    if away_streak == 0:
+                        home_streak += 1
+                    else:
+                        break
+                else:
+                    if home_streak == 0:
+                        away_streak += 1
+                    else:
+                        break
+            else:  # h2h_match.home_team == away_team
+                if h2h_match.home_score > h2h_match.away_score:
+                    if home_streak == 0:
+                        away_streak += 1
+                    else:
+                        break
+                else:
+                    if away_streak == 0:
+                        home_streak += 1
+                    else:
+                        break
+
         return WinningStreakData(
             home_team_h2h_wins=home_team_h2h_wins,
             away_team_h2h_wins=away_team_h2h_wins,
-            home_team_recent_wins=home_team_recent_wins,
-            away_team_recent_wins=away_team_recent_wins,
-            home_team_winning_streak=home_team_winning_streak,
-            away_team_winning_streak=away_team_winning_streak,
-            total_h2h_matches=len(h2h_matches)
+            home_team_recent_wins=recent_home_wins,
+            away_team_recent_wins=recent_away_wins,
+            home_team_winning_streak=home_streak,
+            away_team_winning_streak=away_streak,
+            total_h2h_matches=len(h2h_matches_sorted)
         )
     
     def _determine_team_winner(self, winning_streak_data: WinningStreakData) -> TeamWinnerPrediction:

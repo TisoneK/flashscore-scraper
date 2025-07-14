@@ -99,16 +99,17 @@ class ColoredDisplay:
             box=box.ROUNDED,
             border_style=self.colors.TABLE_BORDER,
             row_styles=["", "dim"],  # Alternate row styling
-            show_lines=True  # Show lines between rows
+            show_lines=True,  # Show lines between rows
+            expand=True
         )
         
         # Add columns with colors in new order
         table.add_column("NO.", style="cyan", header_style=self.colors.TABLE_HEADER)
         table.add_column("MATCH_ID", style="cyan", header_style=self.colors.TABLE_HEADER)
         table.add_column("DATE/TIME", style="cyan", header_style=self.colors.TABLE_HEADER)
-        table.add_column("COUNTRY/LEAGUE", style="white", header_style=self.colors.TABLE_HEADER)
-        table.add_column("HOME", style="white", header_style=self.colors.TABLE_HEADER)
-        table.add_column("AWAY", style="white", header_style=self.colors.TABLE_HEADER)
+        table.add_column("COUNTRY/LEAGUE", style="white", header_style=self.colors.TABLE_HEADER, min_width=14, max_width=20, no_wrap=False, overflow="fold")
+        table.add_column("HOME", style="white", header_style=self.colors.TABLE_HEADER, min_width=10, max_width=18, no_wrap=False, overflow="fold")
+        table.add_column("AWAY", style="white", header_style=self.colors.TABLE_HEADER, min_width=10, max_width=18, no_wrap=False, overflow="fold")
         table.add_column("LINE", style="yellow", header_style=self.colors.TABLE_HEADER)
         table.add_column("AVG", style="green", header_style=self.colors.TABLE_HEADER)
         table.add_column("RATIO", style="blue", header_style=self.colors.TABLE_HEADER)
@@ -116,6 +117,8 @@ class ColoredDisplay:
         table.add_column("WINNER", style="green", header_style=self.colors.TABLE_HEADER)
         table.add_column("CONF.", style="blue", header_style=self.colors.TABLE_HEADER)
         table.add_column("AVGRATE", style="green", header_style=self.colors.TABLE_HEADER)
+        table.add_column("RESULTS", style="yellow", header_style=self.colors.TABLE_HEADER)
+        table.add_column("STATUS", style="magenta", header_style=self.colors.TABLE_HEADER)
         
         # Add rows with prediction-specific colors
         for i, result in enumerate(results):
@@ -141,6 +144,22 @@ class ColoredDisplay:
             elif result['confidence'] == 'MEDIUM':
                 conf_color = self.colors.PREDICTION_MEDIUM_CONFIDENCE
             
+            # Determine status color
+            status_value = result.get('status', 'Pending...')
+            if status_value == 'Won':
+                status_color = self.colors.SUCCESS
+            elif status_value == 'Lost':
+                status_color = self.colors.ERROR
+            else:
+                status_color = self.colors.WARNING
+            
+            # Responsive team name wrapping for HOME using Rich Text
+            home_team = str(result.get('home', 'N/A'))
+            home_text = Text(home_team, overflow="fold", no_wrap=False)
+            # Responsive team name wrapping for AWAY using Rich Text
+            away_team = str(result.get('away', 'N/A'))
+            away_text = Text(away_team, overflow="fold", no_wrap=False)
+            
             # Alternate row colors
             row_style = self.colors.TABLE_ROW_ALT if i % 2 == 1 else ""
             
@@ -149,8 +168,8 @@ class ColoredDisplay:
                 str(result.get('match_id', 'N/A')),
                 str(result.get('date', 'N/A')),
                 f"{str(result.get('country', 'N/A'))}\n{str(result.get('league', 'N/A'))}",
-                str(result.get('home', 'N/A')),
-                str(result.get('away', 'N/A')),
+                home_text,
+                away_text,
                 str(result.get('line', 'N/A')),
                 str(result.get('avg', 'N/A')),
                 str(result.get('ratio', 'N/A')),
@@ -158,6 +177,8 @@ class ColoredDisplay:
                 f"[{winner_color}]{winner_value}[/{winner_color}]",
                 f"[{conf_color}]{result.get('confidence', 'N/A')}[/{conf_color}]",
                 str(result.get('avg_rate', 'N/A')),
+                str(result.get('results', 'N/A')),
+                f"[{status_color}]{status_value}[/{status_color}]",
                 style=row_style
             )
         
@@ -170,36 +191,36 @@ class ColoredDisplay:
             box=box.ROUNDED,
             border_style=self.colors.TABLE_BORDER,
             row_styles=["", "dim"],  # Alternate row styling
-            show_lines=True  # Show lines between rows
+            show_lines=True,  # Show lines between rows
+            expand=True
         )
-        
-        # Add columns with colors in new order
         table.add_column("NO.", style="cyan", header_style=self.colors.TABLE_HEADER)
         table.add_column("MATCH_ID", style="cyan", header_style=self.colors.TABLE_HEADER)
         table.add_column("DATE/TIME", style="cyan", header_style=self.colors.TABLE_HEADER)
-        table.add_column("COUNTRY/LEAGUE", style="white", header_style=self.colors.TABLE_HEADER)
-        table.add_column("HOME", style="white", header_style=self.colors.TABLE_HEADER)
-        table.add_column("AWAY", style="white", header_style=self.colors.TABLE_HEADER)
+        table.add_column("COUNTRY/LEAGUE", style="white", header_style=self.colors.TABLE_HEADER, min_width=14, max_width=20, no_wrap=False, overflow="fold")
+        table.add_column("HOME", style="white", header_style=self.colors.TABLE_HEADER, min_width=10, max_width=18, no_wrap=False, overflow="fold")
+        table.add_column("AWAY", style="white", header_style=self.colors.TABLE_HEADER, min_width=10, max_width=18, no_wrap=False, overflow="fold")
         table.add_column("LINE", style="yellow", header_style=self.colors.TABLE_HEADER)
         table.add_column("AVG", style="green", header_style=self.colors.TABLE_HEADER)
         table.add_column("RATIO", style="blue", header_style=self.colors.TABLE_HEADER)
         table.add_column("PRED.", style="magenta", header_style=self.colors.TABLE_HEADER)
-        table.add_column("WINNER", style="green", header_style=self.colors.TABLE_HEADER)
         table.add_column("CONF.", style="blue", header_style=self.colors.TABLE_HEADER)
         table.add_column("AVGRATE", style="green", header_style=self.colors.TABLE_HEADER)
-        
-        # Add rows with prediction-specific colors
+        table.add_column("RESULTS", style="yellow", header_style=self.colors.TABLE_HEADER)
+        table.add_column("STATUS", style="magenta", header_style=self.colors.TABLE_HEADER)
         for i, result in enumerate(results):
-            # Determine prediction color
-            pred_color = self.colors.PREDICTION_OVER if result['prediction'] == 'OVER' else self.colors.PREDICTION_UNDER
-            
-            # Determine winner color
-            winner_color = self.colors.PREDICTION_NO_BET
-            winner_value = result.get('winner') or 'NO_BET'
-            if winner_value == 'HOME_TEAM':
-                winner_color = self.colors.PREDICTION_OVER
-            elif winner_value == 'AWAY_TEAM':
-                winner_color = self.colors.PREDICTION_UNDER
+            # Determine prediction color and display for OVER/UNDER
+            pred_color = self.colors.PREDICTION_NO_BET
+            pred_value = result.get('prediction', 'NO_BET')
+            pred_display = "NO_BET"
+            if pred_value == 'OVER':
+                pred_color = self.colors.PREDICTION_OVER
+                over_odds = result.get('over_odds', 'N/A')
+                pred_display = f"OVER\n@{over_odds}" if over_odds != 'N/A' else "OVER"
+            elif pred_value == 'UNDER':
+                pred_color = self.colors.PREDICTION_UNDER
+                under_odds = result.get('under_odds', 'N/A')
+                pred_display = f"UNDER\n@{under_odds}" if under_odds != 'N/A' else "UNDER"
             
             # Determine confidence color
             conf_color = self.colors.PREDICTION_LOW_CONFIDENCE
@@ -207,6 +228,22 @@ class ColoredDisplay:
                 conf_color = self.colors.PREDICTION_HIGH_CONFIDENCE
             elif result['confidence'] == 'MEDIUM':
                 conf_color = self.colors.PREDICTION_MEDIUM_CONFIDENCE
+            
+            # Determine status color
+            status_value = result.get('status', 'Pending...')
+            if status_value == 'Won':
+                status_color = self.colors.SUCCESS
+            elif status_value == 'Lost':
+                status_color = self.colors.ERROR
+            else:
+                status_color = self.colors.WARNING
+            
+            # Responsive team name wrapping for HOME using Rich Text
+            home_team = str(result.get('home', 'N/A'))
+            home_text = Text(home_team, overflow="fold", no_wrap=False)
+            # Responsive team name wrapping for AWAY using Rich Text
+            away_team = str(result.get('away', 'N/A'))
+            away_text = Text(away_team, overflow="fold", no_wrap=False)
             
             # Alternate row colors
             row_style = self.colors.TABLE_ROW_ALT if i % 2 == 1 else ""
@@ -216,18 +253,99 @@ class ColoredDisplay:
                 str(result.get('match_id', 'N/A')),
                 str(result.get('date', 'N/A')),
                 f"{str(result.get('country', 'N/A'))}\n{str(result.get('league', 'N/A'))}",
-                str(result.get('home', 'N/A')),
-                str(result.get('away', 'N/A')),
+                home_text,
+                away_text,
                 str(result.get('line', 'N/A')),
                 str(result.get('avg', 'N/A')),
                 str(result.get('ratio', 'N/A')),
-                f"[{pred_color}]{result.get('prediction', 'N/A')}[/{pred_color}]",
-                f"[{winner_color}]{winner_value}[/{winner_color}]",
+                f"[{pred_color}]{pred_display}[/{pred_color}]",
                 f"[{conf_color}]{result.get('confidence', 'N/A')}[/{conf_color}]",
                 str(result.get('avg_rate', 'N/A')),
+                str(result.get('results', 'N/A')),
+                f"[{status_color}]{status_value}[/{status_color}]",
                 style=row_style
             )
-        
+        return table
+
+    def create_home_away_predictions_table(self, results: list) -> Table:
+        """Create a table for actionable predictions (HOME/AWAY only)."""
+        table = Table(
+            title="[bold blue]🎯 ACTIONABLE PREDICTIONS (HOME/AWAY)[/bold blue]",
+            box=box.ROUNDED,
+            border_style=self.colors.TABLE_BORDER,
+            row_styles=["", "dim"],
+            show_lines=True,
+            expand=True
+        )
+        table.add_column("NO.", style="cyan", header_style=self.colors.TABLE_HEADER)
+        table.add_column("MATCH ID", style="cyan", header_style=self.colors.TABLE_HEADER)
+        table.add_column("DATE/TIME", style="cyan", header_style=self.colors.TABLE_HEADER)
+        table.add_column("COUNTRY/LEAGUE", style="white", header_style=self.colors.TABLE_HEADER, min_width=14, max_width=20, no_wrap=False, overflow="fold")
+        table.add_column("HOME", style="white", header_style=self.colors.TABLE_HEADER, min_width=10, max_width=18, no_wrap=False, overflow="fold")
+        table.add_column("AWAY", style="white", header_style=self.colors.TABLE_HEADER, min_width=10, max_width=18, no_wrap=False, overflow="fold")
+        table.add_column("RATIO", style="blue", header_style=self.colors.TABLE_HEADER)
+        table.add_column("PRED", style="magenta", header_style=self.colors.TABLE_HEADER)
+        table.add_column("CONF.", style="blue", header_style=self.colors.TABLE_HEADER)
+        table.add_column("RESULTS", style="yellow", header_style=self.colors.TABLE_HEADER)
+        table.add_column("STATUS", style="magenta", header_style=self.colors.TABLE_HEADER)
+        for i, result in enumerate(results):
+            home_team = str(result.get('home', 'N/A'))
+            home_text = Text(home_team, overflow="fold", no_wrap=False)
+            away_team = str(result.get('away', 'N/A'))
+            away_text = Text(away_team, overflow="fold", no_wrap=False)
+            # Odds for HOME and AWAY
+            home_odds = result.get('home_odds', 'N/A')
+            away_odds = result.get('away_odds', 'N/A')
+            # Determine prediction color
+            pred_color = self.colors.PREDICTION_NO_BET
+            pred_value = result.get('prediction', 'NO_BET')
+            pred_display = "NO_BET"
+            if pred_value == 'HOME':
+                pred_color = self.colors.PREDICTION_OVER
+                pred_display = f"HOME\n@{home_odds}" if home_odds != 'N/A' else "HOME"
+            elif pred_value == 'AWAY':
+                pred_color = self.colors.PREDICTION_UNDER
+                pred_display = f"AWAY\n@{away_odds}" if away_odds != 'N/A' else "AWAY"
+            # Ratio: home/away win ratio for predicted winner
+            winner = pred_value
+            match_id = result.get('match_id')
+            ratio = '0/0'
+            ws = result.get('winning_streak_data', {})
+            if isinstance(ws, dict):
+                total_h2h = ws.get('total_h2h_matches', 0)
+                if winner == 'HOME' and 'home_team_h2h_wins' in ws:
+                    ratio = f"{ws['home_team_h2h_wins']}/{total_h2h}"
+                elif winner == 'AWAY' and 'away_team_h2h_wins' in ws:
+                    ratio = f"{ws['away_team_h2h_wins']}/{total_h2h}"
+            # Determine confidence color
+            conf_color = self.colors.PREDICTION_LOW_CONFIDENCE
+            if result['confidence'] == 'HIGH':
+                conf_color = self.colors.PREDICTION_HIGH_CONFIDENCE
+            elif result['confidence'] == 'MEDIUM':
+                conf_color = self.colors.PREDICTION_MEDIUM_CONFIDENCE
+            # Determine status color
+            status_value = result.get('status', 'Pending...')
+            if status_value == 'Won':
+                status_color = self.colors.SUCCESS
+            elif status_value == 'Lost':
+                status_color = self.colors.ERROR
+            else:
+                status_color = self.colors.WARNING
+            row_style = self.colors.TABLE_ROW_ALT if i % 2 == 1 else ""
+            table.add_row(
+                str(i + 1),
+                str(result.get('match_id', 'N/A')),
+                str(result.get('date', 'N/A')),
+                f"{str(result.get('country', 'N/A'))}\n{str(result.get('league', 'N/A'))}",
+                home_text,
+                away_text,
+                ratio,
+                f"[{pred_color}]{pred_display}[/{pred_color}]",
+                f"[{conf_color}]{result.get('confidence', 'N/A')}[/{conf_color}]",
+                str(result.get('results', 'N/A')),
+                f"[{status_color}]{status_value}[/{status_color}]",
+                style=row_style
+            )
         return table
 
     def create_no_bet_predictions_table(self, results: list) -> Table:
@@ -237,16 +355,17 @@ class ColoredDisplay:
             box=box.ROUNDED,
             border_style=self.colors.TABLE_BORDER,
             row_styles=["", "dim"],  # Alternate row styling
-            show_lines=True  # Show lines between rows
+            show_lines=True,  # Show lines between rows
+            expand=True
         )
         
         # Add columns with colors in new order
         table.add_column("NO.", style="cyan", header_style=self.colors.TABLE_HEADER)
         table.add_column("MATCH_ID", style="cyan", header_style=self.colors.TABLE_HEADER)
         table.add_column("DATE/TIME", style="cyan", header_style=self.colors.TABLE_HEADER)
-        table.add_column("COUNTRY/LEAGUE", style="white", header_style=self.colors.TABLE_HEADER)
-        table.add_column("HOME", style="white", header_style=self.colors.TABLE_HEADER)
-        table.add_column("AWAY", style="white", header_style=self.colors.TABLE_HEADER)
+        table.add_column("COUNTRY/LEAGUE", style="white", header_style=self.colors.TABLE_HEADER, min_width=14, max_width=20, no_wrap=False, overflow="fold")
+        table.add_column("HOME", style="white", header_style=self.colors.TABLE_HEADER, min_width=10, max_width=18, no_wrap=False, overflow="fold")
+        table.add_column("AWAY", style="white", header_style=self.colors.TABLE_HEADER, min_width=10, max_width=18, no_wrap=False, overflow="fold")
         table.add_column("LINE", style="yellow", header_style=self.colors.TABLE_HEADER)
         table.add_column("AVG", style="green", header_style=self.colors.TABLE_HEADER)
         table.add_column("RATIO", style="blue", header_style=self.colors.TABLE_HEADER)
@@ -254,6 +373,8 @@ class ColoredDisplay:
         table.add_column("WINNER", style="green", header_style=self.colors.TABLE_HEADER)
         table.add_column("CONF.", style="blue", header_style=self.colors.TABLE_HEADER)
         table.add_column("AVGRATE", style="green", header_style=self.colors.TABLE_HEADER)
+        table.add_column("RESULTS", style="yellow", header_style=self.colors.TABLE_HEADER)
+        table.add_column("STATUS", style="magenta", header_style=self.colors.TABLE_HEADER)
         
         # Add rows with prediction-specific colors
         for i, result in enumerate(results):
@@ -275,6 +396,22 @@ class ColoredDisplay:
             elif result['confidence'] == 'MEDIUM':
                 conf_color = self.colors.PREDICTION_MEDIUM_CONFIDENCE
             
+            # Determine status color
+            status_value = result.get('status', 'Pending...')
+            if status_value == 'Won':
+                status_color = self.colors.SUCCESS
+            elif status_value == 'Lost':
+                status_color = self.colors.ERROR
+            else:
+                status_color = self.colors.WARNING
+            
+            # Responsive team name wrapping for HOME using Rich Text
+            home_team = str(result.get('home', 'N/A'))
+            home_text = Text(home_team, overflow="fold", no_wrap=False)
+            # Responsive team name wrapping for AWAY using Rich Text
+            away_team = str(result.get('away', 'N/A'))
+            away_text = Text(away_team, overflow="fold", no_wrap=False)
+            
             # Alternate row colors
             row_style = self.colors.TABLE_ROW_ALT if i % 2 == 1 else ""
             
@@ -283,8 +420,8 @@ class ColoredDisplay:
                 str(result.get('match_id', 'N/A')),
                 str(result.get('date', 'N/A')),
                 f"{str(result.get('country', 'N/A'))}\n{str(result.get('league', 'N/A'))}",
-                str(result.get('home', 'N/A')),
-                str(result.get('away', 'N/A')),
+                home_text,
+                away_text,
                 str(result.get('line', 'N/A')),
                 str(result.get('avg', 'N/A')),
                 str(result.get('ratio', 'N/A')),
@@ -292,14 +429,15 @@ class ColoredDisplay:
                 f"[{winner_color}]{winner_value}[/{winner_color}]",
                 f"[{conf_color}]{result.get('confidence', 'N/A')}[/{conf_color}]",
                 str(result.get('avg_rate', 'N/A')),
+                str(result.get('results', 'N/A')),
+                f"[{status_color}]{status_value}[/{status_color}]",
                 style=row_style
             )
         
         return table
 
-    def show_dual_prediction_tables(self, actionable_results: list, no_bet_results: list):
-        """Display dual prediction tables - actionable and NO_BET separately."""
-        # Show actionable predictions first (most important)
+    def show_dual_prediction_tables(self, actionable_results: list, home_away_results: list):
+        """Display dual prediction tables - actionable (OVER/UNDER) and HOME/AWAY separately."""
         if actionable_results:
             self.console.print("\n")
             actionable_table = self.create_actionable_predictions_table(actionable_results)
@@ -307,18 +445,14 @@ class ColoredDisplay:
             self.console.print(f"\n[bold green]📊 Found {len(actionable_results)} actionable predictions[/bold green]")
         else:
             self.console.print("\n[bold yellow]⚠️  No actionable predictions found[/bold yellow]")
-        
-        # Show NO_BET predictions second (for team winner analysis)
-        if no_bet_results:
+        if home_away_results:
             self.console.print("\n")
-            no_bet_table = self.create_no_bet_predictions_table(no_bet_results)
-            self.console.print(no_bet_table)
-            self.console.print(f"\n[bold yellow]📊 Found {len(no_bet_results)} NO_BET predictions (check team winners)[/bold yellow]")
+            home_away_table = self.create_home_away_predictions_table(home_away_results)
+            self.console.print(home_away_table)
+            self.console.print(f"\n[bold blue]📊 Found {len(home_away_results)} HOME/AWAY predictions[/bold blue]")
         else:
-            self.console.print("\n[bold yellow]⚠️  No NO_BET predictions found[/bold yellow]")
-        
-        # Show summary
-        total_predictions = len(actionable_results) + len(no_bet_results)
+            self.console.print("\n[bold yellow]⚠️  No HOME/AWAY predictions found[/bold yellow]")
+        total_predictions = len(actionable_results) + len(home_away_results)
         if total_predictions > 0:
             actionable_percentage = (len(actionable_results) / total_predictions) * 100
             self.console.print(f"\n[bold cyan]📈 SUMMARY: {len(actionable_results)}/{total_predictions} predictions are actionable ({actionable_percentage:.1f}%)[/bold cyan]")

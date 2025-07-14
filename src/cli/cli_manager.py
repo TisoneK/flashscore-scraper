@@ -463,7 +463,12 @@ class CLIManager:
                     "winner": pred.team_winner.value,
                     "confidence": pred.confidence.value,
                     "avg_rate": f"{pred.average_rate:.2f}",
-                    "match_id": match.match_id
+                    "match_id": match.match_id,
+                    "winning_streak_data": pred.winning_streak_data.__dict__ if hasattr(pred, 'winning_streak_data') else {},
+                    "home_odds": match.odds.home_odds if match.odds and match.odds.home_odds is not None else 'N/A',
+                    "away_odds": match.odds.away_odds if match.odds and match.odds.away_odds is not None else 'N/A',
+                    "over_odds": match.odds.over_odds if match.odds and match.odds.over_odds is not None else 'N/A',
+                    "under_odds": match.odds.under_odds if match.odds and match.odds.under_odds is not None else 'N/A',
                 }
                 results.append(summary)
                 match_id_map[match.match_id] = (match, pred)
@@ -476,15 +481,32 @@ class CLIManager:
         # Sort results by time by default
         results = self.sort_results_by_time(results)
         
-        # Separate actionable predictions (OVER/UNDER) from NO_BET predictions
-        actionable_results = [r for r in results if r['prediction'] in ['OVER', 'UNDER']]
-        no_bet_results = [r for r in results if r['prediction'] == 'NO_BET']
-        
+        # Strictly separate actionable tables
+        actionable_over_under = []
+        actionable_home_away = []
+        for r in results:
+            # Table 1: OVER/UNDER
+            if r['prediction'] in ['OVER', 'UNDER']:
+                actionable_over_under.append(r)
+            # Table 2: HOME/AWAY (strict rule)
+            winner = r.get('winner', '')
+            if winner in ['HOME_TEAM', 'AWAY_TEAM', 'HOME', 'AWAY']:
+                ws = r.get('winning_streak_data', {})
+                if winner in ['HOME_TEAM', 'HOME']:
+                    h2h_wins = ws.get('home_team_h2h_wins', 0)
+                    streak = ws.get('home_team_winning_streak', 0)
+                    recent = ws.get('home_team_recent_wins', 0)
+                else:
+                    h2h_wins = ws.get('away_team_h2h_wins', 0)
+                    streak = ws.get('away_team_winning_streak', 0)
+                    recent = ws.get('away_team_recent_wins', 0)
+                # Use real streak and recent wins for qualification
+                if h2h_wins >= 4 and streak >= 3 and recent >= 3:
+                    actionable_home_away.append(r)
+        # Only show matches that qualify for at least one table
         # Clear console and show prediction header
         self._clear_and_header('prediction')
-        
-        # Display dual tables - actionable predictions first, then NO_BET predictions
-        self.colored_display.show_dual_prediction_tables(actionable_results, no_bet_results)
+        self.colored_display.show_dual_prediction_tables(actionable_over_under, actionable_home_away)
         print()
 
         # Ask if user wants to filter, sort, or proceed
