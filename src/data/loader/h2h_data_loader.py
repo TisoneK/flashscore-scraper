@@ -70,6 +70,13 @@ class H2HDataLoader:
                 raise Exception(f"Error loading H2H page for {match_id}: {error}")
             if self.selenium_utils:
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+                # --- Match status check ---
+                match_status = self.selenium_utils.get_match_status()
+                if match_status != 'scheduled':
+                    logger.warning(f"[H2HDataLoader] Skipping H2H for match {match_id}: status is '{match_status}'")
+                    if status_callback:
+                        status_callback(f"Skipping H2H for match {match_id}: status is '{match_status}'")
+                    return False
                 # --- FAIL-SAFE: Check for H2H main tab ---
                 if not self.selenium_utils.check_tab_present('H2H'):
                     logger.warning(f"[H2HDataLoader] H2H tab not found for match {match_id}. No H2H data available.")

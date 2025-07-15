@@ -82,6 +82,13 @@ class OddsDataLoader:
             if self.selenium_utils:
                 logger.info(f"[OddsDataLoader] Waiting for dynamic content for match {match_id}")
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+                # --- Match status check ---
+                match_status = self.selenium_utils.get_match_status()
+                if match_status != 'scheduled':
+                    logger.warning(f"[OddsDataLoader] Skipping odds for match {match_id}: status is '{match_status}'")
+                    if status_callback:
+                        status_callback(f"Skipping odds for match {match_id}: status is '{match_status}'")
+                    return False
                 # --- FAIL-SAFE: Check for Odds main tab ---
                 if not self.selenium_utils.check_tab_present('Odds'):
                     logger.warning(f"[OddsDataLoader] Odds tab not found for match {match_id}. No odds available.")
@@ -126,6 +133,13 @@ class OddsDataLoader:
                 raise Exception(f"Error loading over/under odds page for {match_id}: {error}")
             if self.selenium_utils:
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+                # --- Match status check ---
+                match_status = self.selenium_utils.get_match_status()
+                if match_status != 'scheduled':
+                    logger.warning(f"[OddsDataLoader] Skipping odds for match {match_id}: status is '{match_status}'")
+                    if status_callback:
+                        status_callback(f"Skipping odds for match {match_id}: status is '{match_status}'")
+                    return False
                 # --- FAIL-SAFE: Check for Odds main tab ---
                 if not self.selenium_utils.check_tab_present('Odds'):
                     logger.warning(f"[OddsDataLoader] Odds tab not found for match {match_id}. No odds available.")

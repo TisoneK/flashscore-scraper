@@ -91,6 +91,13 @@ class MatchDataLoader:
                 raise Exception(f"Error loading match page for {match_id}: {error}")
             if self.selenium_utils:
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+                # --- Match status check ---
+                match_status = self.selenium_utils.get_match_status()
+                if match_status != 'scheduled':
+                    logger.warning(f"[MatchDataLoader] Skipping match {match_id}: status is '{match_status}'")
+                    if status_callback:
+                        status_callback(f"Skipping match {match_id}: status is '{match_status}'")
+                    return False
             # Extract and verify elements with retry logic for each
             self.elements.country = self._retry_element_extraction(
                 lambda: self.get_country(),

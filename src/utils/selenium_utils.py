@@ -505,3 +505,52 @@ class SeleniumUtils:
         except Exception as e:
             self.logger.debug(f"Error checking for tab '{tab_name}': {e}")
             return False 
+
+    def get_match_status(self) -> str:
+        """
+        Extract the match status from the loaded match page.
+        Returns:
+            str: 'scheduled', 'live', or 'finished'
+        """
+        try:
+            # Try to find the status span (live or finished)
+            status_elem = self.find('css', '.detailScore__status .fixedHeaderDuel__detailStatus')
+            if status_elem and hasattr(status_elem, 'text'):
+                status_text = status_elem.text.strip()
+                # If status_text is empty or just a date/time, it's scheduled
+                if not status_text or status_text == '\xa0':
+                    # Try to find a date/time in the fixedScore__status
+                    date_elem = self.find('css', '.fixedScore__status')
+                    if date_elem and hasattr(date_elem, 'text'):
+                        date_text = date_elem.text.strip()
+                        # If date_text looks like a date/time, treat as scheduled
+                        if date_text and any(char.isdigit() for char in date_text):
+                            return 'scheduled'
+                    return 'scheduled'
+                # Known live status patterns (expand as needed)
+                live_keywords = [
+                    '1st Quarter', '2nd Quarter', '3rd Quarter', '4th Quarter',
+                    'Half Time', 'Q1', 'Q2', 'Q3', 'Q4', "1st Half", "2nd Half", "Overtime", "OT", "LIVE"
+                ]
+                if any(kw.lower() in status_text.lower() for kw in live_keywords):
+                    return 'live'
+                # Known finished status patterns
+                finished_keywords = ['FT', 'Finished', 'Full Time', 'Ended']
+                if any(kw.lower() in status_text.lower() for kw in finished_keywords):
+                    return 'finished'
+                # If status_text is a time (e.g., '11:00'), treat as scheduled
+                if any(char.isdigit() for char in status_text):
+                    return 'scheduled'
+                # Default: treat as live if not empty
+                return 'live'
+            # Fallback: try to find a date/time in the fixedScore__status
+            date_elem = self.find('css', '.fixedScore__status')
+            if date_elem and hasattr(date_elem, 'text'):
+                date_text = date_elem.text.strip()
+                if date_text and any(char.isdigit() for char in date_text):
+                    return 'scheduled'
+            # If all else fails, return 'unknown'
+            return 'unknown'
+        except Exception as e:
+            self.logger.error(f"Error extracting match status: {e}")
+            return 'unknown' 
