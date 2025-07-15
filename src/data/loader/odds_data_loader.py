@@ -8,6 +8,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from src.data.verifier.odds_data_verifier import OddsDataVerifier
 import logging
 from src.core.exceptions import DataNotFoundError, DataParseError, DataValidationError, DataUnavailableWarning
+from selenium.webdriver.common.by import By
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ class OddsDataLoader:
             return []
 
     def load_home_away_odds(self, match_id: str, status_callback=None) -> bool:
-        """Load home/away odds with network resilience."""
+        """Load home/away odds with network resilience and fail-safe for missing odds tab."""
         logger.info(f"[OddsDataLoader] Starting to load home/away odds for match {match_id}")
         if status_callback:
             status_callback(f"Loading home/away odds for match {match_id}...")
@@ -81,6 +82,18 @@ class OddsDataLoader:
             if self.selenium_utils:
                 logger.info(f"[OddsDataLoader] Waiting for dynamic content for match {match_id}")
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+                # --- FAIL-SAFE: Check for Odds main tab ---
+                if not self.selenium_utils.check_tab_present('Odds'):
+                    logger.warning(f"[OddsDataLoader] Odds tab not found for match {match_id}. No odds available.")
+                    if status_callback:
+                        status_callback(f"No odds available for match {match_id}.")
+                    return False
+                # --- FAIL-SAFE: Check for Home/Away tab ---
+                if not self.selenium_utils.check_tab_present('Home/Away'):
+                    logger.warning(f"[OddsDataLoader] Home/Away tab not found for match {match_id}. Odds unavailable.")
+                    if status_callback:
+                        status_callback(f"No Home/Away odds available for match {match_id}.")
+                    return False
             logger.info(f"[OddsDataLoader] Extracting home odds for match {match_id}")
             self.elements.home_odds = self.get_home_odds()
             logger.info(f"[OddsDataLoader] Extracting away odds for match {match_id}")
@@ -92,7 +105,8 @@ class OddsDataLoader:
             result = self.retry_manager.retry_network_operation(_load_operation)
             logger.info(f"[OddsDataLoader] Retry operation result for match {match_id}: {result}")
             if status_callback:
-                status_callback(f"Home/away odds loaded for match {match_id}.")
+                if result:
+                    status_callback(f"Home/away odds loaded for match {match_id}.")
             logger.info(f"[OddsDataLoader] Successfully loaded home/away odds for match {match_id}")
             return result
         except Exception as e:
@@ -102,7 +116,7 @@ class OddsDataLoader:
             return False
 
     def load_over_under_odds(self, match_id: str, status_callback=None) -> bool:
-        """Load over/under odds with network resilience."""
+        """Load over/under odds with network resilience and fail-safe for missing odds tab."""
         if status_callback:
             status_callback(f"Loading over/under odds for match {match_id}...")
         def _load_operation():
@@ -112,6 +126,18 @@ class OddsDataLoader:
                 raise Exception(f"Error loading over/under odds page for {match_id}: {error}")
             if self.selenium_utils:
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+                # --- FAIL-SAFE: Check for Odds main tab ---
+                if not self.selenium_utils.check_tab_present('Odds'):
+                    logger.warning(f"[OddsDataLoader] Odds tab not found for match {match_id}. No odds available.")
+                    if status_callback:
+                        status_callback(f"No odds available for match {match_id}.")
+                    return False
+                # --- FAIL-SAFE: Check for Over/Under tab ---
+                if not self.selenium_utils.check_tab_present('Over/Under'):
+                    logger.warning(f"[OddsDataLoader] Over/Under tab not found for match {match_id}. Odds unavailable.")
+                    if status_callback:
+                        status_callback(f"No Over/Under odds available for match {match_id}.")
+                    return False
             self.elements.all_totals = self.get_all_totals()
             is_valid, error = self.odds_data_verifier.verify_all_totals(self.elements.all_totals)
             if not is_valid:
@@ -132,7 +158,8 @@ class OddsDataLoader:
         try:
             result = self.retry_manager.retry_network_operation(_load_operation)
             if status_callback:
-                status_callback(f"Over/under odds loaded for match {match_id}.")
+                if result:
+                    status_callback(f"Over/under odds loaded for match {match_id}.")
             return result
         except Exception as e:
             logger.error(f"Failed to load over/under odds page for {match_id} after retries: {e}")

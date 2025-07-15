@@ -487,3 +487,21 @@ class SeleniumUtils:
         except Exception as e:
             self.logger.error(f"Error waiting for page load: {e}")
             return False 
+
+    def check_tab_present(self, tab_name: str) -> bool:
+        """
+        Check if a tab with the given name is present among all wcl-tab buttons.
+        Args:
+            tab_name: The tab name to look for (e.g., 'Odds', 'H2H', 'Home/Away', 'Over/Under')
+        Returns:
+            bool: True if a tab with the given name is present, False otherwise
+        """
+        try:
+            tabs = self.find_all('css', "button[data-testid='wcl-tab']")
+            for tab in tabs:
+                if tab.text.strip().lower().replace(" ", "") == tab_name.strip().lower().replace(" ", ""):
+                    return True
+            return False
+        except Exception as e:
+            self.logger.debug(f"Error checking for tab '{tab_name}': {e}")
+            return False 

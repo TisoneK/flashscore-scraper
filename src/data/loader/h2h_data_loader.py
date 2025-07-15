@@ -70,6 +70,12 @@ class H2HDataLoader:
                 raise Exception(f"Error loading H2H page for {match_id}: {error}")
             if self.selenium_utils:
                 self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+                # --- FAIL-SAFE: Check for H2H main tab ---
+                if not self.selenium_utils.check_tab_present('H2H'):
+                    logger.warning(f"[H2HDataLoader] H2H tab not found for match {match_id}. No H2H data available.")
+                    if status_callback:
+                        status_callback(f"No H2H data available for match {match_id}.")
+                    return False
             self.elements.h2h_section = self.get_h2h_section()
             is_valid, error = self.h2h_data_verifier.verify_h2h_section(self.elements.h2h_section)
             if not is_valid:
