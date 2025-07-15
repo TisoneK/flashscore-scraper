@@ -11,10 +11,52 @@ The prediction system now displays results in **two separate tables** for better
 - **Color**: Green header with green/red prediction colors
 - **Contains**: Only OVER and UNDER predictions
 
-### 2. NO_BET Predictions Table (Team Winner Analysis)
-- **Purpose**: Shows predictions where you should check team winners instead
-- **Color**: Yellow header with yellow prediction colors
-- **Contains**: Only NO_BET predictions with team winner suggestions
+---
+
+### 🎯 ACTIONABLE PREDICTIONS (HOME/AWAY)
+Shows only matches qualifying for a win bet (≥4/6 and 3-game streak). Displays the H2H win ratio (RATIO), current streak, and odds for the prediction. This table is based solely on H2H win ratio and winning streak, not on average rate or bookmaker line.
+
+```
+🎯 ACTIONABLE PREDICTIONS (HOME/AWAY)
+┌─────┬──────────┬──────────────┬─────────────────┬──────────────┬──────────────┬───────┬───────┬───────┬---------┬---------┐
+│ NO. │ MATCH_ID │ DATE/TIME    │ COUNTRY/LEAGUE  │ HOME         │ AWAY         │ RATIO │ CONF. │ PRED. │ RESULTS │ STATUS  │
+├─────┼──────────┼──────────────┼─────────────────┼──────────────┼──────────────┼───────┼───────┼───────┼---------┼---------┤
+│  1  │ 12345682 │ 16.01.2025   │ Spain/La Liga   │ Real Madrid  │ Barcelona    │ 5/6   │ HIGH  │ HOME  │  Won    │ Settled │
+│  2  │ 12345683 │ 16.01.2025   │ Italy/Serie A   │ Juventus     │ Inter Milan  │ 4/6   │ MED   │ AWAY  │ Pending │ Pending │
+└─────┴──────────┴──────────────┴─────────────────┴──────────────┴──────────────┴───────┴───────┴───────┴---------┴---------┘
+
+📊 Found 2 actionable home/away predictions
+```
+
+**Notes:**
+- Only matches with at least 4 wins in the last 6 and a 3-game winning streak are shown.
+- **RATIO**: H2H win ratio for the predicted team (e.g., 4/6, 5/6).
+- **CONF.**: Confidence level, based on streaks and H2H wins (HIGH, MED, LOW).
+- **PRED.**: The team predicted to win (HOME or AWAY).
+- "RESULTS" and "STATUS" columns track the outcome and settlement status.
+- Team names with more than two words wrap to two lines.
+- This table does NOT use average rate, bookmaker line, or over/under logic.
+- 'NO_BET' is used instead of 'NO_WINNER_PREDICTION' where appropriate.
+
+---
+
+### ⏸️ NO_BET PREDICTIONS (For Team Winner Analysis)
+(These are matches that do not qualify for actionable home/away or over/under predictions, but may have a team winner suggestion.)
+
+```
+⏸️  NO_BET PREDICTIONS (For Team Winner Analysis)
+┌─────┬──────────┬─────────────────┬─────────────────┬──────────────┬──────────────┬──────┬─────┬──────┬──────┬──────────┬──────┬─────────┐
+│ NO. │ MATCH_ID │   DATE/TIME     │ COUNTRY/LEAGUE │     HOME     │     AWAY     │ LINE │ AVG │RATIO │ PRED.│  WINNER  │ CONF.│ AVGRATE │
+├─────┼──────────┼─────────────────┼─────────────────┼──────────────┼──────────────┼──────┼─────┼──────┼──────┼──────────┼──────┼─────────┤
+│  1  │ 12345680 │ 15.01.2025     │ England         │ Manchester   │ Liverpool    │182.5 │181.8│ 2/4  │NO_BET│HOME      │ HIGH │ +2.15   │
+│     │          │    (19:00)      │ Premier League  │ United       │              │      │     │      │      │          │      │         │
+├─────┼──────────┼─────────────────┼─────────────────┼──────────────┼──────────────┼──────┼─────┼──────┼──────┼──────────┼──────┼─────────┤
+│  2  │ 12345681 │ 15.01.2025     │ Germany         │ Bayern       │ Dortmund     │175.0 │174.5│ 3/5  │NO_BET│AWAY      │MEDIUM│ +1.25   │
+│     │          │    (20:15)      │ Bundesliga      │ Munich       │              │      │     │      │      │          │      │         │
+└─────┴──────────┴─────────────────┴─────────────────┴──────────────┴──────────────┴──────┴─────┴──────┴──────┴──────────┴──────┴─────────┘
+
+📊 Found 2 NO_BET predictions (check team winners)
+```
 
 ## Table Format
 
@@ -54,7 +96,7 @@ Both tables use the same column structure but with different styling:
 📊 Found 2 actionable predictions
 ```
 
-### NO_BET Predictions Table
+### Home/Away Predictions Table
 ```
 ⏸️  NO_BET PREDICTIONS (For Team Winner Analysis)
 ┌─────┬──────────┬─────────────────┬─────────────────┬──────────────┬──────────────┬──────┬─────┬──────┬──────┬──────────┬──────┬─────────┐

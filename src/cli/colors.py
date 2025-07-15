@@ -268,9 +268,9 @@ class ColoredDisplay:
         return table
 
     def create_home_away_predictions_table(self, results: list) -> Table:
-        """Create a table for actionable predictions (HOME/AWAY only). TEMP: Show all matches for debugging."""
+        """Create a table for actionable predictions (HOME/AWAY only)."""
         table = Table(
-            title="[bold green]🎯 ACTIONABLE PREDICTIONS (HOME/AWAY) [DEBUG: ALL MATCHES][/bold green]",
+            title="[bold green]🎯 ACTIONABLE PREDICTIONS (HOME/AWAY)[/bold green]",
             box=box.ROUNDED,
             border_style=self.colors.TABLE_BORDER,
             row_styles=["", "dim"],
@@ -278,57 +278,65 @@ class ColoredDisplay:
             expand=True
         )
         table.add_column("NO.", style="cyan", header_style=self.colors.TABLE_HEADER)
-        table.add_column("MATCH ID", style="cyan", header_style=self.colors.TABLE_HEADER)
+        table.add_column("MATCH_ID", style="cyan", header_style=self.colors.TABLE_HEADER)
         table.add_column("DATE/TIME", style="magenta", header_style=self.colors.TABLE_HEADER)
-        table.add_column("HOME TEAM", style="green", header_style=self.colors.TABLE_HEADER)
-        table.add_column("AWAY TEAM", style="red", header_style=self.colors.TABLE_HEADER)
-        table.add_column("PREDICTION", style="yellow", header_style=self.colors.TABLE_HEADER)
-        table.add_column("CONFIDENCE", style="blue", header_style=self.colors.TABLE_HEADER)
-        table.add_column("RATIO", style="white", header_style=self.colors.TABLE_HEADER)
-        table.add_column("STREAK", style="white", header_style=self.colors.TABLE_HEADER)
-        table.add_column("RECENT", style="white", header_style=self.colors.TABLE_HEADER)
+        table.add_column("COUNTRY/LEAGUE", style="white", header_style=self.colors.TABLE_HEADER, min_width=14, max_width=20, no_wrap=False, overflow="fold")
+        table.add_column("HOME", style="green", header_style=self.colors.TABLE_HEADER, min_width=10, max_width=18, no_wrap=False, overflow="fold")
+        table.add_column("AWAY", style="red", header_style=self.colors.TABLE_HEADER, min_width=10, max_width=18, no_wrap=False, overflow="fold")
+        table.add_column("RATIO", style="blue", header_style=self.colors.TABLE_HEADER)
+        table.add_column("CONF.", style="blue", header_style=self.colors.TABLE_HEADER)
+        table.add_column("PRED.", style="magenta", header_style=self.colors.TABLE_HEADER)
+        table.add_column("RESULTS", style="yellow", header_style=self.colors.TABLE_HEADER)
+        table.add_column("STATUS", style="magenta", header_style=self.colors.TABLE_HEADER)
 
-        # TEMP: Show all matches, not just actionable
         for idx, result in enumerate(results, 1):
             pred_value = result.get('prediction', '-')
-            winner = result.get('winner', '-')
             confidence = result.get('confidence', '-')
             ws = result.get('winning_streak_data', {})
-            ratio = '-'
-            streak = '-'
-            recent = '-'
+            winner = result.get('winner', '-')
+            # RATIO: H2H win ratio for predicted team
             if winner == 'HOME':
                 wins = ws.get('home_team_h2h_wins', 0)
                 total_h2h = ws.get('total_h2h_matches', 0)
                 ratio = f"{wins}/{total_h2h}" if total_h2h else '-'
-                streak = ws.get('home_team_winning_streak', '-')
-                recent = ws.get('home_team_recent_wins', '-')
             elif winner == 'AWAY':
                 wins = ws.get('away_team_h2h_wins', 0)
                 total_h2h = ws.get('total_h2h_matches', 0)
                 ratio = f"{wins}/{total_h2h}" if total_h2h else '-'
-                streak = ws.get('away_team_winning_streak', '-')
-                recent = ws.get('away_team_recent_wins', '-')
             else:
                 # For NO_BET/NO_WINNER, show both ratios for debugging
                 home_wins = ws.get('home_team_h2h_wins', 0)
                 away_wins = ws.get('away_team_h2h_wins', 0)
                 total_h2h = ws.get('total_h2h_matches', 0)
                 ratio = f"H:{home_wins}/{total_h2h} | A:{away_wins}/{total_h2h}" if total_h2h else '-'
-                streak = f"H:{ws.get('home_team_winning_streak', '-')} | A:{ws.get('away_team_winning_streak', '-')}"
-                recent = f"H:{ws.get('home_team_recent_wins', '-')} | A:{ws.get('away_team_recent_wins', '-')}"
+
+            # Responsive team name wrapping for HOME and AWAY using Rich Text
+            home_team = str(result.get('home_team', result.get('home', '-')))
+            home_text = Text(home_team, overflow="fold", no_wrap=False)
+            away_team = str(result.get('away_team', result.get('away', '-')))
+            away_text = Text(away_team, overflow="fold", no_wrap=False)
+
+            # Country/League
+            country = result.get('country', '-')
+            league = result.get('league', '-')
+            country_league = f"{country}\n{league}" if country and league else country or league or '-'
+
+            # Results and Status
+            results_value = result.get('results', '-')
+            status_value = result.get('status', '-')
 
             table.add_row(
                 str(idx),
                 str(result.get('match_id', '-')),
-                str(result.get('date_time', '-')),
-                str(result.get('home_team', '-')),
-                str(result.get('away_team', '-')),
-                str(pred_value),
-                str(confidence),
+                str(result.get('date', result.get('date_time', '-'))),
+                country_league,
+                home_text,
+                away_text,
                 str(ratio),
-                str(streak),
-                str(recent)
+                str(confidence),
+                str(pred_value),
+                str(results_value),
+                str(status_value)
             )
         return table
 
