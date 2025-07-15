@@ -35,6 +35,13 @@ MAX_MATCHES = 3  # Limit for demo/testing
 
 logger = logging.getLogger(__name__)
 
+def get_ddmmyy_date(day: str) -> str:
+    from datetime import datetime, timedelta
+    if day == "Tomorrow":
+        return (datetime.now() + timedelta(days=1)).strftime("%d%m%y")
+    else:
+        return datetime.now().strftime("%d%m%y")
+
 class FlashscoreScraper:
     def __init__(self, status_callback=None):
         self.driver_manager = WebDriverManager(chrome_log_path=chrome_log_path)
@@ -214,8 +221,10 @@ class FlashscoreScraper:
             reasons.append(f"insufficient H2H matches ({h2h_count} found, {MIN_H2H_MATCHES} required)")
         return "; ".join(reasons)
 
-    def save_match_data(self, match):
-        self.json_storage.save_matches([match])
+    def save_match_data(self, match, day="Today"):
+        file_date = get_ddmmyy_date(day)
+        filename = f"matches_{file_date}.json"
+        self.json_storage.save_matches([match], filename=filename)
 
     @staticmethod
     def log_match_info(match):
@@ -254,9 +263,7 @@ class FlashscoreScraper:
         logger.info("Network monitoring stopped.")
 
     def scrape(self, progress_callback=None, day="Today", status_callback=None):
-        # Update log file paths based on the day parameter
-        from src.utils import get_scraping_date
-        file_date = get_scraping_date(day)
+        file_date = get_ddmmyy_date(day)
         global scraper_log_path, chrome_log_path
         scraper_log_path = os.path.join(log_dir, f"scraper_{file_date}.log")
         chrome_log_path = os.path.join(log_dir, f"chrome_{file_date}.log")
@@ -365,7 +372,7 @@ class FlashscoreScraper:
                             skip_reason=skip_reason
                         )
                         matches.append(match)
-                        self.save_match_data(match)
+                        self.save_match_data(match, day=day)
                     else:
                         warn_msg = f'  - Failed to load/verify match page for {match_id}'
                         logger.warning(warn_msg)
