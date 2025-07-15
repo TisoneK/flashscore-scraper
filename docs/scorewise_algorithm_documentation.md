@@ -196,6 +196,39 @@ The algorithm assigns confidence levels based on prediction type and winning pat
 - When average rate is between -6.0 and +6.0 (weak signals)
 - OR when no clear pattern emerges
 
+## Clarification: What Drives Each Prediction
+
+### 1. Over/Under Prediction
+- **Depends on:** H2H totals, average rate, and bookmaker line.
+- **Logic:** Only returns OVER/UNDER if the average rate is within the actionable range (e.g., 7–15 for OVER, -7 to -15 for UNDER).
+- **NO_BET:** If the average rate is outside these ranges, the algorithm returns NO_BET for Over/Under.
+
+### 2. Winner Prediction (Home/Away)
+- **Depends ONLY on:** H2H win ratio (e.g., 4/6 or more) and winning streak (e.g., 3+).
+- **Does NOT depend on:** Total goals, average rate, or bookmaker line.
+- **NO_WINNER_PREDICTION:** Returned when:
+  - Both teams have 3/6 H2H wins (or similar), i.e., no clear dominance.
+  - Even if one team has a streak of 3, if the H2H ratio is not ≥4/6, it should not be a winner.
+  - If both teams are tied in H2H and streak, it’s ambiguous—so NO_WINNER_PREDICTION (NO_BET for winner).
+
+### Over/Under Confidence Levels
+
+- **HIGH Confidence:**
+  - **OVER:** 7 ≤ avg_rate ≤ 15
+  - **UNDER:** -15 ≤ avg_rate ≤ -7
+
+- **MEDIUM Confidence:**
+  - **OVER:** 7 < avg_rate < 15 but does not meet all HIGH criteria (e.g., missing streak or H2H wins), or as determined by the algorithm when not HIGH or LOW
+  - **UNDER:** -15 < avg_rate < -7 but does not meet all HIGH criteria, or as determined by the algorithm when not HIGH or LOW
+
+- **LOW Confidence:**
+  - **OVER:** 0 < avg_rate < 7 or 15 < avg_rate ≤ 20
+  - **UNDER:** -20 ≤ avg_rate < -15 or -7 < avg_rate < 0
+
+- **NO_BET:**
+  - **OVER:** avg_rate ≤ 0 or avg_rate > 20
+  - **UNDER:** avg_rate ≥ 0 or avg_rate < -20
+
 ## Configuration Parameters
 
 The algorithm uses the following configurable parameters:

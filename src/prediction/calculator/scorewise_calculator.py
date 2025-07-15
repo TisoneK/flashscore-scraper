@@ -119,12 +119,15 @@ class ScoreWiseCalculator:
             
             # Determine team winner
             team_winner = self._determine_team_winner(winning_streak_data)
-            
-            # Determine confidence level with enhanced logic
-            confidence = self._determine_enhanced_confidence(
-                average_rate, matches_above, matches_below,
-                recommendation, winning_streak_data
-            )
+
+            # Determine confidence level
+            if team_winner in [TeamWinnerPrediction.HOME_TEAM, TeamWinnerPrediction.AWAY_TEAM]:
+                confidence = self._determine_team_winner_confidence(winning_streak_data)
+            else:
+                confidence = self._determine_enhanced_confidence(
+                    average_rate, matches_above, matches_below,
+                    recommendation, winning_streak_data
+                )
             
             # Create prediction
             prediction = ScoreWisePrediction(
@@ -150,7 +153,7 @@ class ScoreWiseCalculator:
                     'bookmaker_line': bookmaker_line
                 }
             )
-            
+            logger.debug(f"Full prediction for match {match.match_id}: {prediction.to_dict()}")
             logger.info(f"Prediction calculated for match {match.match_id}: {prediction.get_summary()}")
             return PredictionResult(success=True, prediction=prediction)
             

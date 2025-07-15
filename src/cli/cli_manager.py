@@ -488,21 +488,9 @@ class CLIManager:
             # Table 1: OVER/UNDER
             if r['prediction'] in ['OVER', 'UNDER']:
                 actionable_over_under.append(r)
-            # Table 2: HOME/AWAY (strict rule)
-            winner = r.get('winner', '')
-            if winner in ['HOME_TEAM', 'AWAY_TEAM', 'HOME', 'AWAY']:
-                ws = r.get('winning_streak_data', {})
-                if winner in ['HOME_TEAM', 'HOME']:
-                    h2h_wins = ws.get('home_team_h2h_wins', 0)
-                    streak = ws.get('home_team_winning_streak', 0)
-                    recent = ws.get('home_team_recent_wins', 0)
-                else:
-                    h2h_wins = ws.get('away_team_h2h_wins', 0)
-                    streak = ws.get('away_team_winning_streak', 0)
-                    recent = ws.get('away_team_recent_wins', 0)
-                # Use real streak and recent wins for qualification
-                if h2h_wins >= 4 and streak >= 3 and recent >= 3:
-                    actionable_home_away.append(r)
+            # Table 2: Home/Away
+            if r['prediction'] == 'NO_BET':
+                actionable_home_away.append(r)
         # Only show matches that qualify for at least one table
         # Clear console and show prediction header
         self._clear_and_header('prediction')
