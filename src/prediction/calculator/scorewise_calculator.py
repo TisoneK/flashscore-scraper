@@ -33,7 +33,7 @@ class ScoreWiseConfig:
     under_rate_min: float = -15.0  # UNDER bets need rate between -15 and -7
     under_rate_max: float = -7.0
     test_adjustment: float = 5.0  # Reduced from 7.0 for more sensitivity
-    min_matches_above_threshold: int = 3  # Reduced from 4 for more flexibility
+    min_matches_above_threshold: int = 4  # Require at least 4 out of 6 for any positive recommendation
     
     # Team winner prediction thresholds
     min_h2h_wins_for_winner: int = 4  # Minimum wins out of 6 H2H games
@@ -126,7 +126,8 @@ class ScoreWiseCalculator:
             else:
                 confidence = self._determine_enhanced_confidence(
                     average_rate, matches_above, matches_below,
-                    recommendation, winning_streak_data
+                    recommendation, winning_streak_data, h2h_totals, bookmaker_line,
+                    decrement_test, increment_test
                 )
             
             # Create prediction
@@ -294,46 +295,41 @@ class ScoreWiseCalculator:
     def _determine_recommendation(self, average_rate: float, matches_above: int, 
                                 matches_below: int, decrement_test: int, 
                                 increment_test: int) -> PredictionRecommendation:
-        """
-        Apply ScoreWise prediction rules to determine recommendation.
-        
-        Args:
-            average_rate: Average rate value
-            matches_above: Number of matches above bookmaker line
-            matches_below: Number of matches below bookmaker line
-            decrement_test: Result of decrement test
-            increment_test: Result of increment test
-            
-        Returns:
-            PredictionRecommendation
-        """
         total_matches = matches_above + matches_below
-        
-        # Over Bet conditions
-        over_conditions = (
+
+        # Over Bet conditions (strict)
+        over_strict = (
             self.config.over_rate_min <= average_rate <= self.config.over_rate_max and
             matches_above >= self.config.min_matches_above_threshold and
             decrement_test >= 1
         )
-        
-        # Under Bet conditions
-        under_conditions = (
+        # Over Bet conditions (relaxed: ignore decrement_test)
+        over_relaxed = (
+            self.config.over_rate_min <= average_rate <= self.config.over_rate_max and
+            matches_above >= self.config.min_matches_above_threshold
+        )
+
+        # Under Bet conditions (strict)
+        under_strict = (
             self.config.under_rate_min <= average_rate <= self.config.under_rate_max and
             matches_below >= self.config.min_matches_above_threshold and
             increment_test <= -1
         )
-        
-        if over_conditions:
-            logger.info(f"OVER recommendation - Avg rate: {average_rate}, "
-                       f"Matches above: {matches_above}, Decrement test: {decrement_test}")
+        # Under Bet conditions (relaxed: ignore increment_test)
+        under_relaxed = (
+            self.config.under_rate_min <= average_rate <= self.config.under_rate_max and
+            matches_below >= self.config.min_matches_above_threshold
+        )
+
+        if over_strict:
             return PredictionRecommendation.OVER
-        elif under_conditions:
-            logger.info(f"UNDER recommendation - Avg rate: {average_rate}, "
-                       f"Matches below: {matches_below}, Increment test: {increment_test}")
+        elif under_strict:
+            return PredictionRecommendation.UNDER
+        elif over_relaxed:
+            return PredictionRecommendation.OVER
+        elif under_relaxed:
             return PredictionRecommendation.UNDER
         else:
-            logger.info(f"NO BET recommendation - Avg rate: {average_rate}, "
-                       f"Conditions not met for OVER or UNDER")
             return PredictionRecommendation.NO_BET
     
     def _analyze_winning_patterns(self, h2h_matches: List[H2HMatchModel], match: MatchModel) -> WinningStreakData:
@@ -472,60 +468,62 @@ class ScoreWiseCalculator:
         else:
             return ConfidenceLevel.LOW
     
+    def _calculate_totals_streaks(self, h2h_totals: List[int], bookmaker_line: float) -> Tuple[int, int]:
+        """
+        Calculate the streaks of consecutive matches going OVER and UNDER the bookmaker line.
+        Returns (over_streak, under_streak).
+        """
+        over_streak = 0
+        under_streak = 0
+        # Start from most recent match (last in list)
+        for total in reversed(h2h_totals):
+            if total > bookmaker_line:
+                if under_streak == 0:
+                    over_streak += 1
+                else:
+                    break
+            elif total < bookmaker_line:
+                if over_streak == 0:
+                    under_streak += 1
+                else:
+                    break
+            else:
+                break  # If exactly equal, break streak
+        return over_streak, under_streak
+
     def _determine_enhanced_confidence(self, average_rate: float, matches_above: int, 
                                      matches_below: int, recommendation: PredictionRecommendation,
-                                     winning_streak_data: WinningStreakData) -> ConfidenceLevel:
+                                     winning_streak_data: WinningStreakData, h2h_totals: list, bookmaker_line: float,
+                                     decrement_test: int, increment_test: int) -> ConfidenceLevel:
         """
-        Determine confidence level with enhanced logic considering winning streaks.
-        
-        Args:
-            average_rate: Average rate value
-            matches_above: Number of matches above line
-            matches_below: Number of matches below line
-            recommendation: Current prediction recommendation
-            winning_streak_data: Winning streak analysis
-            
-        Returns:
-            ConfidenceLevel
+        Determine confidence level with enhanced logic considering totals streaks for OVER/UNDER.
         """
-        # Enhanced confidence logic based on recommendation type
         if recommendation == PredictionRecommendation.OVER:
-            return self._determine_over_confidence(average_rate, matches_above, winning_streak_data)
+            # If decrement_test fails but other conditions are met, confidence is MEDIUM
+            if decrement_test < 1:
+                return ConfidenceLevel.MEDIUM
+            return self._determine_over_confidence(average_rate, matches_above, h2h_totals, bookmaker_line)
         elif recommendation == PredictionRecommendation.UNDER:
-            return self._determine_under_confidence(average_rate, matches_below, winning_streak_data)
+            if increment_test > -1:
+                return ConfidenceLevel.MEDIUM
+            return self._determine_under_confidence(average_rate, matches_below, h2h_totals, bookmaker_line)
         else:  # NO_BET
             return ConfidenceLevel.LOW
-    
-    def _determine_over_confidence(self, average_rate: float, matches_above: int, 
-                                 winning_streak_data: WinningStreakData) -> ConfidenceLevel:
-        """Determine confidence for OVER predictions."""
-        # High confidence: rate 7-15, winning streak ≥3, and ≥4 H2H wins
-        if (7.0 <= average_rate <= 15.0 and 
-            winning_streak_data.home_team_winning_streak >= 3 and
-            winning_streak_data.home_team_h2h_wins >= 4):
-            return ConfidenceLevel.HIGH
-        
-        # Low confidence: rate 16-20
-        elif 16.0 <= average_rate <= 20.0:
-            return ConfidenceLevel.LOW
-        
-        # Medium confidence: other cases
-        else:
-            return ConfidenceLevel.MEDIUM
-    
-    def _determine_under_confidence(self, average_rate: float, matches_below: int, 
-                                  winning_streak_data: WinningStreakData) -> ConfidenceLevel:
-        """Determine confidence for UNDER predictions."""
-        # High confidence: rate -7 to -15, winning streak ≥3, and ≥4 H2H wins
-        if (-15.0 <= average_rate <= -7.0 and 
-            winning_streak_data.away_team_winning_streak >= 3 and
-            winning_streak_data.away_team_h2h_wins >= 4):
-            return ConfidenceLevel.HIGH
-        
-        # Low confidence: rate -16 to -20
-        elif -20.0 <= average_rate <= -16.0:
-            return ConfidenceLevel.LOW
-        
-        # Medium confidence: other cases
-        else:
-            return ConfidenceLevel.MEDIUM 
+
+    def _determine_over_confidence(self, average_rate: float, matches_above: int, h2h_totals: List[int], bookmaker_line: float) -> ConfidenceLevel:
+        over_streak, _ = self._calculate_totals_streaks(h2h_totals, bookmaker_line)
+        if matches_above >= self.config.min_matches_above_threshold:
+            if over_streak >= 3 and 7.0 <= average_rate <= 15.0:
+                return ConfidenceLevel.HIGH
+            elif over_streak == 2 and 7.0 <= average_rate <= 15.0:
+                return ConfidenceLevel.MEDIUM
+        return ConfidenceLevel.LOW
+
+    def _determine_under_confidence(self, average_rate: float, matches_below: int, h2h_totals: List[int], bookmaker_line: float) -> ConfidenceLevel:
+        _, under_streak = self._calculate_totals_streaks(h2h_totals, bookmaker_line)
+        if matches_below >= self.config.min_matches_above_threshold:
+            if under_streak >= 3 and -15.0 <= average_rate <= -7.0:
+                return ConfidenceLevel.HIGH
+            elif under_streak == 2 and -15.0 <= average_rate <= -7.0:
+                return ConfidenceLevel.MEDIUM
+        return ConfidenceLevel.LOW 
