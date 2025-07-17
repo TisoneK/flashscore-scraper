@@ -438,8 +438,16 @@ class CLIManager:
                 
                 # Calculate RATIO (how many times went over/under)
                 matches_above = pred.matches_above_line
+                matches_below = pred.matches_below_line
                 total_matches = pred.total_matches
-                ratio = f"{matches_above}/{total_matches}"
+                
+                # Show appropriate ratio based on prediction type
+                if pred.recommendation.value == 'OVER':
+                    ratio = f"{matches_above}/{total_matches}"
+                elif pred.recommendation.value == 'UNDER':
+                    ratio = f"{matches_below}/{total_matches}"
+                else:  # NO_BET
+                    ratio = f"{matches_above}/{total_matches}"  # Default to matches_above
                 
                 # Format date properly
                 date_str = match.date if match.date else "N/A"
