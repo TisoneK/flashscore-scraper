@@ -236,6 +236,12 @@
             "team_fouls": "div.stat__row",
             "timeouts": "div.stat__row"
         },
+        "results": {
+            "final_score": "div.duelParticipant__score div.detailScore__wrapper",
+            "match_status": "div.duelParticipant__score div.detailScore__status span.fixedHeaderDuel__detailStatus",
+            "home_score": "div.duelParticipant__score div.detailScore__wrapper span:first-child",
+            "away_score": "div.duelParticipant__score div.detailScore__wrapper span:last-child"
+        },
         "loading_indicator": "loader"
     },
     "scraping": {

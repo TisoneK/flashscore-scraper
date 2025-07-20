@@ -38,6 +38,9 @@ class MatchModel:
     h2h_matches: List[H2HMatchModel] = field(default_factory=list)
     status: str = "complete"  # 'complete' or 'incomplete'
     skip_reason: Optional[str] = None  # Reason for being incomplete
+    home_score: Optional[int] = None
+    away_score: Optional[int] = None
+    results_updated_at: Optional[str] = None
 
     @classmethod
     def create(cls, **kwargs) -> 'MatchModel':
@@ -69,6 +72,9 @@ class MatchModel:
             'created_at': self.created_at,
             'status': self.status,
             'skip_reason': self.skip_reason,
+            'home_score': self.home_score,
+            'away_score': self.away_score,
+            'results_updated_at': self.results_updated_at,
         }
         if self.odds:
             base_dict['odds'] = self.odds.__dict__

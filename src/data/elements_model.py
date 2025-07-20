@@ -28,4 +28,11 @@ class H2HElements:
     h2h_rows: List[Any] = field(default_factory=list)
     h2h_row_count: int = 0
     # Add more fields as needed for h2h details
-    # Each row dict can now include a 'competition' field 
+    # Each row dict can now include a 'competition' field
+
+@dataclass
+class ResultsElements:
+    final_score: Optional[Any] = None
+    home_score: Optional[Any] = None
+    away_score: Optional[Any] = None
+    match_status: Optional[Any] = None 

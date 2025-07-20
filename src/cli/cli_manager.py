@@ -98,6 +98,10 @@ class CLIManager:
                           help="Install drivers only. Browser: chrome (default) or firefox. Version: major version (e.g., 138)")
         parser.add_argument("--list-versions", action="store_true",
                           help="List available Chrome versions")
+        parser.add_argument("--results-update", metavar="JSON_FILE",
+                          help="Update match results from JSON file")
+        parser.add_argument("--output", "-o", metavar="OUTPUT_FILE",
+                          help="Output file for results update")
         parser.add_argument("--version", "-v", action="version", version="1.0.0")
         parser.add_argument("--debug", action="store_true", help="Enable debug output")
         
@@ -128,6 +132,11 @@ class CLIManager:
         # Handle UI mode
         if parsed_args.ui:
             self.launch_ui()
+            return
+        
+        # Handle results update
+        if parsed_args.results_update:
+            self.handle_results_update(parsed_args.results_update, parsed_args.output)
             return
         
         # Handle CLI mode
@@ -362,20 +371,48 @@ class CLIManager:
             self.display.show_prediction_header()
         elif context == 'status':
             self.display.show_status_header()
+        elif context == 'results_scraping':
+            self.display.show_results_scraping_header()
 
     def handle_scraping_selection(self):
         self._clear_and_header('scraping')
-        default_day = self.user_settings.get('default_day', 'Today')
-        selected_day = self.prompts.ask_scraping_day()
-        if selected_day == "Back":
+        # New: Ask for scraping mode
+        scraping_mode = self.prompts.ask_scraping_mode()
+        if scraping_mode == "Back":
             return  # Go back to main menu
-        if selected_day != default_day:
-            self.user_settings['default_day'] = selected_day
-            self._save_user_settings(self.user_settings)
-        self.start_scraping_with_day(selected_day)
-        self.prompts.ask_back()
-        # Do NOT clear after scraping; let user see results
-        # Return to main menu on next loop
+        if scraping_mode == "Scheduled Matches":
+            # Existing scheduled matches flow
+            default_day = self.user_settings.get('default_day', 'Today')
+            selected_day = self.prompts.ask_scraping_day()
+            if selected_day == "Back":
+                return  # Go back to main menu
+            if selected_day != default_day:
+                self.user_settings['default_day'] = selected_day
+                self._save_user_settings(self.user_settings)
+            self.start_scraping_with_day(selected_day)
+            self.prompts.ask_back()
+            # Do NOT clear after scraping; let user see results
+            # Return to main menu on next loop
+        elif scraping_mode == "Results":
+            # New results scraping flow
+            self._clear_and_header('results_scraping')
+            while True:
+                results_date_choice = self.prompts.ask_results_date()
+                if results_date_choice == "Back":
+                    return
+                elif results_date_choice == "Yesterday":
+                    from datetime import datetime, timedelta
+                    results_date = (datetime.now() - timedelta(days=1)).strftime('%d.%m.%Y')
+                elif results_date_choice == "Custom Date":
+                    # Prompt for custom date input
+                    from InquirerPy import inquirer
+                    results_date = inquirer.text(message="Enter results date (DD.MM.YYYY):").execute()
+                else:
+                    continue
+                # Call results scraping logic (stub for now)
+                self.scrape_results_for_date(results_date)
+                self.prompts.ask_back()
+                break
 
     def run_prediction_menu(self):
         while True:
@@ -1428,6 +1465,35 @@ class CLIManager:
             # If scraper supports a stop method, call it here
             pass
 
+    def handle_results_update(self, json_file: str, output_file: str = None):
+        """Handle results update from command line."""
+        try:
+            print(f"🔄 Starting results update for: {json_file}")
+            
+            # Import the processor
+            from src.data.processor.results_update_processor import ResultsUpdateProcessor
+            
+            # Create processor
+            processor = ResultsUpdateProcessor()
+            
+            # Define status callback
+            def status_callback(message: str):
+                print(f"📊 {message}")
+            
+            # Process the file
+            success = processor.process_json_file(json_file, output_file, status_callback)
+            
+            if success:
+                print("✅ Results update completed successfully!")
+            else:
+                print("❌ Results update failed!")
+                
+        except Exception as e:
+            print(f"❌ Error during results update: {e}")
+            if self.debug:
+                import traceback
+                traceback.print_exc()
+
     def display_show_scraping_results(self, results, critical_messages):
         # Save results to the correct output file
         from src.storage.json_storage import JSONStorage
@@ -1437,6 +1503,98 @@ class CLIManager:
         storage.save_matches(matches, filename=self.output_filename)
         # Then display as before
         self.display.show_scraping_results(results, critical_messages)
+
+    def scrape_results_for_date(self, results_date):
+        """Scrape results for a given date. Only process matches with status 'finished'."""
+        import threading
+        import os
+        import time
+        try:
+            self._clear_and_header('results_scraping')
+            from src.scraper import FlashscoreScraper
+            from src.utils import get_scraping_date, ensure_logging_configured, get_logging_status
+            from src.config import CONFIG
+
+            # Setup logging
+            CONFIG.logging.log_to_console = False
+            log_dir = CONFIG.logging.log_directory
+            os.makedirs(log_dir, exist_ok=True)
+            file_date = get_scraping_date(results_date)
+            scraper_log_path = os.path.join(log_dir, f"results_scraper_{file_date}.log")
+            self.output_filename = f"results_{file_date}.json"
+            ensure_logging_configured(scraper_log_path)
+            self._show_log_file_info(scraper_log_path)
+            logging_status = get_logging_status()
+            if logging_status['configured']:
+                self.logger.info(f"✅ Logging configured: {logging_status['log_file']}")
+            else:
+                self.logger.warning("⚠️ Logging not properly configured")
+
+            self.scraper = FlashscoreScraper(status_callback=self._status_update)
+            self._should_stop_scraper = False
+            self.performance_display.set_stop_callback(self._stop_scraper)
+
+            # --- Progress and status callbacks ---
+            def progress_callback(current, total):
+                stats = self.performance_monitor.get_stats() if hasattr(self, 'performance_monitor') else {}
+                self.performance_display.update_progress(current, total, f"Processing result {current} of {total}")
+                self.performance_display.update_current_task(f"Result {current}/{total}")
+                metrics = {
+                    "tasks_processed": current,
+                    "success_rate": (current / max(total, 1)) * 100 if total > 0 else 0,
+                    "active_workers": 1,
+                    "memory_usage": stats.get("memory_usage", 0),
+                    "cpu_usage": stats.get("cpu_usage", 0),
+                    "average_processing_time": stats.get("average_match_time", 0)
+                }
+                self.performance_display.update_metrics(metrics)
+
+            def status_callback(message: str):
+                self.performance_display.update_current_task(message)
+
+            log_thread = threading.Thread(target=self._monitor_logs, daemon=True)
+            log_thread.start()
+
+            scraping_result = []
+            scraping_exception = []
+            def run_scraper():
+                try:
+                    with self._allow_status_messages():
+                        # Pass both progress_callback and status_callback for results scraping
+                        self.scraper.scrape_results(results_date, progress_callback=progress_callback, status_callback=status_callback)
+                    scraping_result.append(True)
+                except Exception as e:
+                    scraping_exception.append(e)
+            self._scraper_thread = threading.Thread(target=run_scraper)
+            self._scraper_thread.daemon = True
+            self._scraper_thread.start()
+
+            try:
+                self.performance_display.start()  # This now runs in the main thread and handles controls
+            except KeyboardInterrupt:
+                self._should_stop_scraper = True
+                if self._scraper_thread.is_alive():
+                    self._scraper_thread.join(timeout=2)
+                sys.exit(0)
+            # After performance_display exits, join scraper thread if still running
+            if self._scraper_thread.is_alive():
+                self._should_stop_scraper = True
+                self._scraper_thread.join(timeout=2)
+            if scraping_exception:
+                self.performance_display.show_alert("Results scraping failed!", alert_type="error")
+                raise scraping_exception[0]
+            elif scraping_result:
+                self.performance_display.show_alert("Results scraping completed!", alert_type="success")
+
+            # Wait 5 seconds, then clear screen and show summary
+            time.sleep(5)
+            self.clear_terminal()
+            # TODO: Display results summary if available (implement as needed)
+            self.logger.info("Returning to main menu...")
+            time.sleep(1.2)
+        except Exception as e:
+            self.display.show_error(f"Results scraping failed: {str(e)}")
+            self.logger.error(f"Results scraping error: {e}")
 
 def main():
     """Main entry point for the CLI application."""

@@ -21,6 +21,9 @@ from src.core.network_monitor import NetworkMonitor
 from src.core.retry_manager import NetworkRetryManager
 from src.utils import setup_logging, ensure_logging_configured, get_logging_status
 from datetime import datetime
+from src.data.loader.results_data_loader import ResultsDataLoader
+from src.data.extractor.results_data_extractor import ResultsDataExtractor
+from src.core.performance_monitor import PerformanceMonitor
 
 # Global variables for logging paths
 log_dir = CONFIG.logging.log_directory
@@ -390,4 +393,94 @@ class FlashscoreScraper:
             # Run the main scrape with retry logic
             self.retry_manager.retry_network_operation(main_scrape)
         finally:
+            self.close()
+
+    def scrape_results(self, date, status_callback=None, progress_callback=None):
+        """
+        Scrape final results for a given date. Only process matches with status 'finished'.
+        Uses ResultsDataLoader and ResultsDataExtractor, and PerformanceMonitor.
+        Loads match IDs from the JSON file for the given date.
+        """
+        logger.info(f"=== Starting results scraping for {date} ===")
+        if status_callback:
+            status_callback(f"=== Starting results scraping for {date} ===")
+        self.initialize(status_callback=status_callback)
+        perf_monitor = PerformanceMonitor()
+        try:
+            def main_results_scrape():
+                # Load match IDs from the JSON file for the given date
+                file_date = date.replace('.', '')
+                filename = f"matches_{file_date}.json"
+                try:
+                    matches = self.json_storage.load_matches(filename)
+                except Exception as e:
+                    msg = f"Could not load matches for {date} from {filename}: {e}"
+                    logger.error(msg)
+                    if status_callback:
+                        status_callback(msg)
+                    return
+                match_ids = [m.match_id for m in matches]
+                if not match_ids:
+                    msg = f"No matches found for results scraping on {date}."
+                    logger.info(msg)
+                    if status_callback:
+                        status_callback(msg)
+                    return
+                found_msg = f"Found {len(match_ids)} matches for results scraping on {date}."
+                logger.info(found_msg)
+                if status_callback:
+                    status_callback(found_msg)
+                results_loader = ResultsDataLoader(self.driver, selenium_utils=self.selenium_utils)
+                extractor = ResultsDataExtractor(results_loader)
+                results = []
+                total = len(match_ids)
+                for i, match_id in enumerate(match_ids):
+                    if progress_callback:
+                        progress_callback(i+1, total)
+                    progress_msg = f"Processing match {i+1}/{total}: {match_id}"
+                    if status_callback:
+                        status_callback(progress_msg)
+                    # Load match summary page
+                    loaded = results_loader.load_match_summary(match_id, status_callback=status_callback)
+                    if not loaded:
+                        warn_msg = f"Failed to load match summary for {match_id}"
+                        logger.warning(warn_msg)
+                        if status_callback:
+                            status_callback(warn_msg)
+                        continue
+                    elements = results_loader.get_elements()
+                    # Extract match status
+                    match_status = extractor.extract_match_status(elements, status_callback=status_callback)
+                    if match_status != "finished":
+                        skip_msg = f"Skipping match {match_id}: status is '{match_status}' (not finished)"
+                        logger.info(skip_msg)
+                        if status_callback:
+                            status_callback(skip_msg)
+                        continue
+                    # Extract final scores
+                    home_score, away_score = extractor.extract_final_scores(elements, status_callback=status_callback)
+                    if home_score is None or away_score is None:
+                        warn_msg = f"No final scores found for match {match_id}"
+                        logger.warning(warn_msg)
+                        if status_callback:
+                            status_callback(warn_msg)
+                        continue
+                    # Save or log the result (here, just collect for summary)
+                    results.append({
+                        "match_id": match_id,
+                        "home_score": home_score,
+                        "away_score": away_score,
+                        "status": match_status
+                    })
+                # Save results using JSONStorage or similar
+                results_filename = f"results_{file_date}.json"
+                self.json_storage.save_matches(results, filename=results_filename)
+                summary_msg = f"\n--- Results scraping summary: {len(results)} matches with final scores for {date} ---"
+                logger.info(summary_msg)
+                if status_callback:
+                    status_callback(summary_msg)
+            # Run with retry logic
+            self.retry_manager.retry_network_operation(main_results_scrape)
+        finally:
+            perf_monitor.stop_resource_monitoring()
             self.close()

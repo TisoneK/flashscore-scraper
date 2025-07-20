@@ -59,6 +59,14 @@ class ConsoleDisplay:
         """
         self.console.print(Panel(scraping_text, box=box.ROUNDED, expand=False))
 
+    def show_results_scraping_header(self):
+        """Show results scraping page header."""
+        results_text = """
+[bold purple]📊 Results Scraping Mode[/bold purple]
+[dim]Update match results with final scores from Flashscore[/dim]
+        """
+        self.console.print(Panel(results_text, box=box.ROUNDED, expand=False))
+
     def show_scraping_start_immediate(self):
         """Show immediate scraping start message."""
         self.console.print("\n[bold yellow]🚀 Starting scraper with current settings...[/bold yellow]")

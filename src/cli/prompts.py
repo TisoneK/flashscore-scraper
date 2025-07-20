@@ -252,3 +252,27 @@ class ScraperPrompts:
             choices=["Back"],
             default="Back"
         ).execute() 
+
+    def ask_scraping_mode(self):
+        """Ask user for scraping mode: scheduled matches or results."""
+        return inquirer.select(
+            message="Select scraping mode:",
+            choices=[
+                "Scheduled Matches",
+                "Results",
+                "Back"
+            ],
+            default="Scheduled Matches"
+        ).execute()
+
+    def ask_results_date(self):
+        """Ask user for results scraping date (Yesterday default, Custom Date, Back)."""
+        return inquirer.select(
+            message="Select results scraping date:",
+            choices=[
+                "Yesterday",
+                "Custom Date",
+                "Back"
+            ],
+            default="Yesterday"
+        ).execute() 
