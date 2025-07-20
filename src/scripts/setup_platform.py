@@ -274,7 +274,6 @@ class PlatformSetup:
         
         logger.info(f"\n🚀 Your scraper is ready to use!")
         logger.info(f"   Run: python main.py --cli")
-        logger.info(f"   Run: python main.py --ui")
         logger.info(f"   Run: python run_cli.py --cli")
 
 if __name__ == "__main__":

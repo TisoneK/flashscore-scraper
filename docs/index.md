@@ -1,8 +1,6 @@
 # ScoreWise Prediction Calculator Algorithm
 
-## Overview
-
-ScoreWise is a statistical approach to basketball score prediction. The algorithm analyzes historical head-to-head (H2H) matchup data and bookmaker alternatives to provide recommendations for Over/Under bets.
+> **Note:** The Flashscore Basketball Scraper is now CLI-only. All UI/GUI features and instructions have been removed. Please use the CLI for all scraping and configuration tasks.
 
 ---
 

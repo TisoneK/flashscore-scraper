@@ -76,11 +76,6 @@ Repository = "https://github.com/your-username/flashscore-scraper.git"
 [project.scripts]
 flashscore-scraper = "src.cli.cli_manager:main"
 fss = "src.cli.cli_manager:main"
-flashscore-ui = "src.ui.main:main"
-setup-drivers = "setup_drivers:main"
-
-[project.gui-scripts]
-flashscore-gui = "src.ui.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -207,7 +202,6 @@ python = "^3.8"
 selenium = "^4.18.1"
 webdriver-manager = "^4.0.1"
 pandas = "^2.1.0"
-flet = "^0.28.0"
 InquirerPy = "^0.3.4"
 rich = "^13.0.0"
 tqdm = "^4.65.0"
@@ -236,7 +230,6 @@ myst-parser = "^1.0.0"
 
 [tool.poetry.scripts]
 flashscore-scraper = "src.cli.cli_manager:main"
-flashscore-ui = "src.ui.main:main"
 
 [tool.poetry.urls]
 Homepage = "https://github.com/your-username/flashscore-scraper"

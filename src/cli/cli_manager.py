@@ -90,8 +90,6 @@ class CLIManager:
         )
         parser.add_argument("--init", nargs='*', metavar='BROWSER [VERSION]',
                           help="Initialize project (venv, install, drivers). Browser: chrome (default) or firefox. Version: major version (e.g., 138)")
-        parser.add_argument("--ui", "-u", action="store_true", 
-                          help="Launch GUI interface")
         parser.add_argument("--cli", "-c", action="store_true", 
                           help="Launch CLI interface")
         parser.add_argument("--install-drivers", nargs='*', metavar='BROWSER [VERSION]',
@@ -127,11 +125,6 @@ class CLIManager:
             browser = args[0].lower() if args else 'chrome'
             version = args[1] if len(args) > 1 else None
             self.initialize_project(browser, version)
-            return
-        
-        # Handle UI mode
-        if parsed_args.ui:
-            self.launch_ui()
             return
         
         # Handle results update
@@ -245,9 +238,7 @@ class CLIManager:
         
         print("✅ Project initialized successfully!")
         print(f"\n📋 Next steps:")
-        print("  • Run: flashscore-scraper --ui    (for GUI)")
         print("  • Run: flashscore-scraper --cli   (for command line)")
-        print("  • Run: fss -u                     (short form for GUI)")
         print("  • Run: fss -c                     (short form for CLI)")
     
     def list_available_versions(self):
@@ -292,13 +283,12 @@ class CLIManager:
                     print("\n🎉 Chrome drivers installed successfully!")
                     print("   You can now run the scraper with:")
                     print("   • fss --cli")
-                    print("   • fss --ui")
                 else:
                     print("\n⚠️  Some Chrome drivers failed to install.")
                     print("   You may need to install them manually or use system drivers.")
                     
             elif browser == 'firefox':
-                print("📡 Using webdriver-manager for Firefox...")
+                print("\U0001F4E1 Using webdriver-manager for Firefox...")
                 from webdriver_manager.firefox import GeckoDriverManager
                 
                 driver_path = GeckoDriverManager().install()
@@ -307,7 +297,6 @@ class CLIManager:
                 print("\n🎉 Firefox driver installed successfully!")
                 print("   You can now run the scraper with:")
                 print("   • fss --cli")
-                print("   • fss --ui")
                 
         except ImportError as e:
             print(f"❌ Error importing driver manager: {e}")
@@ -316,20 +305,6 @@ class CLIManager:
             print(f"❌ Error installing {browser} drivers: {e}")
             print("💡 Check your internet connection and try again.")
     
-    def launch_ui(self):
-        """Launch the GUI interface."""
-        try:
-            import flet as ft
-            from src.ui.main import main as ui_main
-            ft.app(target=ui_main)
-        except ImportError as e:
-            print(f"❌ Error launching UI: {e}")
-            print("💡 Make sure you're in the project directory and all dependencies are installed.")
-            sys.exit(1)
-        except Exception as e:
-            print(f"❌ Error launching UI: {e}")
-            sys.exit(1)
-
     def run_interactive_cli(self):
         """Run the interactive CLI interface."""
         try:
