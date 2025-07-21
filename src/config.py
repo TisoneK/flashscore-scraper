@@ -263,7 +263,7 @@ class ScraperConfig:
     
     def __post_init__(self):
         """Initialize selectors after object creation."""
-        # Selectors
+        # Hardcoded selectors
         self.selectors = {
             'match': {
                 'container': 'div.event__match',
@@ -414,8 +414,35 @@ class ScraperConfig:
                     'today_button_alt': '[aria-label=\'Today\']'
                 }
             },
-            'loading_indicator': 'loader'
+            'loading_indicator': 'loader',
+            'results': {
+                'final_score_wrapper': 'div.detailScore__wrapper',
+                'home_score': 'div.detailScore__wrapper > span:first-child',
+                'away_score': 'div.detailScore__wrapper > span:last-child',
+                'match_status': 'div.detailScore__status > span.fixedHeaderDuel__detailStatus'
+            }
         }
+        # Merge in any extra selectors from config.json (e.g., 'results')
+        if hasattr(self, '_raw_selectors'):
+            for k, v in self._raw_selectors.items():
+                if k not in self.selectors:
+                    self.selectors[k] = v
+        elif hasattr(self, 'raw_selectors'):
+            for k, v in self.raw_selectors.items():
+                if k not in self.selectors:
+                    self.selectors[k] = v
+        # If loaded from config.json, merge in any extra selectors
+        if isinstance(getattr(self, 'selectors', None), dict):
+            config_path = 'src/config.json'
+            try:
+                with open(config_path, 'r') as f:
+                    config_dict = json.load(f)
+                extra_selectors = config_dict.get('selectors', {})
+                for k, v in extra_selectors.items():
+                    if k not in self.selectors:
+                        self.selectors[k] = v
+            except Exception:
+                pass
     
     @classmethod
     def load(cls, config_path: str = "src/config.json") -> 'ScraperConfig':

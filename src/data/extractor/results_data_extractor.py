@@ -85,6 +85,14 @@ class ResultsDataExtractor:
                     home_score = None
                     away_score = None
 
+            # Fallback: Try extracting from window title if scores are missing
+            if (home_score is None or away_score is None) and self._loader and hasattr(self._loader, 'get_window_title'):
+                title = self._loader.get_window_title() if self._loader else None
+                if title:
+                    fallback_home, fallback_away = self.extract_scores_from_title(title, status_callback=status_callback)
+                    if fallback_home is not None and fallback_away is not None:
+                        home_score, away_score = fallback_home, fallback_away
+
             # Store the extracted data
             self._last_extracted_data = {
                 'home_score': home_score,
@@ -173,6 +181,38 @@ class ResultsDataExtractor:
             
         except Exception as e:
             print(f"Error parsing score text: {e}")
+            return None, None
+
+    def extract_scores_from_title(self, title: str, status_callback=None):
+        """
+        Extract home and away scores from a window title string.
+        :param title: The window title string.
+        :param status_callback: Optional callback for status updates.
+        :return: (home_score, away_score) or (None, None)
+        """
+        if status_callback:
+            status_callback(f"[Fallback] Attempting to extract scores from window title: {title}")
+        try:
+            score_pattern = r'^.*?(\d+)\s*[-:]\s*(\d+).*$'
+            import re
+            match = re.match(score_pattern, title.strip())
+            if not match:
+                if status_callback:
+                    status_callback(f"[Fallback] Invalid score format in title: {title}")
+                return None, None
+            home_score = int(match.group(1))
+            away_score = int(match.group(2))
+            is_valid, error = self.results_data_verifier.verify_scores(home_score, away_score)
+            if not is_valid:
+                if status_callback:
+                    status_callback(f"[Fallback] Error verifying scores from title: {error}")
+                return None, None
+            if status_callback:
+                status_callback(f"[Fallback] Successfully extracted scores from title: {home_score}-{away_score}")
+            return home_score, away_score
+        except Exception as e:
+            if status_callback:
+                status_callback(f"[Fallback] Error extracting scores from window title: {e}")
             return None, None
 
     def get_last_extracted_data(self) -> Optional[Dict[str, Optional[int]]]:

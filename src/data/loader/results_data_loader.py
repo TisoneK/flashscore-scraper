@@ -1,6 +1,6 @@
 from src.data.elements_model import ResultsElements
 from typing import List, Optional
-from src.config import CONFIG, SELECTORS
+from src.config import CONFIG
 from src.core.url_verifier import URLVerifier
 from src.core.network_monitor import NetworkMonitor
 from src.core.retry_manager import NetworkRetryManager
@@ -34,21 +34,22 @@ class ResultsDataLoader:
         if hasattr(self, 'network_monitor'):
             self.network_monitor.stop_monitoring()
 
-    def get_final_score(self):
-        """Extract the final score element from the match summary page."""
-        return self._safe_find_element('css', SELECTORS['results']['final_score'])
-
     def get_home_score(self):
         """Extract the home score element."""
-        return self._safe_find_element('css', SELECTORS['results']['home_score'])
+        return self._safe_find_element('css', CONFIG.selectors['results']['home_score'])
 
     def get_away_score(self):
         """Extract the away score element."""
-        return self._safe_find_element('css', SELECTORS['results']['away_score'])
+        return self._safe_find_element('css', CONFIG.selectors['results']['away_score'])
 
     def get_match_status(self):
         """Extract the match status element."""
-        return self._safe_find_element('css', SELECTORS['results']['match_status'])
+        return self._safe_find_element('css', CONFIG.selectors['results']['match_status'])
+
+    # Optionally remove get_final_score if not needed, or update if you want to extract the wrapper
+    def get_final_score_wrapper(self):
+        """Extract the final score wrapper element (if needed)."""
+        return self._safe_find_element('css', CONFIG.selectors['results']['final_score_wrapper'])
 
     def load_match_summary(self, match_id: str, status_callback=None) -> bool:
         """Load a match summary page and extract all required elements with network resilience."""
@@ -60,31 +61,23 @@ class ResultsDataLoader:
             success, error = self.url_verifier.load_and_verify_url(url)
             if not success:
                 raise Exception(f"Error loading match summary for {match_id}: {error}")
-            
+            # Wait specifically for the results container to be present
             if self.selenium_utils:
-                self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
-            
+                self.selenium_utils.find('css', CONFIG.selectors['results']['final_score_wrapper'], duration=CONFIG.timeout.element_timeout)
             # Extract and verify elements with retry logic for each
-            self.elements.final_score = self._retry_element_extraction(
-                lambda: self.get_final_score(),
-                f"final score for {match_id}"
-            )
-            
+            self.elements.final_score = None  # Optionally update or remove if not used
             self.elements.home_score = self._retry_element_extraction(
                 lambda: self.get_home_score(),
                 f"home score for {match_id}"
             )
-            
             self.elements.away_score = self._retry_element_extraction(
                 lambda: self.get_away_score(),
                 f"away score for {match_id}"
             )
-            
             self.elements.match_status = self._retry_element_extraction(
                 lambda: self.get_match_status(),
                 f"match status for {match_id}"
             )
-            
             return True
         
         try:
@@ -139,3 +132,14 @@ class ResultsDataLoader:
     def set_elements(self, elements: ResultsElements):
         """Set the elements."""
         self.elements = elements 
+
+    def get_window_title(self):
+        """Return the current window title from the driver if match is finished, else None."""
+        try:
+            status = self.get_match_status()
+            if status and str(status).strip().lower() == 'finished':
+                if hasattr(self, 'driver') and self.driver is not None:
+                    return self.driver.title
+        except Exception:
+            return None
+        return None 
