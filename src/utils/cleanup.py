@@ -1,26 +1,44 @@
 #!/usr/bin/env python3
 """
-Flashscore Scraper - Main Entry Point
+Flashscore Scraper Cleanup Utility
 
-This script launches the CLI scraper and provides cleanup functionality.
+This utility cleans up corrupted package installations and reinstalls the package.
+Use this when the 'fss' command is not working due to corrupted installations.
+
+Usage:
+    python cleanup.py           # Clean and reinstall
+    python cleanup.py --clean   # Clean only (no reinstall)
+    python cleanup.py --help    # Show help
 """
 
-import warnings
-import sys
-import argparse
 import os
+import sys
 import shutil
 import subprocess
-import glob
+import argparse
 from pathlib import Path
+import glob
 
-# Suppress Python warnings about platform independent libraries
-warnings.filterwarnings("ignore", message="Could not find platform independent libraries")
 
-def run_cleanup():
-    """Run cleanup utility for corrupted installations."""
-    print("🧹 Flashscore Scraper Emergency Cleanup")
-    print("======================================")
+def find_corrupted_packages(site_packages_dir):
+    """Find corrupted package directories."""
+    corrupted = []
+    
+    # Look for directories starting with ~ (corrupted prefix)
+    pattern = os.path.join(site_packages_dir, "~*flashscore*")
+    corrupted.extend(glob.glob(pattern))
+    
+    # Look for directories with mangled names
+    pattern = os.path.join(site_packages_dir, "*lashscore*")  # Missing 'f'
+    corrupted.extend(glob.glob(pattern))
+    
+    return corrupted
+
+
+def clean_corrupted_packages():
+    """Clean up corrupted package installations."""
+    print("🧹 Flashscore Scraper Cleanup Utility")
+    print("=====================================")
     
     # Check if we're in a virtual environment
     in_venv = hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix)
@@ -49,11 +67,7 @@ def run_cleanup():
     print(f"📂 Checking site-packages: {site_packages}")
     
     # Find corrupted packages
-    corrupted = []
-    pattern = os.path.join(site_packages, "~*flashscore*")
-    corrupted.extend(glob.glob(pattern))
-    pattern = os.path.join(site_packages, "*lashscore*")  # Missing 'f'
-    corrupted.extend(glob.glob(pattern))
+    corrupted = find_corrupted_packages(site_packages)
     
     if not corrupted:
         print("✅ No corrupted packages found!")
@@ -84,7 +98,7 @@ def run_cleanup():
             print(f"   ❌ Failed to remove: {e}")
             success = False
     
-    # Try to uninstall the package properly
+    # Also try to uninstall the package properly
     print("\n📦 Attempting to uninstall flashscore-scraper...")
     try:
         result = subprocess.run([
@@ -98,9 +112,23 @@ def run_cleanup():
     except Exception as e:
         print(f"⚠️  Error during uninstall: {e}")
     
-    # Reinstall the package
+    if success:
+        print("\n🎉 Cleanup completed successfully!")
+    else:
+        print("\n⚠️  Cleanup completed with some errors.")
+    
+    return success
+
+
+def reinstall_package():
+    """Reinstall the package in development mode."""
     print("\n📦 Reinstalling flashscore-scraper...")
+    
     try:
+        # Change to the project root directory
+        script_dir = Path(__file__).parent
+        os.chdir(script_dir)
+        
         result = subprocess.run([
             sys.executable, "-m", "pip", "install", "-e", "."
         ], capture_output=True, text=True)
@@ -110,70 +138,56 @@ def run_cleanup():
             print("\n🎯 You can now run:")
             print("   • fss --help")
             print("   • fss --cli")
+            return True
         else:
             print("❌ Package reinstallation failed!")
             print(f"Error: {result.stderr}")
-            success = False
+            return False
+            
     except Exception as e:
         print(f"❌ Error during reinstallation: {e}")
-        success = False
-    
-    if success:
-        print("\n🎉 Emergency cleanup completed successfully!")
-    else:
-        print("\n⚠️  Emergency cleanup completed with some errors.")
-    
-    return success
+        return False
 
-def run_cli_scraper():
-    """Run the CLI version of the scraper using the new CLI manager."""
-    from src.cli import CLIManager
-    
-    try:
-        cli = CLIManager()
-        cli.run()
-    except KeyboardInterrupt:
-        print("\nScraping interrupted by user")
-        sys.exit(130)  # Standard exit code for SIGINT
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
-        sys.exit(1)
 
 def main():
-    """Main entry point with CLI argument parsing."""
     parser = argparse.ArgumentParser(
-        description="Flashscore Basketball Scraper (CLI Only)",
+        description="Flashscore Scraper Cleanup Utility",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py          # Run CLI scraper (default)
-  python main.py --cli    # Run CLI scraper (explicit)
-  python main.py -c       # Run CLI scraper (short form)
-  python main.py --cleanup # Emergency cleanup for corrupted installations
+  python cleanup.py           # Clean corrupted packages and reinstall
+  python cleanup.py --clean   # Clean corrupted packages only
+  
+This utility is useful when the 'fss' command is not working due to
+corrupted package installations.
         """
     )
     
     parser.add_argument(
-        '--cli', '-c',
+        '--clean', '-c',
         action='store_true',
-        help='Run CLI scraper'
-    )
-    
-    parser.add_argument(
-        '--cleanup',
-        action='store_true',
-        help='Emergency cleanup for corrupted package installations'
+        help='Clean corrupted packages only (do not reinstall)'
     )
     
     args = parser.parse_args()
     
-    # Handle cleanup mode
-    if args.cleanup:
-        success = run_cleanup()
-        sys.exit(0 if success else 1)
+    # Clean corrupted packages
+    cleanup_success = clean_corrupted_packages()
     
-    # Always run CLI scraper (default)
-    run_cli_scraper()
+    if not cleanup_success:
+        sys.exit(1)
+    
+    # Reinstall if requested (default behavior)
+    if not args.clean:
+        reinstall_success = reinstall_package()
+        if not reinstall_success:
+            sys.exit(1)
+    else:
+        print("\n💡 To reinstall the package, run:")
+        print("   pip install -e .")
+    
+    print("\n🎉 All done!")
+
 
 if __name__ == "__main__":
     main()

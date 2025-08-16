@@ -10,22 +10,59 @@ A powerful basketball match data scraper with a modern CLI interface, designed t
 
 ### Installation
 
-1. **Clone and install:**
+1. **Clone the repository:**
 ```bash
 git clone https://github.com/TisoneK/flashscore-scraper.git
 cd flashscore-scraper
+```
+
+2. **Create and activate virtual environment:**
+```bash
+# Create virtual environment
+python -m venv .venv
+
+# Activate virtual environment
+# On Windows:
+.\.venv\Scripts\activate
+# On macOS/Linux:
+source .venv/bin/activate
+```
+
+3. **Install the package:**
+```bash
 pip install -e .
 ```
 
-2. **Set up drivers:**
+4. **Initialize drivers:**
 ```bash
 fss --init
 ```
 
-3. **Start scraping:**
+5. **Start scraping:**
 ```bash
 fss    # or: fss -c
 ```
+
+### 🛠️ Troubleshooting Installation Issues
+
+If you encounter corrupted package installations (e.g., `ModuleNotFoundError: No module named 'src'`), use the cleanup utility:
+
+```bash
+# Method 1: Using the cleanup command (if package is installed)
+fss-cleanup
+
+# Method 2: Emergency cleanup via main.py (most reliable fallback)
+python main.py --cleanup
+
+# Method 3: Direct module execution (if main.py fails)
+python -m src.utils.cleanup
+python -m src.utils.cleanup --clean  # Clean only (no reinstall)
+```
+
+**Common signs of corrupted installation:**
+- `fss` command not found or fails to run
+- Import errors when running the scraper
+- Warning messages about "invalid distribution"
 
 ---
 
@@ -205,20 +242,27 @@ Accessible via the CLI "Configure Settings" menu:
 
 ```
 flashscore-scraper/
-├── main.py                 # Main entry point (CLI only)
-├── src/config.json        # Configuration file
+├── main.py                # Main entry point (CLI only)
+├── config.py              # Root configuration file
 ├── requirements.txt       # Dependencies
-├── pyproject.toml        # Project configuration
+├── pyproject.toml         # Project configuration
+├── drivers/               # Browser drivers storage
+├── output/                # Scraping output directory
 ├── src/                   # Core scraper logic
+│   ├── __init__.py        # Package initialization
 │   ├── scraper.py         # Main scraper class
 │   ├── config.py          # Configuration management
+│   ├── config.json        # Configuration file
 │   ├── models.py          # Data models
 │   ├── driver.py          # WebDriver management (legacy)
+│   ├── api/               # API interfaces
 │   ├── cli/               # CLI interface
 │   │   ├── cli_manager.py # Main CLI manager
 │   │   ├── display.py     # Console display
 │   │   ├── progress.py    # Progress tracking
 │   │   ├── prompts.py     # User prompts
+│   │   ├── colors.py      # Color schemes
+│   │   ├── performance_display.py # Performance monitoring
 │   │   └── cli_settings.json # CLI-specific settings
 │   ├── core/              # Core functionality
 │   │   ├── batch_processor.py
@@ -228,28 +272,18 @@ flashscore-scraper/
 │   │   ├── tab_manager.py
 │   │   └── url_verifier.py
 │   ├── data/              # Data processing
-│   │   ├── elements_model.py
-│   │   ├── extractor/     # Data extractors
-│   │   ├── loader/        # Data loaders
-│   │   └── verifier/      # Data verifiers
 │   ├── driver_manager/    # Driver management system
-│   │   ├── web_driver_manager.py # Main WebDriver manager
-│   │   ├── chrome_driver.py     # Chrome driver management
-│   │   ├── firefox_driver.py    # Firefox driver management
 │   │   └── driver_installer.py  # Driver installation
-│   ├── storage/           # Data storage
-│   │   ├── database.py
-│   │   └── json_storage.py
-│   ├── utils/             # Utilities
-│   │   ├── driver_manager.py # Legacy driver management
-│   │   ├── progress_monitor.py
-│   │   ├── selenium_utils.py
-│   │   └── utils.py
+│   ├── prediction/        # Match prediction system
 │   ├── scripts/           # Utility scripts
-│   │   ├── run_cli.py     # CLI launcher
-│   │   ├── setup_platform.py # Platform setup
-│   │   └── activate_and_run.py # Environment activation
-│   └── api/               # API interface
+│   ├── storage/           # Data storage
+│   ├── ui/                # User interface components
+│   └── utils/             # Utilities
+│       ├── cleanup.py     # Cleanup utility for corrupted installations
+│       ├── driver_manager.py # Legacy driver management
+│       ├── progress_monitor.py
+│       ├── selenium_utils.py
+│       └── utils.py
 ├── docs/                  # Documentation
 │   ├── index.md           # Main documentation
 │   └── issues.md          # Known issues

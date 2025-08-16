@@ -32,7 +32,7 @@ class ScoreWiseConfig:
     over_rate_max: float = 15.0
     under_rate_min: float = -15.0  # UNDER bets need rate between -15 and -7
     under_rate_max: float = -7.0
-    test_adjustment: float = 5.0  # Reduced from 7.0 for more sensitivity
+    test_adjustment: float = 7.0  # Standard adjustment for prediction sensitivity
     min_matches_above_threshold: int = 4  # Require at least 4 out of 6 for any positive recommendation
     
     # Team winner prediction thresholds

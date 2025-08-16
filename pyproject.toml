@@ -76,6 +76,7 @@ Repository = "https://github.com/your-username/flashscore-scraper.git"
 [project.scripts]
 flashscore-scraper = "src.cli.cli_manager:main"
 fss = "src.cli.cli_manager:main"
+fss-cleanup = "src.utils.cleanup:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

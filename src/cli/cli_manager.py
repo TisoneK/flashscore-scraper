@@ -116,6 +116,9 @@ class CLIManager:
             args = parsed_args.install_drivers
             browser = args[0].lower() if args else 'chrome'
             version = args[1] if len(args) > 1 else None
+            # Default to Chrome 138 if no version specified
+            if browser == 'chrome' and version is None:
+                version = '138'
             self.install_drivers_automated(browser, version)
             return
         
@@ -142,7 +145,11 @@ class CLIManager:
     
     def initialize_project(self, browser='chrome', version=None):
         """Initialize the project and install drivers."""
-        print(f"🚀 Initializing FlashScore Scraper with {browser}...")
+        # Default to Chrome 138 if no version specified
+        if browser == 'chrome' and version is None:
+            version = '138'
+        
+        print(f"🚀 Initializing FlashScore Scraper with {browser} {version or 'latest'}...")
         
         # Validate browser choice
         if browser not in ['chrome', 'firefox']:
