@@ -14,8 +14,8 @@
         "disable_javascript": false,
         "disable_css": false,
         "driver_path": null,
-        "chrome_binary_path": "C:\\Users\\SKY TECH SOLUTIONS\\OneDrive\\Documents\\Dev\\flashscore-scraper\\drivers\\windows\\chrome\\138.0.7152.0\\chrome.exe",
-        "chromedriver_path": "C:\\Users\\SKY TECH SOLUTIONS\\OneDrive\\Documents\\Dev\\flashscore-scraper\\drivers\\windows\\chrome\\138.0.7152.0\\chromedriver.exe"
+        "chrome_binary_path": "C:\\Users\\PC\\OneDrive\\Documents\\Dev\\flashscore-scraper\\drivers\\windows\\chrome\\138.0.7152.0\\chrome.exe",
+        "chromedriver_path": "C:\\Users\\PC\\OneDrive\\Documents\\Dev\\flashscore-scraper\\drivers\\windows\\chrome\\138.0.7152.0\\chromedriver.exe"
     },
     "tab": {
         "max_tabs": 1,
@@ -62,6 +62,7 @@
         "log_level": "DEBUG",
         "log_file": "output/logs/scraper.log",
         "log_directory": "output/logs",
+        "chrome_log_directory": "output/logs/chrome",
         "log_format": "%(asctime)s,%(msecs)03d %(levelname)s: %(message)s",
         "log_date_format": "%Y-%m-%d %H:%M:%S",
         "log_filename_date_format": "%y%m%d",

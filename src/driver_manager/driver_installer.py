@@ -13,9 +13,13 @@ import zipfile
 import json
 import subprocess
 import shutil
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, List
 import logging
+
+from .downloader import DriverDownloader
+from .exceptions import DownloadError, NetworkError, HTTPError, TimeoutError, FileSystemError
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,7 @@ class DriverInstaller:
         self.drivers_dir = self.project_root / "drivers"
         self.system = platform.system().lower()
         self.machine = platform.machine().lower()
+        self.downloader = DriverDownloader()
         
         # Chrome for Testing API endpoints
         self.api_base = "https://googlechromelabs.github.io/chrome-for-testing"
@@ -67,14 +72,14 @@ class DriverInstaller:
     def get_available_versions(self) -> list:
         """Get all available Chrome for Testing versions."""
         try:
-            logger.info("Fetching available Chrome for Testing versions...")
+            logger.info("[STATUS] Fetching available Chrome for Testing versions...")
             with urllib.request.urlopen(self.stable_endpoint) as response:
                 data = json.load(response)
             
             return data.get('versions', [])
             
         except Exception as e:
-            logger.error(f"Failed to fetch Chrome versions: {e}")
+            logger.error("[STATUS] Failed to fetch Chrome versions: %s", e)
             return []
     
     def find_version_by_major(self, major_version: str) -> Optional[Dict[str, Any]]:
@@ -85,17 +90,17 @@ class DriverInstaller:
         for version_info in versions:
             version = version_info['version']
             if version.startswith(f"{major_version}."):
-                logger.info(f"Found Chrome version {version} for major version {major_version}")
+                logger.info("[STATUS] Found Chrome version %s for major version %s", version, major_version)
                 return version_info
         
         # If not found, return the latest version
-        logger.warning(f"No Chrome version found for major version {major_version}, using latest")
+        logger.warning("[STATUS] No Chrome version found for major version %s, using latest", major_version)
         return versions[0] if versions else None
     
     def get_latest_chrome_version(self) -> Dict[str, Any]:
         """Get the latest Chrome for Testing version and download URLs."""
         try:
-            logger.info("Fetching latest Chrome for Testing version...")
+            logger.info("[STATUS] Fetching latest Chrome for Testing version...")
             with urllib.request.urlopen(self.stable_endpoint) as response:
                 data = json.load(response)
             
@@ -111,11 +116,11 @@ class DriverInstaller:
                 'downloads': latest_version.get('downloads', {})
             }
             
-            logger.info(f"Latest Chrome for Testing version: {version_info['version']}")
+            logger.info("[STATUS] Latest Chrome for Testing version: %s", version_info['version'])
             return version_info
             
         except Exception as e:
-            logger.error(f"Failed to fetch Chrome version: {e}")
+            logger.error("[STATUS] Failed to fetch Chrome version: %s", e)
             # Fallback to a known working version
             return {
                 'version': '138.0.7204.92',
@@ -148,61 +153,94 @@ class DriverInstaller:
         return chrome_url, chromedriver_url
     
     def download_and_extract(self, url: str, target_path: Path, description: str) -> bool:
-        """Download and extract a file from URL."""
-        try:
-            logger.info(f"Downloading {description}...")
-            logger.info(f"URL: {url}")
+        """
+        Download and extract a file from URL using the new downloader with progress tracking.
+        
+        Args:
+            url: The URL to download from
+            target_path: The target path to save the downloaded file
+            description: Description of the file being downloaded
             
+        Returns:
+            bool: True if download and extraction was successful, False otherwise
+            
+        Raises:
+            DownloadError: If there's an error during download
+            FileSystemError: If there's an error during file operations
+        """
+        try:
             version_dir = target_path.parent  # The version directory
-            # Directory existence is checked at the top level, so just create it
             version_dir.mkdir(parents=True, exist_ok=True)
             
-            # Download file
-            temp_file = version_dir / (description.lower() + '.zip')
-            urllib.request.urlretrieve(url, temp_file)
+            # Download file using the new downloader
+            temp_file = version_dir / (description.lower().replace(' ', '_') + '.zip')
+            logger.info("[STATUS] Starting download of %s...", description)
             
-            # Extract zip file directly into version_dir
-            with zipfile.ZipFile(temp_file, 'r') as zip_ref:
-                zip_ref.extractall(version_dir)
+            try:
+                self.downloader.download(url, temp_file)
+            except Exception as e:
+                logger.error("[STATUS] ❌ Download failed: %s", e)
+                if temp_file.exists():
+                    temp_file.unlink()
+                return False
             
-            # Clean up zip file
-            temp_file.unlink()
-            
-            # Remove the unnecessary chrome-win64 folder if it exists
-            chrome_win64_dir = version_dir / "chrome-win64"
-            if chrome_win64_dir.exists():
-                logger.info(f"Moving contents from {chrome_win64_dir} to {version_dir}")
-                # Move all contents from chrome-win64 to version_dir
-                for item in chrome_win64_dir.iterdir():
-                    target_item = version_dir / item.name
-                    if target_item.exists():
-                        if target_item.is_file():
-                            target_item.unlink()
-                        elif target_item.is_dir():
-                            shutil.rmtree(target_item)
-                    item.rename(target_item)
-                # Remove the empty chrome-win64 directory
-                chrome_win64_dir.rmdir()
-            
-            # Move chromedriver.exe from chromedriver-win64 subdirectory if it exists
-            chromedriver_win64_dir = version_dir / "chromedriver-win64"
-            if chromedriver_win64_dir.exists():
-                logger.info(f"Moving chromedriver.exe from {chromedriver_win64_dir} to {version_dir}")
-                chromedriver_exe = chromedriver_win64_dir / "chromedriver.exe"
-                if chromedriver_exe.exists():
-                    target_chromedriver = version_dir / "chromedriver.exe"
-                    if target_chromedriver.exists():
-                        target_chromedriver.unlink()
-                    chromedriver_exe.rename(target_chromedriver)
-                # Remove the empty chromedriver-win64 directory
-                shutil.rmtree(chromedriver_win64_dir, ignore_errors=True)
-            
-            logger.info(f"✅ {description} installed successfully at: {version_dir}")
-            return True
-            
+            # Extract zip file
+            logger.info("[STATUS] Extracting %s...", description)
+            try:
+                with zipfile.ZipFile(temp_file, 'r') as zip_ref:
+                    zip_ref.extractall(version_dir)
+                
+                # Clean up zip file
+                temp_file.unlink()
+                
+                # Handle platform-specific directory structures
+                self._cleanup_extracted_files(version_dir, description)
+                
+                logger.info("[STATUS] ✅ %s installed successfully at: %s", description, version_dir)
+                return True
+                
+            except zipfile.BadZipFile as e:
+                logger.error("[STATUS] ❌ Invalid zip file: %s", e)
+                return False
+            except Exception as e:
+                logger.error("[STATUS] ❌ Failed to extract %s: %s", description, e)
+                return False
+                
         except Exception as e:
-            logger.error(f"❌ Failed to download {description}: {e}")
+            logger.error("[STATUS] ❌ Unexpected error during %s installation: %s", description, e)
+            if 'temp_file' in locals() and temp_file.exists():
+                temp_file.unlink()
             return False
+    
+    def _cleanup_extracted_files(self, version_dir: Path, description: str) -> None:
+        """Clean up and organize extracted files."""
+        # Handle Chrome browser files
+        chrome_win64_dir = version_dir / "chrome-win64"
+        if chrome_win64_dir.exists():
+            logger.info("[STATUS] Organizing Chrome files in %s", version_dir)
+            for item in chrome_win64_dir.iterdir():
+                target = version_dir / item.name
+                if target.exists():
+                    if target.is_file():
+                        target.unlink()
+                    elif target.is_dir():
+                        shutil.rmtree(target)
+                shutil.move(str(item), str(version_dir))
+            chrome_win64_dir.rmdir()
+        
+        # Handle ChromeDriver files
+        chromedriver_dir = version_dir / "chromedriver-win64"
+        if chromedriver_dir.exists():
+            logger.info("[STATUS] Organizing ChromeDriver files in %s", version_dir)
+            for item in chromedriver_dir.iterdir():
+                target = version_dir / item.name
+                if target.exists():
+                    if target.is_file():
+                        target.unlink()
+                    elif target.is_dir():
+                        shutil.rmtree(target)
+                shutil.move(str(item), str(version_dir))
+            chromedriver_dir.rmdir()
     
     def _get_clean_installation_paths(self, platform_key: str, version: str) -> Path:
         """Get clean installation path for the version directory."""
@@ -237,7 +275,7 @@ class DriverInstaller:
             versions = sorted([d for d in chrome_base.iterdir() if d.is_dir()], 
                            key=lambda x: x.name, reverse=True)
             for old_version in versions[keep_versions:]:
-                logger.info(f"Removing old Chrome version: {old_version.name}")
+                logger.info("[STATUS] Removing old Chrome version: %s", old_version.name)
                 shutil.rmtree(old_version, ignore_errors=True)
     
     def install_chrome(self, version_info: Dict[str, Any], platform_key: str) -> Optional[str]:
@@ -245,7 +283,7 @@ class DriverInstaller:
         chrome_url, _ = self.get_download_urls(version_info, platform_key)
         
         if not chrome_url:
-            logger.warning("Chrome download URL not found, skipping Chrome installation")
+            logger.warning("[STATUS] Chrome download URL not found, skipping Chrome installation")
             return None
         
         version = version_info['version']
@@ -261,7 +299,7 @@ class DriverInstaller:
         _, chromedriver_url = self.get_download_urls(version_info, platform_key)
         
         if not chromedriver_url:
-            logger.warning("ChromeDriver download URL not found, skipping ChromeDriver installation")
+            logger.warning("[STATUS] ChromeDriver download URL not found, skipping ChromeDriver installation")
             return None
         
         version = version_info['version']
@@ -320,31 +358,31 @@ class DriverInstaller:
             
             # Save updated config
             CONFIG.save()
-            logger.info(f"✅ Updated config with driver paths")
+            logger.info("[STATUS] ✅ Updated config with driver paths")
             
         except Exception as e:
-            logger.error(f"❌ Failed to update config: {e}")
+            logger.error("[STATUS] ❌ Failed to update config: %s", e)
     
     def install_all(self, version: Optional[str] = None, cleanup: bool = True) -> Dict[str, Optional[str]]:
         """Install both Chrome and ChromeDriver."""
         platform_key = self.detect_platform()
-        logger.info(f"Installing drivers for platform: {platform_key}")
+        logger.info("[STATUS] Installing drivers for platform: %s", platform_key)
         
         # Get version information
         if version:
             version_info = self.find_version_by_major(version)
             if not version_info:
-                logger.error(f"Version {version} not found")
+                logger.error("[STATUS] Version %s not found", version)
                 return {}
         else:
             version_info = self.get_latest_chrome_version()
         
         if not version_info:
-            logger.error("Failed to get version information")
+            logger.error("[STATUS] Failed to get version information")
             return {}
         
         version_str = version_info['version']
-        logger.info(f"Installing Chrome version: {version_str}")
+        logger.info("[STATUS] Installing Chrome version: %s", version_str)
         
         # Clean up old versions if requested
         if cleanup:
@@ -353,16 +391,16 @@ class DriverInstaller:
         # Check if version directory already exists before installing
         version_dir = self._get_clean_installation_paths(platform_key, version_str)
         if version_dir.exists():
-            logger.warning(f"⚠️ Chrome version {version_str} already exists at {version_dir}")
+            logger.warning("[STATUS] ⚠️ Chrome version %s already exists at %s", version_str, version_dir)
             resp = input("Do you want to [r]einstall (overwrite) or [c]ancel? [r/c]: ").strip().lower()
             if resp == 'c':
-                logger.info(f"User cancelled installation")
+                logger.info("[STATUS] User cancelled installation")
                 return {}
             elif resp == 'r':
                 shutil.rmtree(version_dir, ignore_errors=True)
-                logger.info(f"Overwriting Chrome version {version_str}")
+                logger.info("[STATUS] Overwriting Chrome version %s", version_str)
             else:
-                logger.info(f"Invalid input, cancelling installation")
+                logger.info("[STATUS] Invalid input, cancelling installation")
                 return {}
         
         # Install Chrome and ChromeDriver
@@ -377,11 +415,11 @@ class DriverInstaller:
         }
         
         if chrome_path and chromedriver_path:
-            logger.info("✅ All drivers installed successfully")
+            logger.info("[STATUS] ✅ All drivers installed successfully")
             # Update config with installed paths
             self.update_config_with_paths(chrome_path, chromedriver_path, version_str)
         else:
-            logger.warning("⚠️ Some drivers failed to install")
+            logger.warning("[STATUS] ⚠️ Some drivers failed to install")
         
         return results
     
@@ -390,22 +428,22 @@ class DriverInstaller:
         versions = self.get_available_versions()
         
         if not versions:
-            logger.error("❌ Failed to fetch available versions")
+            logger.error("[STATUS] ❌ Failed to fetch available versions")
             return
         
-        logger.info(f"📋 Available Chrome for Testing versions ({len(versions)} total):")
+        logger.info("[STATUS] 📋 Available Chrome for Testing versions (%d total):", len(versions))
         logger.info("-" * 80)
         
         for i, version_info in enumerate(versions[:20]):  # Show first 20 versions
             version = version_info['version']
             revision = version_info['revision']
-            logger.info(f"{i+1:2d}. {version} (revision: {revision})")
+            logger.info("%d. %s (revision: %s)", i+1, version, revision)
         
         if len(versions) > 20:
-            logger.info(f"... and {len(versions) - 20} more versions")
+            logger.info("... and %d more versions", len(versions) - 20)
         
-        logger.info(f"\n💡 Use: fss --init chrome <major_version> to install a specific version")
-        logger.info(f"💡 Example: fss --init chrome 138")
+        logger.info("\n💡 Use: fss --init chrome <major_version> to install a specific version")
+        logger.info("💡 Example: fss --init chrome 138")
     
     def check_installation(self) -> Dict[str, Any]:
         """Check the current driver installation status."""
@@ -453,7 +491,7 @@ class DriverInstaller:
             version_dir = self._get_clean_installation_paths(platform_key, version)
             
             if not version_dir.exists():
-                logger.error(f"Version {version} is not installed")
+                logger.error("[STATUS] Version %s is not installed", version)
                 return False
             
             # Get the binary paths for this version
@@ -465,17 +503,17 @@ class DriverInstaller:
                 chromedriver_path = version_dir / "chromedriver"
             
             if not chrome_path.exists() or not chromedriver_path.exists():
-                logger.error(f"Version {version} is incomplete (missing binaries)")
+                logger.error("[STATUS] Version %s is incomplete (missing binaries)", version)
                 return False
             
             # Update config with the selected version paths
             self.update_config_with_paths(str(version_dir), str(version_dir), version)
             
-            logger.info(f"✅ Set version {version} as default driver")
+            logger.info("[STATUS] ✅ Set version %s as default driver", version)
             return True
             
         except Exception as e:
-            logger.error(f"❌ Failed to set default driver version: {e}")
+            logger.error("[STATUS] ❌ Failed to set default driver version: %s", e)
             return False
     
     def select_default_driver(self) -> bool:
@@ -485,19 +523,19 @@ class DriverInstaller:
             chrome_versions = installed_versions.get('chrome', [])
             
             if not chrome_versions:
-                logger.error("No Chrome versions installed")
+                logger.error("[STATUS] No Chrome versions installed")
                 return False
             
             if len(chrome_versions) == 1:
                 # Only one version, automatically set as default
                 version = chrome_versions[0]
-                logger.info(f"Only one version installed ({version}), setting as default")
+                logger.info("[STATUS] Only one version installed (%s), setting as default", version)
                 return self.set_default_driver_version(version)
             
             # Multiple versions, let user choose
-            logger.info(f"📋 Installed Chrome versions:")
+            logger.info("[STATUS] 📋 Installed Chrome versions:")
             for i, version in enumerate(chrome_versions, 1):
-                logger.info(f"  {i}. {version}")
+                logger.info("  %d. %s", i, version)
             
             while True:
                 try:
@@ -507,15 +545,15 @@ class DriverInstaller:
                         selected_version = chrome_versions[choice_idx]
                         return self.set_default_driver_version(selected_version)
                     else:
-                        logger.warning(f"Invalid choice. Please enter 1-{len(chrome_versions)}")
+                        logger.warning("[STATUS] Invalid choice. Please enter 1-%d", len(chrome_versions))
                 except ValueError:
-                    logger.warning("Invalid input. Please enter a number.")
+                    logger.warning("[STATUS] Invalid input. Please enter a number.")
                 except KeyboardInterrupt:
-                    logger.info("\nCancelled")
+                    logger.info("\n[STATUS] Cancelled")
                     return False
             
         except Exception as e:
-            logger.error(f"❌ Failed to select default driver: {e}")
+            logger.error("[STATUS] ❌ Failed to select default driver: %s", e)
             return False
 
 
@@ -535,38 +573,38 @@ def main():
     
     if args.check:
         status = installer.check_installation()
-        logger.info(f"Platform: {status['platform']}")
-        logger.info(f"Chrome installed: {status['chrome_installed']}")
-        logger.info(f"ChromeDriver installed: {status['chromedriver_installed']}")
-        logger.info(f"All installed: {status['all_installed']}")
+        logger.info("[STATUS] Platform: %s", status['platform'])
+        logger.info("[STATUS] Chrome installed: %s", status['chrome_installed'])
+        logger.info("[STATUS] ChromeDriver installed: %s", status['chromedriver_installed'])
+        logger.info("[STATUS] All installed: %s", status['all_installed'])
         if status['chrome_path']:
-            logger.info(f"Chrome path: {status['chrome_path']}")
+            logger.info("[STATUS] Chrome path: %s", status['chrome_path'])
         if status['chromedriver_path']:
-            logger.info(f"ChromeDriver path: {status['chromedriver_path']}")
+            logger.info("[STATUS] ChromeDriver path: %s", status['chromedriver_path'])
     
     elif args.list_versions:
         installer.list_available_versions()
     
     elif args.install:
         if args.version:
-            logger.info(f"Installing Chrome version {args.version}...")
+            logger.info("[STATUS] Installing Chrome version %s...", args.version)
             results = installer.install_all(version=args.version)
         else:
-            logger.info("Installing latest Chrome version...")
+            logger.info("[STATUS] Installing latest Chrome version...")
             results = installer.install_all()
         
         if results:
-            logger.info(f"Installation completed:")
-            logger.info(f"  Chrome: {results.get('chrome', 'Not installed')}")
-            logger.info(f"  ChromeDriver: {results.get('chromedriver', 'Not installed')}")
-            logger.info(f"  Version: {results.get('version', 'Unknown')}")
-            logger.info(f"  Platform: {results.get('platform', 'Unknown')}")
+            logger.info("[STATUS] Installation completed:")
+            logger.info("  Chrome: %s", results.get('chrome', 'Not installed'))
+            logger.info("  ChromeDriver: %s", results.get('chromedriver', 'Not installed'))
+            logger.info("  Version: %s", results.get('version', 'Unknown'))
+            logger.info("  Platform: %s", results.get('platform', 'Unknown'))
         else:
-            logger.error("Installation failed")
+            logger.error("[STATUS] Installation failed")
     
     else:
         parser.print_help()
 
 
 if __name__ == '__main__':
-    main() 
+    main()
