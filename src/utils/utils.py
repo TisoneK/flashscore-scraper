@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import re
 
 from src.models import MatchModel
-from src.config import CONFIG, DEFAULT_OUTPUT_FILE
+from src.utils.config_loader import CONFIG, DEFAULT_OUTPUT_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -20,27 +20,28 @@ def setup_logging(log_file_path: Optional[str] = None, force: bool = False) -> s
     """
     logger.debug("setup_logging() called")
     
+    # Get logging config with defaults
+    logging_config = CONFIG.get('logging', {})
+    
     # Create logs directory if it doesn't exist
-    log_dir = Path(CONFIG.logging.log_directory)
+    log_dir = Path(logging_config.get('log_directory', 'logs'))
     logger.debug(f"Log directory: {log_dir}")
     log_dir.mkdir(parents=True, exist_ok=True)
     
     # Generate log filename with date
     if log_file_path is None:
-        log_filename = f"scraper_{datetime.now().strftime(CONFIG.logging.log_filename_date_format)}.log"
+        log_filename = f"scraper_{datetime.now().strftime(logging_config.get('log_filename_date_format', '%Y%m%d'))}.log"
         final_log_path = log_dir / log_filename
     else:
         final_log_path = Path(log_file_path)
+        
     logger.debug(f"Log file path: {final_log_path}")
-    logger.debug(f"Log level: {CONFIG.logging.log_level}")
-    logger.debug(f"Log format: {CONFIG.logging.log_format}")
-    logger.debug(f"Log date format: {CONFIG.logging.log_date_format}")
+    logger.debug(f"Log level: {logging_config.get('log_level', 'INFO')}")
+    logger.debug(f"Log format: {logging_config.get('log_format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')}")
+    logger.debug(f"Log date format: {logging_config.get('log_date_format', '%Y-%m-%d %H:%M:%S')}")
     
     # Configure root logger
     root_logger = logging.getLogger()
-    
-    # Remove all StreamHandlers (console handlers)
-    root_logger.handlers = [h for h in root_logger.handlers if not isinstance(h, logging.StreamHandler)]
     
     # Check if we already have a file handler for this log file
     existing_file_handler = None
@@ -59,30 +60,40 @@ def setup_logging(log_file_path: Optional[str] = None, force: bool = False) -> s
         root_logger.handlers.clear()
         logger.debug("Cleared existing log handlers")
     
-    # Create file handler
+    # Set log level
+    log_level = getattr(logging, logging_config.get('log_level', 'INFO').upper(), logging.INFO)
+    root_logger.setLevel(log_level)
+    
+    # Create formatters
+    file_formatter = logging.Formatter(
+        fmt=logging_config.get('log_format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s'),
+        datefmt=logging_config.get('log_date_format', '%Y-%m-%d %H:%M:%S')
+    )
+    
+    # Create console handler with Rich formatting - only show INFO and above
+    from rich.logging import RichHandler
+    console = RichHandler(rich_tracebacks=True, markup=True, show_time=False, show_path=False)
+    console.setFormatter(logging.Formatter(fmt='%(message)s'))
+    console.setLevel(logging.INFO)  # Only show INFO and above in console
+    
+    # Create file handler - capture all levels including DEBUG
     file_handler = logging.FileHandler(str(final_log_path), encoding='utf-8')
-    file_handler.setLevel(logging.DEBUG)  # File shows DEBUG and above
+    file_handler.setFormatter(file_formatter)
+    file_handler.setLevel(logging.DEBUG)  # Capture all levels in file
     
-    # Set formatter for file handler
-    formatter = logging.Formatter(CONFIG.logging.log_format, datefmt=CONFIG.logging.log_date_format)
-    file_handler.setFormatter(formatter)
-    
-    # Add file handler to root logger
+    # Add handlers to root logger
+    root_logger.addHandler(console)
     root_logger.addHandler(file_handler)
-    root_logger.setLevel(logging.DEBUG)  # Root logger accepts all levels
     
-    # Debug: Check if handlers were added
-    logger.debug(f"Root logger handlers: {root_logger.handlers}")
-    logger.debug(f"Root logger level: {root_logger.level}")
-    
-    # Test logging to file
-    test_logger = logging.getLogger('test_setup')
-    test_logger.info("=== TEST LOG MESSAGE FROM SETUP_LOGGING ===")
-    logger.debug(f"Test log message sent. Check if it appears in: {final_log_path}")
+    # Set root logger level to accept all messages
+    root_logger.setLevel(logging.DEBUG)
     
     # Set specific log levels for noisy modules
-    for module in CONFIG.logging.quiet_modules:
+    for module in logging_config.get('quiet_modules', []):
         logging.getLogger(module).setLevel(logging.WARNING)
+    
+    # Test logging (removed permanent test message)
+    logger.debug(f"Logging setup completed. Log file: {final_log_path}")
     
     logger.debug("setup_logging() completed")
     return str(final_log_path)
@@ -91,7 +102,7 @@ def ensure_logging_configured(log_file_path: Optional[str] = None) -> str:
     """Ensure logging is properly configured for the application.
     
     This function checks if logging is already configured and sets it up if needed.
-    It's safe to call multiple times.
+    It's safe to call multiple times and prevents duplicate handlers.
     
     Args:
         log_file_path: Optional path for the log file. If None, generates a timestamped filename.
@@ -112,7 +123,7 @@ def ensure_logging_configured(log_file_path: Optional[str] = None) -> str:
         return setup_logging(log_file_path, force=True)
     
     # No handlers found, configure logging
-    return setup_logging(log_file_path, force=True)
+    return setup_logging(log_file_path, force=False)
 
 def get_logging_status() -> dict:
     """Get the current logging configuration status.
@@ -207,8 +218,8 @@ def split_date_time(date_time_str):
     return date_time_str, None 
 
 def get_scraping_date(day: str) -> str:
-    """Return date string in YYMMDD format for 'Today' or 'Tomorrow'."""
+    """Return date string in YYYYMMDD format for 'Today' or 'Tomorrow'."""
     if day == "Tomorrow":
-        return (datetime.now() + timedelta(days=1)).strftime("%y%m%d")
+        return (datetime.now() + timedelta(days=1)).strftime("%Y%m%d")
     else:
-        return datetime.now().strftime("%y%m%d") 
+        return datetime.now().strftime("%Y%m%d") 

@@ -132,7 +132,7 @@ class ChromeDriverManager:
             '--disable-infobars',
             '--disable-popup-blocking',
             '--disable-blink-features=AutomationControlled',
-            '--disable-features=IsolateOrigins,site-per-process',
+            '--disable-features=IsolateOrigins,site-per-process,VizDisplayCompositor,TranslateUI,BlinkGenPropertyTrees',
             
             # Performance optimizations
             '--disable-background-timer-throttling',
@@ -142,8 +142,6 @@ class ChromeDriverManager:
             '--disable-default-apps',
             '--disable-sync',
             '--disable-translate',
-            '--disable-web-security',
-            '--disable-features=VizDisplayCompositor',
             '--disable-ipc-flooding-protection',
             
             # Memory optimizations
@@ -158,17 +156,39 @@ class ChromeDriverManager:
             '--no-first-run',
             '--no-default-browser-check',
             
-            # Security and stability
-            '--allow-running-insecure-content',
+            # Security and stability (safer options)
             '--disable-site-isolation-trials',
-            '--disable-features=TranslateUI',
-            '--disable-features=BlinkGenPropertyTrees',
             
-            # Logging suppression
-            '--log-level=3',
+            # Comprehensive logging suppression
+            '--log-level=3',  # Only fatal errors
             '--silent',
             '--disable-logging',
+            '--disable-dev-shm-usage',
+            '--disable-gpu-logging',
+            '--disable-background-logging',
+            '--disable-component-logging',
+            '--disable-extensions-logging',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-ipc-logging',
+            '--disable-logging',
+            '--disable-perf-logging',
+            '--disable-renderer-logging',
+            '--disable-service-logging',
+            '--disable-web-security-logging',
+            '--log-file=/dev/null',  # Redirect logs to null
+            '--enable-logging=false',
+            '--v=0',  # Verbose level 0
+            '--vmodule=*=0',  # Disable all verbose modules
         ]
+        
+        # Add risky flags only if explicitly enabled in config
+        risky_flags = [
+            '--disable-web-security',
+            '--allow-running-insecure-content',
+        ]
+        
+        if chrome_options.get('enable_risky_flags', False):
+            critical_flags.extend(risky_flags)
         for flag in critical_flags:
             options.add_argument(flag)
         
@@ -201,62 +221,25 @@ class ChromeDriverManager:
         return options
     
     def create_driver(self) -> webdriver.Chrome:
-        """Create and configure Chrome WebDriver, redirecting all Chrome/ChromeDriver logs to the chrome log file."""
+        """Create and configure Chrome WebDriver."""
         try:
             # Get ChromeDriver path
             _, chromedriver_path = self.find_latest_driver_paths()
             if not chromedriver_path:
                 raise WebDriverException("ChromeDriver not found. Run 'fss --init chrome' to install drivers.")
 
-            # Use the chrome_log_path passed to the manager
-            log_file_path = self.chrome_log_path
-            if not log_file_path:
-                raise Exception("chrome_log_path must be provided to ChromeDriverManager for dual logging.")
-
-            # Create service, redirecting ChromeDriver logs to the chrome log file
-            service_kwargs = {"executable_path": chromedriver_path}
-            if log_file_path:
-                service_kwargs["log_path"] = str(log_file_path)
-            service = Service(**service_kwargs)
-
-            # Monkey-patch Service.start to redirect ChromeDriver and Chrome browser stderr to chrome log file
-            orig_start = service.start
-            def patched_start(*args, **kwargs):
-                import subprocess
-                log_file = open(log_file_path, 'a', encoding='utf-8')
-                orig_popen = subprocess.Popen
-                def patched_popen(*popen_args, **popen_kwargs):
-                    popen_kwargs['stderr'] = log_file
-                    return orig_popen(*popen_args, **popen_kwargs)
-                subprocess.Popen, orig_popen_bak = patched_popen, subprocess.Popen
-                try:
-                    return orig_start(*args, **kwargs)
-                finally:
-                    subprocess.Popen = orig_popen_bak
-            service.start = patched_start
-
+            # Create service with basic options
+            service = Service(executable_path=chromedriver_path)
+            
             # Get Chrome options
             options = self.get_chrome_options()
-
-            # Create driver with timeout handling
-            import time
-            start_time = time.time()
-            timeout = 60  # 60 seconds timeout
             
+            # Create driver
             logger.info("🔄 Creating Chrome WebDriver...")
+            driver = webdriver.Chrome(service=service, options=options)
+            logger.info(f"✅ Chrome WebDriver initialized successfully")
+            logger.info(f"📁 ChromeDriver path: {chromedriver_path}")
             
-            # Create driver with timeout
-            driver = None
-            try:
-                driver = webdriver.Chrome(service=service, options=options)
-                elapsed_time = time.time() - start_time
-                logger.info(f"✅ Chrome WebDriver initialized successfully in {elapsed_time:.2f}s")
-                logger.info(f"📁 ChromeDriver path: {chromedriver_path}")
-            except Exception as driver_error:
-                elapsed_time = time.time() - start_time
-                logger.error(f"❌ Failed to create Chrome WebDriver after {elapsed_time:.2f}s: {driver_error}")
-                raise
-
             return driver
 
         except Exception as e:

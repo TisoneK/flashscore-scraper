@@ -170,17 +170,24 @@ class NetworkRetryManager(RetryManager):
 
     def retry_network_operation(self, operation: Callable, *args, **kwargs) -> Any:
         from src.core.network_monitor import NetworkMonitor
+        import threading
+        
+        # Check if we're in shutdown mode to suppress retry warnings
+        is_shutting_down = getattr(threading.current_thread(), '_is_shutting_down', False)
+        
         monitor = NetworkMonitor()
         last_exception = None
         for attempt in range(self.max_attempts):
             if not monitor.is_connected():
-                self.logger.warning("Network down, waiting for reconnection before retrying...")
+                if not is_shutting_down:
+                    self.logger.warning("Network down, waiting for reconnection before retrying...")
                 monitor.wait_for_connection(timeout=60)
-                self.logger.info("Network reconnected. Resuming operation...")
+                if not is_shutting_down:
+                    self.logger.info("Network reconnected. Resuming operation...")
             try:
                 with suppress_stderr():
                     result = operation(*args, **kwargs)
-                if attempt > 0:
+                if attempt > 0 and not is_shutting_down:
                     self.logger.info(f"Operation succeeded on attempt {attempt + 1}")
                 return result
             except WebDriverException as e:
@@ -188,52 +195,60 @@ class NetworkRetryManager(RetryManager):
                 msg = getattr(e, 'msg', None)
                 msg = msg.splitlines()[0] if msg else str(e)
                 if self._is_network_error(e):
-                    self.logger.warning(f"Selenium network error: {msg}. Will wait for reconnection and retry.")
+                    if not is_shutting_down:
+                        self.logger.warning(f"Selenium network error: {msg}. Will wait for reconnection and retry.")
                     if attempt < self.max_attempts - 1:
                         delay = self.calculate_delay(attempt)
-                        self.logger.warning(
-                            f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {msg}. "
-                            f"Retrying in {delay:.2f}s..."
-                        )
+                        if not is_shutting_down:
+                            self.logger.warning(
+                                f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {msg}. "
+                                f"Retrying in {delay:.2f}s..."
+                            )
                         time.sleep(delay)
                         continue
                 if attempt >= self.max_attempts - 1:
-                    self.logger.error(
-                        f"Operation failed after {self.max_attempts} attempts. "
-                        f"Last error: {e}", exc_info=True
-                    )
+                    if not is_shutting_down:
+                        self.logger.error(
+                            f"Operation failed after {self.max_attempts} attempts. "
+                            f"Last error: {e}", exc_info=True
+                        )
                     raise
                 else:
                     delay = self.calculate_delay(attempt)
-                    self.logger.warning(
-                        f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {e}. "
-                        f"Retrying in {delay:.2f}s..."
-                    )
+                    if not is_shutting_down:
+                        self.logger.warning(
+                            f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {e}. "
+                            f"Retrying in {delay:.2f}s..."
+                        )
                     time.sleep(delay)
             except Exception as e:
                 last_exception = e
                 if self._is_network_error(e):
-                    self.logger.warning(f"Network error detected: {str(e)}. Will wait for reconnection and retry.")
+                    if not is_shutting_down:
+                        self.logger.warning(f"Network error detected: {str(e)}. Will wait for reconnection and retry.")
                     if attempt < self.max_attempts - 1:
                         delay = self.calculate_delay(attempt)
-                        self.logger.warning(
-                            f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {str(e)}. "
-                            f"Retrying in {delay:.2f}s..."
-                        )
+                        if not is_shutting_down:
+                            self.logger.warning(
+                                f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {str(e)}. "
+                                f"Retrying in {delay:.2f}s..."
+                            )
                         time.sleep(delay)
                         continue
                 if attempt >= self.max_attempts - 1:
-                    self.logger.error(
-                        f"Operation failed after {self.max_attempts} attempts. "
-                        f"Last error: {e}", exc_info=True
-                    )
+                    if not is_shutting_down:
+                        self.logger.error(
+                            f"Operation failed after {self.max_attempts} attempts. "
+                            f"Last error: {e}", exc_info=True
+                        )
                     raise
                 else:
                     delay = self.calculate_delay(attempt)
-                    self.logger.warning(
-                        f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {e}. "
-                        f"Retrying in {delay:.2f}s..."
-                    )
+                    if not is_shutting_down:
+                        self.logger.warning(
+                            f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {e}. "
+                            f"Retrying in {delay:.2f}s..."
+                        )
                     time.sleep(delay)
         if last_exception is not None:
             raise last_exception

@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-from src.config import MIN_H2H_MATCHES
+from src.utils.config_loader import MIN_H2H_MATCHES
 
 @dataclass
 class OddsModel:

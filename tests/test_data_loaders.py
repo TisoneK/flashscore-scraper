@@ -30,13 +30,33 @@ def h2h_loader(mock_driver, mock_selenium_utils):
 
 def test_match_loader_skips_live(match_loader):
     assert match_loader.load_match('test_id') is False
+    assert match_loader.load_match('test_id', team_info={
+        'home_slug': 'test-home',
+        'home_id': 'test_home_id',
+        'away_slug': 'test-away',
+        'away_id': 'test_away_id'
+    }) is False
 
 def test_odds_loader_skips_live(odds_loader):
+    team_info = {
+        'home_slug': 'test-home',
+        'home_id': 'test_home_id',
+        'away_slug': 'test-away',
+        'away_id': 'test_away_id'
+    }
     assert odds_loader.load_home_away_odds('test_id') is False
+    assert odds_loader.load_home_away_odds('test_id', team_info=team_info) is False
     assert odds_loader.load_over_under_odds('test_id') is False
+    assert odds_loader.load_over_under_odds('test_id', team_info=team_info) is False
 
 def test_h2h_loader_skips_live(h2h_loader):
     assert h2h_loader.load_h2h('test_id') is False
+    assert h2h_loader.load_h2h('test_id', team_info={
+        'home_slug': 'test-home',
+        'home_id': 'test_home_id',
+        'away_slug': 'test-away',
+        'away_id': 'test_away_id'
+    }) is False
 
 # Repeat for 'finished' status
 @pytest.fixture
@@ -48,13 +68,33 @@ def mock_selenium_utils_finished():
 
 def test_match_loader_skips_finished(mock_driver, mock_selenium_utils_finished):
     loader = MatchDataLoader(mock_driver, selenium_utils=mock_selenium_utils_finished)
+    assert loader.load_match('test_id', team_info={
+        'home_slug': 'test-home',
+        'home_id': 'test_home_id',
+        'away_slug': 'test-away',
+        'away_id': 'test_away_id'
+    }) is False
     assert loader.load_match('test_id') is False
 
 def test_odds_loader_skips_finished(mock_driver, mock_selenium_utils_finished):
     loader = OddsDataLoader(mock_driver, selenium_utils=mock_selenium_utils_finished)
+    team_info = {
+        'home_slug': 'test-home',
+        'home_id': 'test_home_id',
+        'away_slug': 'test-away',
+        'away_id': 'test_away_id'
+    }
     assert loader.load_home_away_odds('test_id') is False
+    assert loader.load_home_away_odds('test_id', team_info=team_info) is False
     assert loader.load_over_under_odds('test_id') is False
+    assert loader.load_over_under_odds('test_id', team_info=team_info) is False
 
 def test_h2h_loader_skips_finished(mock_driver, mock_selenium_utils_finished):
     loader = H2HDataLoader(mock_driver, selenium_utils=mock_selenium_utils_finished)
-    assert loader.load_h2h('test_id') is False 
+    assert loader.load_h2h('test_id') is False
+    assert loader.load_h2h('test_id', team_info={
+        'home_slug': 'test-home',
+        'home_id': 'test_home_id',
+        'away_slug': 'test-away',
+        'away_id': 'test_away_id'
+    }) is False

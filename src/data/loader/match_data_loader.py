@@ -1,7 +1,11 @@
 from src.data.elements_model import MatchElements
-from typing import List, Optional
-from src.config import CONFIG, SELECTORS
+from typing import List, Optional, Dict, Any, Union, TypedDict
+from urllib.parse import urlparse, parse_qs
+import logging
+
+from src.utils.config_loader import CONFIG, SELECTORS
 from src.core.url_verifier import URLVerifier
+from src.core.url_builder import UrlBuilder
 from src.core.network_monitor import NetworkMonitor
 from src.core.retry_manager import NetworkRetryManager
 
@@ -13,6 +17,13 @@ import logging
 from src.core.exceptions import DataNotFoundError, DataParseError, DataValidationError, DataUnavailableWarning
 
 logger = logging.getLogger(__name__)
+
+class MatchUrls(TypedDict):
+    mid: str
+    summary: str
+    home_away_odds: str
+    over_under_odds: str
+    h2h: str
 
 class MatchDataLoader:
     def __init__(self, driver: WebDriver, selenium_utils=None):
@@ -60,11 +71,14 @@ class MatchDataLoader:
         if status_callback:
             status_callback("Loading main basketball page...")
         def _load_operation():
-            success, error = self.url_verifier.load_and_verify_url(CONFIG.url.base_url)
+            success, error = self.url_verifier.load_and_verify_url(CONFIG['url']['base_url'])
             if not success:
                 raise Exception(f"Error loading main page: {error}")
             if self.selenium_utils:
-                self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+                # Get timeout from config with default
+                timeout_config = CONFIG.get('timeout', {})
+                dynamic_timeout = timeout_config.get('dynamic_content_timeout', 30)  # default 30 seconds
+                self.selenium_utils.wait_for_dynamic_content(dynamic_timeout)
             match_ids = self._get_match_ids_internal()
             self.update_match_id(match_ids)
             return True
@@ -80,91 +94,238 @@ class MatchDataLoader:
                 status_callback(f"Failed to load main basketball page: {e}")
             return False
 
-    def load_match(self, match_id: str, status_callback=None) -> bool:
-        """Load a match page and extract all required elements with network resilience."""
+    def collect_match_urls(self) -> List[MatchUrls]:
+        """Collect immutable, canonical URLs for all scheduled matches on the list page.
+        
+        Returns a list of dicts with keys: 'mid', 'summary', 'home_away_odds', 'over_under_odds', 'h2h'.
+        Uses only anchor href extraction; no fallbacks.
+        """
+        urls: List[MatchUrls] = []
+        if not self.selenium_utils:
+            return urls
+
+        def _collect_operation():
+            # Get timeout from config with default
+            timeout_config = CONFIG.get('timeout', {})
+            page_load_timeout = timeout_config.get('page_load_timeout', 30)  # default 30 seconds
+            match_elements = self.selenium_utils.find_all("class", SELECTORS["match"]["scheduled"].split(".")[1], duration=page_load_timeout)
+            if not match_elements:
+                return []
+
+            collected: List[MatchUrls] = []
+            from src.core.url_builder import UrlBuilder  # local import to avoid cycles
+
+            for idx, element in enumerate(match_elements):
+                try:
+                    # Strict single-selector strategy: anchor with match path
+                    anchor = self.selenium_utils.find_element_in_parent(element, "css", 'a[href*="/match/"]')
+                    if not anchor:
+                        continue
+                    href = anchor.get_attribute('href')
+                    if not href:
+                        continue
+                    builder = UrlBuilder.from_summary_url(href)
+                    urls_dict = builder.get_urls()
+                    urls_dict_with_mid = {**urls_dict, 'mid': builder.mid}
+                    collected.append(urls_dict_with_mid)
+                except Exception as e:
+                    # Log at debug level; still skip to honor no-fallbacks policy
+                    logger.debug(f"Skipping match element index {idx} due to error: {e}")
+                    continue
+            return collected
+
+        try:
+            urls = self.retry_manager.retry_network_operation(_collect_operation) or []
+        except Exception:
+            urls = []
+        return urls
+
+    def load_match(
+        self, 
+        url_builder: Union[UrlBuilder, str],
+        status_callback=None
+    ) -> bool:
+        """Load a match page and extract all required elements with network resilience.
+        
+        Args:
+            url_builder: Either a UrlBuilder instance or a string match ID
+            status_callback: Optional callback for status updates
+            
+        Returns:
+            bool: True if match was loaded successfully, False otherwise
+        """
+        if isinstance(url_builder, str):
+            # If a string is provided, treat it as a match ID
+            match_id = url_builder
+            from src.core.url_builder import UrlBuilder  # Import here to avoid circular imports
+            url_builder = UrlBuilder(match_id=match_id)
+            
+        url = url_builder.get('summary')
+        match_id = getattr(url_builder, 'mid', str(url_builder))
+        
+        logger.debug(f"Loading match using UrlBuilder for match {match_id}")
+        
+        # Verify the URL using the match data verifier
         if status_callback:
-            status_callback(f"Loading match page for {match_id}...")
-        def _load_operation():
-            url = CONFIG.url.match_url_template.format(match_id)
-            success, error = self.url_verifier.load_and_verify_url(url)
-            if not success:
-                raise Exception(f"Error loading match page for {match_id}: {error}")
-            if self.selenium_utils:
-                self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
-                # --- Match status check ---
-                match_status = self.selenium_utils.get_match_status()
-                if match_status != 'scheduled':
-                    logger.warning(f"[MatchDataLoader] Skipping match {match_id}: status is '{match_status}'")
-                    if status_callback:
-                        status_callback(f"Skipping match {match_id}: status is '{match_status}'")
-                    return False
-            # Extract and verify elements with retry logic for each
-            self.elements.country = self._retry_element_extraction(
-                lambda: self.get_country(),
-                f"country for {match_id}"
-            )
-            is_valid, error = self.match_data_verifier.verify_country(self.elements.country)
-            if not is_valid:
-                raise Exception(f"Error verifying country for {match_id}: {error}")
-            self.elements.league = self._retry_element_extraction(
-                lambda: self.get_league(),
-                f"league for {match_id}"
-            )
-            is_valid, error = self.match_data_verifier.verify_league(self.elements.league)
-            if not is_valid:
-                raise Exception(f"Error verifying league for {match_id}: {error}")
-            self.elements.home_team = self._retry_element_extraction(
-                lambda: self.get_home_team(),
-                f"home_team for {match_id}"
-            )
-            is_valid, error = self.match_data_verifier.verify_home_team(self.elements.home_team)
-            if not is_valid:
-                raise Exception(f"Error verifying home_team for {match_id}: {error}")
-            self.elements.away_team = self._retry_element_extraction(
-                lambda: self.get_away_team(),
-                f"away_team for {match_id}"
-            )
-            is_valid, error = self.match_data_verifier.verify_away_team(self.elements.away_team)
-            if not is_valid:
-                raise Exception(f"Error verifying away_team for {match_id}: {error}")
-            self.elements.date = self._retry_element_extraction(
-                lambda: self.get_date(),
-                f"date for {match_id}"
-            )
-            is_valid, error = self.match_data_verifier.verify_date(self.elements.date)
-            if not is_valid:
-                raise Exception(f"Error verifying date for {match_id}: {error}")
-            self.elements.time = self._retry_element_extraction(
-                lambda: self.get_time(),
-                f"time for {match_id}"
-            )
-            is_valid, error = self.match_data_verifier.verify_time(self.elements.time)
-            if not is_valid:
-                raise Exception(f"Error verifying time for {match_id}: {error}")
-            self.elements.match_id = match_id
-            is_valid, error = self.match_data_verifier.verify_match_id(self.elements.match_id)
-            if not is_valid:
-                raise Exception(f"Error verifying match_id for {match_id}: {error}")
-            return True
+            status_callback(f"Verifying match URL for {match_id}...")
+            
+        is_valid, error = self.match_data_verifier.verify_url(url, 'summary', status_callback)
+        if not is_valid:
+            logger.error(f"Invalid URL from UrlBuilder: {error}")
+            return False
+            
         try:
             # Execute with retry logic
-            result = self.retry_manager.retry_network_operation(_load_operation)
-            if status_callback:
-                status_callback(f"Match page for {match_id} loaded.")
-            return result
+            return self.retry_manager.retry_network_operation(
+                lambda: self._load_match_page(url, match_id, status_callback)
+            )
         except Exception as e:
             logger.error(f"Failed to load match {match_id} after retries: {e}")
             if status_callback:
                 status_callback(f"Failed to load match page for {match_id}: {e}")
             return False
 
-    def _retry_element_extraction(self, extraction_func, element_name: str):
-        """Retry element extraction with network resilience."""
-        def _extraction_operation():
-            element = extraction_func()
             if element is None:
                 raise Exception(f"Failed to extract {element_name}")
             return element
+
+        try:
+            return self.retry_manager.retry_network_operation(_extraction_operation)
+        except Exception as e:
+            logger.warning(f"Failed to extract {element_name}: {e}")
+            return None
+            
+    def _extract_match_id_from_url(self, url: str, default_match_id: str) -> str:
+        """Extract match ID from URL if possible, otherwise return the default.
+        
+        Args:
+            url: The URL to extract match ID from
+            default_match_id: The match ID to return if extraction fails
+            
+        Returns:
+            str: The extracted match ID or the default if extraction fails
+        """
+        if not url or not url.startswith(('http://', 'https://')):
+            return default_match_id
+            
+        try:
+            parsed = urlparse(url)
+            params = parse_qs(parsed.query)
+            if 'mid' in params and params['mid']:
+                new_match_id = params['mid'][0]
+                if new_match_id != default_match_id:
+                    logger.debug(f"Extracted match ID from URL: {new_match_id} (was: {default_match_id})")
+                return new_match_id
+        except Exception as e:
+            logger.warning(f"Could not extract match ID from URL, using default: {e}")
+            
+        return default_match_id
+        
+    def _load_match_page(self, url: str, match_id: str, status_callback=None) -> bool:
+        """Load and verify the match page.
+        
+        Args:
+            url: The URL to load
+            match_id: The match ID for logging
+            status_callback: Optional callback for status updates
+            
+        Returns:
+            bool: True if the page was loaded successfully, False otherwise
+        """
+        def _load_operation():
+            if status_callback:
+                status_callback(f"Loading match page for {match_id}...")
+                
+            # Load and verify the URL
+            success, error = self.url_verifier.load_and_verify_url(url)
+            if not success:
+                error_msg = f"Error loading match page for {match_id}: {error}"
+                logger.error(error_msg)
+                if status_callback:
+                    status_callback(error_msg)
+                return False
+                
+            logger.info(f"Successfully loaded match page for {match_id}")
+            if status_callback:
+                status_callback(f"Successfully loaded match page for {match_id}")
+                
+            # Wait for dynamic content if using Selenium
+            if self.selenium_utils:
+                timeout_config = CONFIG.get('timeout', {})
+                dynamic_timeout = timeout_config.get('dynamic_content_timeout', 30)  # default 30 seconds
+                self.selenium_utils.wait_for_dynamic_content(dynamic_timeout)
+            
+            # Extract and verify all match elements
+            elements_to_verify = [
+                ('country', self.get_country, self.match_data_verifier.verify_country),
+                ('league', self.get_league, self.match_data_verifier.verify_league),
+                ('home_team', self.get_home_team, self.match_data_verifier.verify_home_team),
+                ('away_team', self.get_away_team, self.match_data_verifier.verify_away_team),
+                ('date', self.get_date, self.match_data_verifier.verify_date),
+                ('time', self.get_time, self.match_data_verifier.verify_time)
+            ]
+            
+            for element_name, getter, verifier in elements_to_verify:
+                element = self._retry_element_extraction(
+                    getter,
+                    f"{element_name} for {match_id}"
+                )
+                if element is None:
+                    error_msg = f"Failed to extract {element_name} for {match_id}"
+                    logger.error(error_msg)
+                    if status_callback:
+                        status_callback(error_msg)
+                    return False
+                    
+                setattr(self.elements, element_name, element)
+                
+                is_valid, error = verifier(element)
+                if not is_valid:
+                    error_msg = f"Error verifying {element_name} for {match_id}: {error}"
+                    logger.error(error_msg)
+                    if status_callback:
+                        status_callback(error_msg)
+                    return False
+            
+            # Set and verify match ID
+            self.elements.match_id = match_id
+            is_valid, error = self.match_data_verifier.verify_match_id(match_id)
+            if not is_valid:
+                error_msg = f"Error verifying match_id for {match_id}: {error}"
+                logger.error(error_msg)
+                if status_callback:
+                    status_callback(error_msg)
+                return False
+                
+            return True
+            
+        try:
+            return self.retry_manager.retry_network_operation(_load_operation)
+        except Exception as e:
+            error_msg = f"Error in _load_match_page for {match_id}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            if status_callback:
+                status_callback(error_msg)
+            return False
+
+    def _retry_element_extraction(self, getter_func, element_name: str):
+        """Retry element extraction with network resilience.
+        
+        Args:
+            getter_func: Function to call to get the element
+            element_name: Name of the element for logging
+            
+        Returns:
+            The extracted element or None if failed
+        """
+        def _extraction_operation():
+            try:
+                element = getter_func()
+                if element is None:
+                    raise Exception(f"Failed to extract {element_name}")
+                return element
+            except Exception as e:
+                raise Exception(f"Failed to extract {element_name}: {str(e)}")
 
         try:
             return self.retry_manager.retry_network_operation(_extraction_operation)
@@ -196,7 +357,7 @@ class MatchDataLoader:
         def _click_operation():
             if self.selenium_utils:
                 # Get selectors from config
-                calendar_config = CONFIG.selectors.get("calendar", {})
+                calendar_config = CONFIG.get('selectors', {}).get("calendar", {})
                 navigation_config = calendar_config.get("navigation", {})
                 
                 # Try multiple selectors for the tomorrow button
@@ -207,15 +368,22 @@ class MatchDataLoader:
                     ("class", "calendar__navigation--tomorrow"),  # Fallback to old selector
                 ]
                 
+                # Get timeout from config with default
+                timeout_config = CONFIG.get('timeout', {})
+                element_timeout = timeout_config.get('element_timeout', 10)  # default 10 seconds
+                
                 for selector_type, selector in selectors:
                     logger.info(f"Trying selector: {selector_type} = {selector}")
-                    tomorrow_btn = self.selenium_utils.find(selector_type, selector, duration=CONFIG.timeout.element_timeout)
+                    tomorrow_btn = self.selenium_utils.find(selector_type, selector, duration=element_timeout)
                     if tomorrow_btn:
                         logger.info(f"Found tomorrow button with selector: {selector}")
                         tomorrow_btn.click()
                         # Wait for page to load after click
                         if self.selenium_utils:
-                            self.selenium_utils.wait_for_dynamic_content(CONFIG.timeout.dynamic_content_timeout)
+                            # Get timeout from config with default
+                            timeout_config = CONFIG.get('timeout', {})
+                            dynamic_timeout = timeout_config.get('dynamic_content_timeout', 30)  # default 30 seconds
+                            self.selenium_utils.wait_for_dynamic_content(dynamic_timeout)
                         logger.info("Tomorrow button clicked successfully")
                         return True
                 
@@ -268,7 +436,10 @@ class MatchDataLoader:
         def _extraction_operation():
             match_ids = []
             if self.selenium_utils:
-                match_elements = self.selenium_utils.find_all("class", SELECTORS["match"]["scheduled"].split(".")[1], duration=CONFIG.timeout.page_load_timeout)
+                # Get timeout from config with default
+                timeout_config = CONFIG.get('timeout', {})
+                page_load_timeout = timeout_config.get('page_load_timeout', 30)  # default 30 seconds
+                match_elements = self.selenium_utils.find_all("class", SELECTORS["match"]["scheduled"].split(".")[1], duration=page_load_timeout)
                 if not match_elements:
                     return []
                 for element in match_elements:
@@ -284,6 +455,5 @@ class MatchDataLoader:
         try:
             return self.retry_manager.retry_network_operation(_extraction_operation)
         except Exception as e:
-            logger.error(f"Failed to extract match IDs: {e}")
-            return [] 
-    
+            self.logger.error(f"Failed to extract match IDs: {e}")
+            return []

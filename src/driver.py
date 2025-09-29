@@ -8,7 +8,7 @@ from selenium.common.exceptions import WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
 import os
 import urllib3
-from src.config import CONFIG
+from src.utils.config_loader import CONFIG
 import platform
 from pathlib import Path
 
@@ -70,7 +70,7 @@ class WebDriverManager:
         if self.driver is not None:
             return
         
-        browser_name = getattr(CONFIG.browser, 'browser_name', 'chrome').lower()
+        browser_name = CONFIG.get('browser', {}).get('browser_name', 'chrome').lower()
         options = None
         service = None
         driver_path = None
@@ -80,30 +80,46 @@ class WebDriverManager:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         
         # Set up options and driver path for Chrome or Firefox
+        browser_config = CONFIG.get('browser', {})
         if browser_name == 'chrome':
             from selenium.webdriver.chrome.options import Options as ChromeOptions
             from selenium.webdriver.chrome.service import Service as ChromeService
             options = ChromeOptions()
-            if CONFIG.browser.headless:
+            if browser_config.get('headless', False):
                 options.add_argument('--headless')
             options.add_argument('--disable-gpu')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
-            options.add_argument(f'--window-size={CONFIG.browser.window_size[0]},{CONFIG.browser.window_size[1]}')
-            # Suppress browser console output
+            window_size = browser_config.get('window_size', [1920, 1080])
+            options.add_argument(f'--window-size={window_size[0]},{window_size[1]}')
+            # Comprehensive browser console output suppression
             options.add_argument('--log-level=3')  # Only fatal errors
             options.add_argument('--silent')
             options.add_argument('--disable-logging')
+            options.add_argument('--disable-gpu-logging')
+            options.add_argument('--disable-background-logging')
+            options.add_argument('--disable-component-logging')
+            options.add_argument('--disable-extensions-logging')
+            options.add_argument('--disable-ipc-logging')
+            options.add_argument('--disable-perf-logging')
+            options.add_argument('--disable-renderer-logging')
+            options.add_argument('--disable-service-logging')
+            options.add_argument('--disable-web-security-logging')
+            options.add_argument('--log-file=/dev/null')  # Redirect logs to null
+            options.add_argument('--enable-logging=false')
+            options.add_argument('--v=0')  # Verbose level 0
+            options.add_argument('--vmodule=*=0')  # Disable all verbose modules
             options.add_experimental_option('excludeSwitches', ['enable-logging'])
-            if CONFIG.browser.disable_images:
+            if browser_config.get('disable_images', False):
                 options.add_argument('--blink-settings=imagesEnabled=false')
-            if CONFIG.browser.disable_javascript:
+            if browser_config.get('disable_javascript', False):
                 options.add_argument('--disable-javascript')
-            if CONFIG.browser.disable_css:
+            if browser_config.get('disable_css', False):
                 options.add_argument('--disable-css')
-            if CONFIG.browser.ignore_certificate_errors:
+            if browser_config.get('ignore_certificate_errors', False):
                 options.add_argument('--ignore-certificate-errors')
-            options.add_argument(f'user-agent={CONFIG.browser.user_agent}')
+            user_agent = browser_config.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            options.add_argument(f'user-agent={user_agent}')
             options.add_argument('--disable-blink-features=AutomationControlled')
             options.add_experimental_option('excludeSwitches', ['enable-automation'])
             options.add_experimental_option('useAutomationExtension', False)
@@ -120,8 +136,8 @@ class WebDriverManager:
                 self.logger.info("Chrome binary not found in local installation, using system Chrome")
             
             # Determine driver path
-            if CONFIG.browser.driver_path and os.path.exists(CONFIG.browser.driver_path):
-                driver_path = CONFIG.browser.driver_path
+            if browser_config.get('driver_path') and os.path.exists(browser_config['driver_path']):
+                driver_path = browser_config['driver_path']
                 self.logger.info(f"Using configured driver path: {driver_path}")
             elif driver_path and os.path.exists(driver_path):
                 self.logger.info(f"Using local ChromeDriver: {driver_path}")
@@ -142,16 +158,17 @@ class WebDriverManager:
             from selenium.webdriver.firefox.options import Options as FirefoxOptions
             from selenium.webdriver.firefox.service import Service as FirefoxService
             options = FirefoxOptions()
-            if CONFIG.browser.headless:
+            if browser_config.get('headless', False):
                 options.add_argument('--headless')
-            options.add_argument(f'--width={CONFIG.browser.window_size[0]}')
-            options.add_argument(f'--height={CONFIG.browser.window_size[1]}')
+            window_size = browser_config.get('window_size', [1920, 1080])
+            options.add_argument(f'--width={window_size[0]}')
+            options.add_argument(f'--height={window_size[1]}')
             
             # Determine driver path
             driver_path, firefox_binary_path = self._get_firefox_paths(system, project_root)
             
-            if CONFIG.browser.driver_path and os.path.exists(CONFIG.browser.driver_path):
-                driver_path = CONFIG.browser.driver_path
+            if browser_config.get('driver_path') and os.path.exists(browser_config['driver_path']):
+                driver_path = browser_config['driver_path']
                 self.logger.info(f"Using configured driver path: {driver_path}")
             elif driver_path and os.path.exists(driver_path):
                 self.logger.info(f"Using local GeckoDriver: {driver_path}")

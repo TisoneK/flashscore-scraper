@@ -7,15 +7,45 @@ This script launches the CLI scraper and provides cleanup functionality.
 
 import warnings
 import sys
-import argparse
+import signal
 import os
 import shutil
 import subprocess
 import glob
+import atexit
+import argparse
 from pathlib import Path
 
 # Suppress Python warnings about platform independent libraries
 warnings.filterwarnings("ignore", message="Could not find platform independent libraries")
+
+# Global variable to hold reference to the scraper for cleanup
+_scraper_instance = None
+
+def cleanup():
+    """Cleanup function to be called on exit."""
+    global _scraper_instance
+    if _scraper_instance is not None:
+        try:
+            _scraper_instance.close()
+        except Exception as e:
+            print(f"Error during cleanup: {e}", file=sys.stderr)
+    # Ensure we flush all output
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+def signal_handler(sig, frame):
+    """Handle termination signals."""
+    print('\nExiting gracefully...')
+    cleanup()
+    # Exit with status code 130 (128 + SIGINT)
+    sys.exit(130)
+
+# Register the cleanup function to run on normal program termination
+atexit.register(cleanup)
+
+# Set up signal handler for SIGINT (Ctrl+C)
+signal.signal(signal.SIGINT, signal_handler)
 
 def run_cleanup():
     """Run cleanup utility for corrupted installations."""
@@ -127,17 +157,21 @@ def run_cleanup():
 
 def run_cli_scraper():
     """Run the CLI version of the scraper using the new CLI manager."""
+    global _scraper_instance
     from src.cli import CLIManager
     
     try:
         cli = CLIManager()
+        _scraper_instance = cli  # Store reference for cleanup
         cli.run()
     except KeyboardInterrupt:
-        print("\nScraping interrupted by user")
-        sys.exit(130)  # Standard exit code for SIGINT
+        # Signal handler will take care of this
+        pass
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
+        print(f"An error occurred: {str(e)}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        _scraper_instance = None
 
 def main():
     """Main entry point with CLI argument parsing."""

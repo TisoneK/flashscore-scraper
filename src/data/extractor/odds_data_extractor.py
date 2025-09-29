@@ -1,4 +1,5 @@
 import logging
+from src.utils.config_loader import CONFIG, SELECTORS
 from typing import Optional, Dict
 from src.data.elements_model import OddsElements
 from src.data.verifier.odds_data_verifier import OddsDataVerifier
@@ -316,14 +317,14 @@ class OddsDataExtractor:
             return None
 
     def get_all_totals(self):
-        elements = self._loader.elements
-        totals = []
-        for row in elements.all_totals:
-            alternative = row['alternative'].text.strip() if row['alternative'] and hasattr(row['alternative'], 'text') else None
-            over = row['over'].text.strip() if row['over'] and hasattr(row['over'], 'text') else None
-            under = row['under'].text.strip() if row['under'] and hasattr(row['under'], 'text') else None
-            totals.append({'alternative': alternative, 'over': over, 'under': under})
-        return totals
+        try:
+            # Delegate to loader to ensure we use the same collected elements
+            if hasattr(self, '_loader') and self._loader is not None and hasattr(self._loader, 'get_all_totals'):
+                return self._loader.get_all_totals()
+            return []
+        except Exception as e:
+            logger.debug(f"Error getting all totals from loader: {e}")
+            return []
 
     def get_total_alternatives(self):
         """Return the total number of available over/under alternatives (lines)."""
@@ -358,47 +359,112 @@ class OddsDataExtractor:
         If index is given, use that index instead.
         """
         totals = self.get_all_totals()
+        if CONFIG.get('logging', {}).get('verbose_odds_debug', False):
+            logger.debug(f"Found {len(totals)} total alternatives")
         if not totals:
+            if CONFIG.get('logging', {}).get('verbose_odds_debug', False):
+                logger.debug("No totals found, returning None")
             return None
         if index is not None:
             if 0 <= index < len(totals):
-                return totals[index]
+                alt = totals[index]
+                # Normalize to strings
+                return {
+                    'alternative': (alt.get('alternative').text.strip() if hasattr(alt.get('alternative'), 'text') else (alt.get('alternative').strip() if isinstance(alt.get('alternative'), str) else None)),
+                    'over': (alt.get('over').text.strip() if hasattr(alt.get('over'), 'text') else (alt.get('over').strip() if isinstance(alt.get('over'), str) else None)),
+                    'under': (alt.get('under').text.strip() if hasattr(alt.get('under'), 'text') else (alt.get('under').strip() if isinstance(alt.get('under'), str) else None)),
+                }
             return None
         
         # Use the property for the target value
         target = self.best_alternative_target
-        best_with_half = None
-        best_overall = None
+        best_with_half = None  # normalized dict
+        best_overall = None    # normalized dict
         min_diff_with_half = float('inf')
         min_diff_overall = float('inf')
         
-        # Find the best alternative with .5 and the best overall
-        for alt in totals:
+        if CONFIG.get('logging', {}).get('verbose_odds_debug', False):
+            logger.debug(f"Target odds: {target}")
+        
+        def to_float(value):
             try:
-                over = float(alt['over']) if alt['over'] is not None else 0.0
-                alternative = alt['alternative']
-                diff = abs(over - target)
+                if value is None:
+                    return None
+                if hasattr(value, 'text'):
+                    value = value.text
+                if isinstance(value, str):
+                    value = value.strip().replace(',', '.')
+                    if value == '':
+                        return None
+                    return float(value)
+                return None
+            except (ValueError, TypeError):
+                return None
+        
+        def to_str(value):
+            try:
+                if value is None:
+                    return None
+                if hasattr(value, 'text'):
+                    text = value.text.strip()
+                    return text if text else None
+                if isinstance(value, str):
+                    text = value.strip()
+                    return text if text else None
+                return None
+            except Exception:
+                return None
+        
+        # Note: We intentionally include odds marked as "removed" for analysis.
+        
+        # Find the best alternative with .5 and the best overall
+        for i, alt in enumerate(totals):
+            try:
+                over_elem = alt.get('over')
+                under_elem = alt.get('under')
+                over_val = to_float(over_elem)
+                alternative_str = to_str(alt.get('alternative'))
+                under_str = to_str(under_elem)
+                if over_val is None or alternative_str is None or under_str is None:
+                    if CONFIG.get('logging', {}).get('verbose_odds_debug', False):
+                        logger.debug(f"Alternative {i}: skipped due to missing values (alternative={alternative_str}, over={over_val}, under={under_str})")
+                    continue
+                diff = abs(over_val - target)
+                has_half = self.has_half_point(alternative_str)
                 
-                # Check if alternative has .5
-                has_half = self.has_half_point(alternative)
+                if CONFIG.get('logging', {}).get('verbose_odds_debug', False):
+                    logger.debug(f"Alternative {i}: {alternative_str}, over: {over_val}, has_half: {has_half}, diff: {diff}")
+                
+                # Build normalized candidate
+                candidate = {
+                    'alternative': alternative_str,
+                    'over': to_str(alt.get('over')),
+                    'under': under_str,
+                }
                 
                 # Track best overall alternative
                 if diff < min_diff_overall:
                     min_diff_overall = diff
-                    best_overall = alt
+                    best_overall = candidate
                 
                 # Track best alternative with .5
                 if has_half and diff < min_diff_with_half:
                     min_diff_with_half = diff
-                    best_with_half = alt
+                    best_with_half = candidate
                         
-            except (ValueError, TypeError):
+            except Exception as e:
+                if CONFIG.get('logging', {}).get('verbose_odds_debug', False):
+                    logger.debug(f"Error processing alternative {i}: {e}")
                 continue
         
         # Return the best alternative with .5 if available, otherwise return best overall
         if best_with_half is not None:
+            if CONFIG.get('logging', {}).get('verbose_odds_debug', False):
+                logger.debug(f"Selected best with half: {best_with_half}")
             return best_with_half
         else:
+            if CONFIG.get('logging', {}).get('verbose_odds_debug', False):
+                logger.debug(f"Selected best overall: {best_overall}")
             return best_overall
 
     def get_best_alternative(self):

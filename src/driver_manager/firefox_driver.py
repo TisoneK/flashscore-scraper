@@ -7,7 +7,7 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 import os
 import platform
 from pathlib import Path
-from src.config import CONFIG
+from src.utils.config_loader import CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -39,28 +39,31 @@ class FirefoxDriver:
         options = FirefoxOptions()
         
         # Basic options
-        if CONFIG.browser.headless:
+        browser_config = CONFIG.get('browser', {})
+        if browser_config.get('headless', False):
             options.add_argument('--headless')
-        options.add_argument(f'--width={CONFIG.browser.window_size[0]}')
-        options.add_argument(f'--height={CONFIG.browser.window_size[1]}')
+        window_size = browser_config.get('window_size', [1920, 1080])
+        options.add_argument(f'--width={window_size[0]}')
+        options.add_argument(f'--height={window_size[1]}')
         
         # Performance options
-        if CONFIG.browser.disable_images:
+        if browser_config.get('disable_images', False):
             options.set_preference('permissions.default.image', 2)
-        if CONFIG.browser.disable_javascript:
+        if browser_config.get('disable_javascript', False):
             options.set_preference('javascript.enabled', False)
-        if CONFIG.browser.disable_css:
+        if browser_config.get('disable_css', False):
             options.set_preference('permissions.default.stylesheet', 2)
-        if CONFIG.browser.ignore_certificate_errors:
+        if browser_config.get('ignore_certificate_errors', False):
             options.set_preference('network.http.ssl-token-cache-size', 0)
         
         # User agent
-        options.set_preference('general.useragent.override', CONFIG.browser.user_agent)
+        user_agent = browser_config.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        options.set_preference('general.useragent.override', user_agent)
         
         # Additional Firefox-specific preferences
         options.set_preference('dom.webdriver.enabled', False)
         options.set_preference('useAutomationExtension', False)
-        options.set_preference('general.useragent.override', CONFIG.browser.user_agent)
+        options.set_preference('general.useragent.override', user_agent)
         
         return options
     
@@ -69,8 +72,9 @@ class FirefoxDriver:
         driver_path, _ = self._get_platform_paths(system, project_root)
         
         # Check configured driver path first
-        if CONFIG.browser.driver_path and os.path.exists(CONFIG.browser.driver_path):
-            driver_path = CONFIG.browser.driver_path
+        browser_config = CONFIG.get('browser', {})
+        if browser_config.get('driver_path') and os.path.exists(browser_config['driver_path']):
+            driver_path = browser_config['driver_path']
             self.logger.info(f"Using configured driver path: {driver_path}")
         elif driver_path and os.path.exists(driver_path):
             self.logger.info(f"Using local GeckoDriver: {driver_path}")

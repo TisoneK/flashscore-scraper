@@ -35,7 +35,6 @@ dependencies = [
     "selenium>=4.18.1",
     "webdriver-manager>=4.0.1",
     "pandas>=2.1.0",
-    "flet>=0.28.0",
     "InquirerPy>=0.3.4",
     "rich>=13.0.0",
     "tqdm>=4.65.0",
@@ -111,7 +110,7 @@ profile = "black"
 multi_line_output = 3
 line_length = 88
 known_first_party = ["src"]
-known_third_party = ["selenium", "pandas", "flet", "rich", "tqdm"]
+known_third_party = ["selenium", "pandas", "rich", "tqdm"]
 
 [tool.mypy]
 python_version = "3.8"
@@ -132,7 +131,6 @@ strict_equality = true
 module = [
     "selenium.*",
     "webdriver_manager.*",
-    "flet.*",
     "InquirerPy.*",
     "rich.*",
     "tqdm.*",

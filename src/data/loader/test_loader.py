@@ -6,7 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../.
 from src.driver_manager import WebDriverManager
 from src.utils.selenium_utils import SeleniumUtils
 from src.core.url_verifier import URLVerifier
-from src.config import CONFIG
+from src.utils.config_loader import CONFIG
 from .match_data_loader import MatchDataLoader
 from src.data.extractor.match_data_extractor import MatchDataExtractor
 from src.data.loader.odds_data_loader import OddsDataLoader

@@ -72,7 +72,8 @@ class PerformanceDisplay:
         self.alert_message = None
         self.alert_type = "info"
         self.lock = Lock()
-        self._setup_layout()
+        
+        # Initialize progress bars first
         self._progress = Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
@@ -93,8 +94,12 @@ class PerformanceDisplay:
             transient=False
         )
         self._batch_task = self._batch_progress.add_task("Batch", total=100)
+        
+        # Initialize controls before setting up layout
         self._stop_callback = None
         self._should_stop = False
+        self._is_running = True
+        self._live = None
         self._controls = [
             ("Pause/Resume", self._action_pause),
             ("Stop Scraper", self._action_stop),
@@ -104,20 +109,32 @@ class PerformanceDisplay:
         ]
         self._selected_control = 0
         self._paused = False
+        
+        # Now setup the layout which depends on the progress bars and controls
+        self._setup_layout()
 
     def set_stop_callback(self, callback: Callable[[], None]):
         self._stop_callback = callback
 
     def _setup_layout(self):
+        # Create the main layout structure
         self.layout.split(
-            Layout(name="header", size=3),
+            Layout(self._render_header(), name="header", size=3),
             Layout(name="body", ratio=1),
-            Layout(name="alert", size=3)
+            Layout(self._render_alert(), name="alert", size=3)
         )
+        
+        # Create the body layout with metrics and progress
         self.layout["body"].split_row(
-            Layout(name="metrics", ratio=1),
-            Layout(name="progress", ratio=2)
+            Layout(self._render_metrics(), name="metrics", ratio=1),
+            Layout(self._render_progress(), name="progress", ratio=2)
         )
+        
+        # Ensure all panels have proper borders and titles
+        self.layout["header"].update(self._render_header())
+        self.layout["body"]["metrics"].update(self._render_metrics())
+        self.layout["body"]["progress"].update(self._render_progress())
+        self.layout["alert"].update(self._render_alert())
 
     def _render_header(self):
         return Panel(
@@ -260,61 +277,106 @@ class PerformanceDisplay:
             import threading
             threading.Thread(target=clear, daemon=True).start()
 
-    def start(self, refresh_per_second: int = 4):
+    def start(self):
+        """Start the display in a non-blocking way."""
+        self._is_running = True
+        
+        # Initial render of all components
         self._refresh_layout()
-        with Live(self.layout, refresh_per_second=refresh_per_second, console=self.console, screen=True):
-            try:
-                while not self._should_stop:
-                    time.sleep(0.1)
-                    key = None
-                    if os.name == 'nt':
-                        import msvcrt
-                        if msvcrt.kbhit():
-                            ch = msvcrt.getwch()
-                            if ch == '\r':  # Enter
-                                key = 'enter'
-                            elif ch == '\xe0':  # Arrow keys
-                                arrow = msvcrt.getwch()
-                                if arrow == 'H':
+        
+        # Start the live display
+        self._live = Live(
+            self.layout, 
+            refresh_per_second=4, 
+            screen=True,
+            redirect_stdout=False,
+            redirect_stderr=False
+        )
+        
+        try:
+            self._live.__enter__()
+            
+            # Main update loop
+            while self._is_running and not self._should_stop:
+                self._update_display()
+                time.sleep(0.1)  # More responsive to input
+        except Exception as e:
+            logger.error(f"Error in display loop: {e}")
+            raise
+        finally:
+            if self._live is not None:
+                try:
+                    self._live.__exit__(None, None, None)
+                except Exception as e:
+                    logger.error(f"Error stopping live display: {e}")
+                finally:
+                    self._live = None
+
+    def stop(self):
+        """Stop the display."""
+        self._is_running = False
+        if self._live is not None:
+            self._live.__exit__(None, None, None)
+            self._live = None
+
+    def _update_display(self):
+        """Handle keyboard input and update the display."""
+        if not hasattr(self, '_live') or self._live is None:
+            return
+            
+        key = None
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                if msvcrt.kbhit():
+                    ch = msvcrt.getwch()
+                    if ch == '\r':  # Enter
+                        key = 'enter'
+                    elif ch == '\xe0':  # Arrow keys
+                        arrow = msvcrt.getwch()
+                        if arrow == 'H':
+                            key = 'up'
+                        elif arrow == 'P':
+                            key = 'down'
+                    elif ch == '\x03':  # Ctrl+C
+                        raise KeyboardInterrupt
+            else:
+                import sys, termios, tty, select
+                fd = sys.stdin.fileno()
+                old_settings = termios.tcgetattr(fd)
+                try:
+                    tty.setcbreak(fd)
+                    if select.select([sys.stdin], [], [], 0)[0]:
+                        ch = sys.stdin.read(1)
+                        if ch == '\n':
+                            key = 'enter'
+                        elif ch == '\x1b':  # Escape sequence
+                            next1 = sys.stdin.read(1)
+                            if next1 == '[':
+                                next2 = sys.stdin.read(1)
+                                if next2 == 'A':
                                     key = 'up'
-                                elif arrow == 'P':
+                                elif next2 == 'B':
                                     key = 'down'
-                            elif ch == '\x03':  # Ctrl+C
-                                raise KeyboardInterrupt
-                    else:
-                        import sys, termios, tty, select
-                        fd = sys.stdin.fileno()
-                        old_settings = termios.tcgetattr(fd)
-                        try:
-                            tty.setcbreak(fd)
-                            if select.select([sys.stdin], [], [], 0)[0]:
-                                ch = sys.stdin.read(1)
-                                if ch == '\n':
-                                    key = 'enter'
-                                elif ch == '\x1b':  # Escape sequence
-                                    next1 = sys.stdin.read(1)
-                                    if next1 == '[':
-                                        next2 = sys.stdin.read(1)
-                                        if next2 == 'A':
-                                            key = 'up'
-                                        elif next2 == 'B':
-                                            key = 'down'
-                                elif ch == '\x03':  # Ctrl+C
-                                    raise KeyboardInterrupt
-                        finally:
-                            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                    if key == 'up':
-                        self._selected_control = (self._selected_control - 1) % len(self._controls)
-                        self._refresh_layout()
-                    elif key == 'down':
-                        self._selected_control = (self._selected_control + 1) % len(self._controls)
-                        self._refresh_layout()
-                    elif key == 'enter':
-                        _, action = self._controls[self._selected_control]
-                        action()
-                        self._refresh_layout()
-            except KeyboardInterrupt:
-                self.show_alert("Stopping (Ctrl+C)...", "error")
-                self._should_stop = True
-                if self._stop_callback:
-                    self._stop_callback() 
+                        elif ch == '\x03':  # Ctrl+C
+                            raise KeyboardInterrupt
+                finally:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            
+            # Handle key presses
+            if key == 'up':
+                self._selected_control = (self._selected_control - 1) % len(self._controls)
+                self._refresh_layout()
+            elif key == 'down':
+                self._selected_control = (self._selected_control + 1) % len(self._controls)
+                self._refresh_layout()
+            elif key == 'enter':
+                _, action = self._controls[self._selected_control]
+                action()
+                self._refresh_layout()
+                
+        except KeyboardInterrupt:
+            self.show_alert("Stopping (Ctrl+C)...", "error")
+            self._should_stop = True
+            if self._stop_callback:
+                self._stop_callback() 

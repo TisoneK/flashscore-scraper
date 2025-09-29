@@ -1,4 +1,4 @@
-from typing import List, Optional, Union, Tuple, Any
+from typing import List, Optional, Union, Tuple, Any, Dict
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -7,7 +7,7 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.webdriver import WebDriver
 import time
 import logging
-from src.config import CONFIG, SELECTORS
+from src.utils.config_loader import CONFIG, SELECTORS
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,10 @@ class SeleniumUtils:
             driver: Selenium WebDriver instance
         """
         self.driver = driver
-        self.wait = WebDriverWait(driver, CONFIG.timeout.element_timeout)
+        # Get timeout values from config with defaults
+        timeout_config = CONFIG.get('timeout', {})
+        element_timeout = timeout_config.get('element_timeout', 10)  # default 10 seconds
+        self.wait = WebDriverWait(driver, element_timeout)
         self.logger = logging.getLogger(__name__)
 
     def selector(self, locator: str) -> By:
@@ -97,7 +100,7 @@ class SeleniumUtils:
             
         return hidden_count
 
-    def find(self, locator: str, value: str, duration: int = None, parent: WebElement = None) -> Optional[WebElement]:
+    def find(self, locator: str, value: str, duration: int = None, parent: WebElement = None, suppress_debug: bool = False) -> Optional[WebElement]:
         """Find a single element.
         
         Args:
@@ -122,21 +125,35 @@ class SeleniumUtils:
             return self.driver.find_element(by, value)
             
         except Exception as e:
-            self.logger.debug(f"Error finding element {locator}={value}: {e}")
+            if not suppress_debug:
+                self.logger.debug(f"Error finding element {locator}={value}: {e}")
             return None
 
-    def find_all(self, locator: str, value: str, duration: int = None, parent: WebElement = None) -> List[WebElement]:
+    def find_all(self, locator: str, value: Union[str, List[Dict[str, str]]], duration: int = None, parent: WebElement = None) -> List[WebElement]:
         """Find all elements matching the criteria.
         
         Args:
             locator: Locator strategy (css, xpath, class, id)
-            value: Locator value
+            value: Locator value (string or list of selector dicts with 'locator' and 'type' keys)
             duration: Optional timeout duration
             parent: Optional parent element to search within
             
         Returns:
             List[WebElement]: List of found elements
         """
+        # Handle list of selector dictionaries
+        if isinstance(value, list) and all(isinstance(x, dict) and 'locator' in x and 'type' in x for x in value):
+            for selector in value:
+                try:
+                    elements = self.find_all(selector['type'], selector['locator'], duration, parent)
+                    if elements:
+                        return elements
+                except Exception as e:
+                    self.logger.debug(f"Error with selector {selector}: {e}")
+                    continue
+            return []
+            
+        # Handle string selector
         try:
             by = self.selector(locator)
             if duration:
@@ -152,6 +169,20 @@ class SeleniumUtils:
         except Exception as e:
             self.logger.debug(f"Error finding elements {locator}={value}: {e}")
             return []
+
+    def find_element_in_parent(self, parent: WebElement, locator: str, value: str, duration: int = None, suppress_debug: bool = False) -> Optional[WebElement]:
+        """Find a single element within a given parent element.
+        
+        Args:
+            parent: Parent WebElement to search within
+            locator: Locator strategy (css, xpath, class, id)
+            value: Locator value
+            duration: Optional timeout duration
+        
+        Returns:
+            Optional[WebElement]: Found element or None
+        """
+        return self.find(locator, value, duration=duration, parent=parent, suppress_debug=suppress_debug)
 
     def is_available(self, locator: str, value: str) -> bool:
         """Check if an element is available.
@@ -247,17 +278,21 @@ class SeleniumUtils:
             self.logger.error(f"Error navigating to {url}: {e}")
             return False
 
-    def wait_for_dynamic_content(self, duration: Optional[int] = None) -> bool:
+    def wait_for_dynamic_content(self, timeout: int = None) -> bool:
         """Wait for dynamic content to load.
         
         Args:
-            duration: Optional timeout duration in seconds
+            timeout: Optional timeout in seconds
             
         Returns:
             bool: True if content loaded successfully, False otherwise
         """
         try:
-            wait = WebDriverWait(self.driver, duration or CONFIG.timeout.dynamic_content_timeout)
+            timeout_config = CONFIG.get('timeout', {})
+            default_timeout = timeout_config.get('dynamic_content_timeout', 30)  # default 30 seconds
+            wait_timeout = timeout or default_timeout
+            
+            wait = WebDriverWait(self.driver, wait_timeout)
             
             # First wait for document.readyState to be 'complete'
             def document_ready(driver):
@@ -307,186 +342,216 @@ class SeleniumUtils:
                 self.driver = None
 
     def wait_for_element(self, locator: str, value: str, duration: int = None, parent: WebElement = None) -> bool:
-        """Wait for an element to be present.
+        """Wait for an element to be present in the DOM.
         
         Args:
             locator: Locator strategy (css, xpath, class, id)
             value: Locator value
-            duration: Optional timeout duration
+            duration: Optional timeout in seconds
             parent: Optional parent element to search within
             
         Returns:
-            bool: True if element is found, False otherwise
+            bool: True if element is present, False otherwise
         """
         try:
             by = self.selector(locator)
-            wait = WebDriverWait(self.driver, duration or CONFIG.timeout.element_timeout)
+            timeout_config = CONFIG.get('timeout', {})
+            default_timeout = timeout_config.get('element_timeout', 10)  # default 10 seconds
+            wait_timeout = duration or default_timeout
+            
+            wait = WebDriverWait(self.driver, wait_timeout)
             
             if parent:
                 # Create a custom condition for finding element within parent
-                def element_in_parent(driver):
+                def element_found(driver):
                     try:
-                        return parent.find_element(by, value)
-                    except:
-                        return None
-                element = wait.until(element_in_parent)
-                return element is not None
+                        return parent.find_element(self.selector(locator), value)
+                    except NoSuchElementException:
+                        return False
+                
+                wait.until(element_found)
             else:
-                element = wait.until(EC.presence_of_element_located((by, value)))
-                return element is not None
+                wait.until(EC.presence_of_element_located((by, value)))
+                
+            return True
             
         except Exception as e:
             self.logger.debug(f"Error waiting for element {locator}={value}: {e}")
             return False
 
     def wait_for_elements(self, locator: str, value: str, duration: int = None) -> bool:
-        """Wait for elements to be present.
+        """Wait for elements to be present in the DOM.
         
         Args:
             locator: Locator strategy (css, xpath, class, id)
             value: Locator value
-            duration: Optional timeout duration
+            duration: Optional timeout in seconds
             
         Returns:
             bool: True if elements are present, False otherwise
         """
         try:
-            wait = WebDriverWait(self.driver, duration or CONFIG.timeout.element_timeout)
-            wait.until(EC.presence_of_all_elements_located((self.selector(locator), value)))
+            by = self.selector(locator)
+            timeout_config = CONFIG.get('timeout', {})
+            default_timeout = timeout_config.get('element_timeout', 10)  # default 10 seconds
+            wait_timeout = duration or default_timeout
+            
+            wait = WebDriverWait(self.driver, wait_timeout)
+            wait.until(EC.presence_of_all_elements_located((by, value)))
             return True
         except Exception as e:
             self.logger.debug(f"Error waiting for elements {locator}={value}: {e}")
             return False
 
-    def wait_for_element_to_disappear(self, by: str, value: str, duration: Optional[int] = None) -> bool:
-        """Wait for an element to disappear.
+    def wait_until_element_disappears(self, by: str, value: str, duration: int = None) -> bool:
+        """Wait until an element is no longer present in the DOM.
         
         Args:
-            by: Locator strategy (e.g., "id", "class", "css")
+            by: Locator strategy (class, id, xpath, etc.)
             value: Locator value
-            duration: Optional timeout duration in seconds
+            duration: Optional timeout in seconds
             
         Returns:
             bool: True if element disappeared, False otherwise
         """
         try:
-            wait = WebDriverWait(self.driver, duration or CONFIG.timeout.element_timeout)
+            timeout_config = CONFIG.get('timeout', {})
+            default_timeout = timeout_config.get('element_timeout', 10)  # default 10 seconds
+            wait_timeout = duration or default_timeout
+            
+            wait = WebDriverWait(self.driver, wait_timeout)
             if by == "class":
                 wait.until(EC.invisibility_of_element_located((By.CLASS_NAME, value)))
             elif by == "id":
                 wait.until(EC.invisibility_of_element_located((By.ID, value)))
+            elif by == "xpath":
+                wait.until(EC.invisibility_of_element_located((By.XPATH, value)))
             elif by == "css":
                 wait.until(EC.invisibility_of_element_located((By.CSS_SELECTOR, value)))
+            else:
+                raise ValueError(f"Unsupported locator type: {by}")
             return True
-        except TimeoutException:
-            self.logger.debug(f"Timeout waiting for element to disappear: {by}={value}")
-            return False
         except Exception as e:
-            self.logger.error(f"Error waiting for element to disappear {by}={value}: {e}")
+            self.logger.debug(f"Error waiting for element to disappear {by}={value}: {e}")
             return False
 
-    def wait_for_elements_to_disappear(self, by: str, value: str, duration: Optional[int] = None) -> bool:
-        """Wait for elements to disappear.
+    def wait_until_elements_disappear(self, by: str, value: str, duration: int = None) -> bool:
+        """Wait until all matching elements are no longer present in the DOM.
         
         Args:
-            by: Locator strategy (e.g., "id", "class", "css")
+            by: Locator strategy (class, id, xpath, etc.)
             value: Locator value
-            duration: Optional timeout duration in seconds
+            duration: Optional timeout in seconds
             
         Returns:
             bool: True if elements disappeared, False otherwise
         """
         try:
-            wait = WebDriverWait(self.driver, duration or CONFIG.timeout.element_timeout)
+            timeout_config = CONFIG.get('timeout', {})
+            default_timeout = timeout_config.get('element_timeout', 10)  # default 10 seconds
+            wait_timeout = duration or default_timeout
+            
+            wait = WebDriverWait(self.driver, wait_timeout)
             if by == "class":
                 wait.until(EC.invisibility_of_all_elements_located((By.CLASS_NAME, value)))
             elif by == "id":
                 wait.until(EC.invisibility_of_all_elements_located((By.ID, value)))
+            elif by == "xpath":
+                wait.until(EC.invisibility_of_all_elements_located((By.XPATH, value)))
             elif by == "css":
                 wait.until(EC.invisibility_of_all_elements_located((By.CSS_SELECTOR, value)))
+            else:
+                raise ValueError(f"Unsupported locator type: {by}")
             return True
-        except TimeoutException:
-            self.logger.debug(f"Timeout waiting for elements to disappear: {by}={value}")
-            return False
         except Exception as e:
-            self.logger.error(f"Error waiting for elements to disappear {by}={value}: {e}")
+            self.logger.debug(f"Error waiting for elements to disappear {by}={value}: {e}")
             return False
 
-    def wait_for_element_to_be_clickable(self, by: str, value: str, duration: Optional[int] = None) -> bool:
-        """Wait for an element to be clickable.
+    def wait_until_clickable(self, by: str, value: str, duration: int = None) -> bool:
+        """Wait until an element is clickable.
         
         Args:
-            by: Locator strategy (e.g., "id", "class", "css")
+            by: Locator strategy (class, id, xpath, etc.)
             value: Locator value
-            duration: Optional timeout duration in seconds
+            duration: Optional timeout in seconds
             
         Returns:
             bool: True if element is clickable, False otherwise
         """
         try:
-            wait = WebDriverWait(self.driver, duration or CONFIG.timeout.element_timeout)
+            timeout_config = CONFIG.get('timeout', {})
+            default_timeout = timeout_config.get('element_timeout', 10)  # default 10 seconds
+            wait_timeout = duration or default_timeout
+            
+            wait = WebDriverWait(self.driver, wait_timeout)
             if by == "class":
                 wait.until(EC.element_to_be_clickable((By.CLASS_NAME, value)))
             elif by == "id":
                 wait.until(EC.element_to_be_clickable((By.ID, value)))
+            elif by == "xpath":
+                wait.until(EC.element_to_be_clickable((By.XPATH, value)))
             elif by == "css":
                 wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, value)))
+            else:
+                raise ValueError(f"Unsupported locator type: {by}")
             return True
-        except TimeoutException:
-            self.logger.debug(f"Timeout waiting for element to be clickable: {by}={value}")
-            return False
         except Exception as e:
-            self.logger.error(f"Error waiting for element to be clickable {by}={value}: {e}")
+            self.logger.debug(f"Error waiting for element to be clickable {by}={value}: {e}")
             return False
 
-    def wait_for_elements_to_be_clickable(self, by: str, value: str, duration: Optional[int] = None) -> bool:
-        """Wait for elements to be clickable.
+    def wait_until_elements_clickable(self, by: str, value: str, duration: int = None) -> bool:
+        """Wait until all matching elements are clickable.
         
         Args:
-            by: Locator strategy (e.g., "id", "class", "css")
+            by: Locator strategy (class, id, xpath, etc.)
             value: Locator value
-            duration: Optional timeout duration in seconds
+            duration: Optional timeout in seconds
             
         Returns:
             bool: True if elements are clickable, False otherwise
         """
         try:
-            wait = WebDriverWait(self.driver, duration or CONFIG.timeout.element_timeout)
+            timeout_config = CONFIG.get('timeout', {})
+            default_timeout = timeout_config.get('element_timeout', 10)  # default 10 seconds
+            wait_timeout = duration or default_timeout
+            
+            wait = WebDriverWait(self.driver, wait_timeout)
             if by == "class":
                 wait.until(EC.element_to_be_clickable((By.CLASS_NAME, value)))
             elif by == "id":
                 wait.until(EC.element_to_be_clickable((By.ID, value)))
+            elif by == "xpath":
+                wait.until(EC.element_to_be_clickable((By.XPATH, value)))
             elif by == "css":
                 wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, value)))
+            else:
+                raise ValueError(f"Unsupported locator type: {by}")
             return True
-        except TimeoutException:
-            self.logger.debug(f"Timeout waiting for elements to be clickable: {by}={value}")
-            return False
         except Exception as e:
-            self.logger.error(f"Error waiting for elements to be clickable {by}={value}: {e}")
+            self.logger.debug(f"Error waiting for elements to be clickable {by}={value}: {e}")
             return False
 
-    def wait_for_page_load(self, timeout: Optional[int] = None) -> bool:
-        """Wait for the page to load completely.
+    def wait_for_page_load(self, timeout: int = None) -> bool:
+        """Wait for the page to finish loading.
         
         Args:
-            timeout: Maximum time to wait in seconds
+            timeout: Optional timeout in seconds
             
         Returns:
             bool: True if page loaded successfully, False otherwise
         """
         try:
-            timeout = timeout or CONFIG.timeout.page_load_timeout
-            WebDriverWait(self.driver, timeout).until(
+            timeout_config = CONFIG.get('timeout', {})
+            default_timeout = timeout_config.get('page_load_timeout', 30)  # default 30 seconds
+            wait_timeout = timeout or default_timeout
+            
+            WebDriverWait(self.driver, wait_timeout).until(
                 lambda driver: driver.execute_script('return document.readyState') == 'complete'
             )
             return True
-        except TimeoutException:
-            self.logger.warning(f"Page load timeout after {timeout} seconds")
-            return False
         except Exception as e:
-            self.logger.error(f"Error waiting for page load: {e}")
-            return False 
+            self.logger.warning(f"Page load timeout: {e}")
+            return False
 
     def check_tab_present(self, tab_name: str) -> bool:
         """
@@ -513,19 +578,21 @@ class SeleniumUtils:
             str: 'scheduled', 'live', or 'finished'
         """
         try:
-            # Try to find the status span (live or finished)
+            # First, try to find a date/time in the fixedScore__status (scheduled matches)
+            # This is more efficient for scheduled matches and avoids score element queries
+            date_elem = self.find('css', '.fixedScore__status')
+            if date_elem and hasattr(date_elem, 'text'):
+                date_text = date_elem.text.strip()
+                if date_text and any(char.isdigit() for char in date_text):
+                    return 'scheduled'
+            
+            # If no date found, try to find the status span (live or finished)
+            # Only query score elements if we haven't found a scheduled match
             status_elem = self.find('css', '.detailScore__status .fixedHeaderDuel__detailStatus')
             if status_elem and hasattr(status_elem, 'text'):
                 status_text = status_elem.text.strip()
                 # If status_text is empty or just a date/time, it's scheduled
                 if not status_text or status_text == '\xa0':
-                    # Try to find a date/time in the fixedScore__status
-                    date_elem = self.find('css', '.fixedScore__status')
-                    if date_elem and hasattr(date_elem, 'text'):
-                        date_text = date_elem.text.strip()
-                        # If date_text looks like a date/time, treat as scheduled
-                        if date_text and any(char.isdigit() for char in date_text):
-                            return 'scheduled'
                     return 'scheduled'
                 # Known live status patterns (expand as needed)
                 live_keywords = [
@@ -543,14 +610,9 @@ class SeleniumUtils:
                     return 'scheduled'
                 # Default: treat as live if not empty
                 return 'live'
-            # Fallback: try to find a date/time in the fixedScore__status
-            date_elem = self.find('css', '.fixedScore__status')
-            if date_elem and hasattr(date_elem, 'text'):
-                date_text = date_elem.text.strip()
-                if date_text and any(char.isdigit() for char in date_text):
-                    return 'scheduled'
-            # If all else fails, return 'unknown'
-            return 'unknown'
+            
+            # If no status elements found, default to scheduled
+            return 'scheduled'
         except Exception as e:
             self.logger.error(f"Error extracting match status: {e}")
             return 'unknown' 

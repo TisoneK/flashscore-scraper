@@ -1,6 +1,6 @@
 # Flashscore Basketball Scraper
 
-A powerful basketball match data scraper with a modern CLI interface, designed to extract comprehensive match data from Flashscore.co.ke.
+A powerful command-line basketball match data scraper designed to extract comprehensive match data from Flashscore.
 
 ## 🚀 Quick Start
 
@@ -35,7 +35,10 @@ pip install -e .
 
 4. **Initialize drivers:**
 ```bash
-fss --init
+fss --init                 # default: chrome 138
+# or specify browser/version
+fss --init chrome 139
+fss --init firefox
 ```
 
 5. **Start scraping:**
@@ -80,122 +83,12 @@ python -m src.utils.cleanup --clean  # Clean only (no reinstall)
 
 ---
 
-## 💡 Example CLI Session
+## 🎯 Features
 
-### Launching the CLI
-```bash
-$ fss
-Flashscore Basketball Scraper
-Interactive CLI for scraping basketball match data
-
-Features:
-• One-click scraping with defaults
-• Interactive configuration
-• Real-time progress tracking
-• Rich console output
-
-What would you like to do?
-> Start Scraping
-  Configure Settings
-  View Status
-  Prediction
-  Exit
-```
-
-### Scraping Flow
-```bash
-> Start Scraping
-
-🚀 Scraping Mode
-Extract basketball match data from Flashscore
-
-Select day to scrape:
-> Today
-  Tomorrow
-  Back
-
-🚀 Starting scraping for today...
-
-[Progress bars and live status updates appear here]
-
-✅ Scraping completed successfully!
-Successfully collected 24 matches!
-============================================================
-```
-
-### Configuring Settings
-```bash
-> Configure Settings
-
-⚙️  Settings Configuration
-Configure your scraper settings and preferences
-
-What would you like to configure?
-> Browser Settings
-  Driver Management
-  Output Settings
-  Logging Settings
-  Day Selection
-  Terminal Clearing
-
-Run browser in headless mode? (Y/n): Y
-✅ Settings saved successfully!
-```
-
-### Prediction Menu
-```bash
-> Prediction
-
-🔮 Match Predictions
-Analyze match data and generate predictions
-
-Prediction - Select range:
-> Today
-  Yesterday
-  Tomorrow
-  All
-  Back
-
-[Prediction tables with actionable OVER/UNDER and HOME/AWAY results appear here]
-
-What would you like to do?
-> Filter Results
-  Sort Results
-  View Details/Export
-  Back
-```
-
-### Viewing Status
-```bash
-> View Status
-
-📊 Scraper Status
-View current scraper status and statistics
-
-Current Status:
-• Output files: 12
-• Output directory: output/
-```
-
-### Exiting
-```bash
-> Exit
-
-👋 Goodbye!
-```
-
----
-
-## 🏀 Features
-
-- **Interactive CLI:** Menu-driven interface for scraping, configuration, and predictions
-- **Real-time Progress:** Live progress bars and status updates
-- **Driver Management:** Install, list, and set default browser drivers
-- **Settings Management:** Configure browser, output, logging, and more
-- **Prediction Module:** ScoreWise algorithm for match predictions
-- **Rich Console Output:** Enhanced visuals using Rich
-- **Performance Monitoring:** Track scraping and system performance
-- **Data Export:** Save results to JSON or CSV
+- **CLI Interface**: Intuitive command-line interface with interactive menus and rich output
+- **Multi-threaded Scraping**: Efficient parallel processing of matches
+- **Data Export**: Save results in multiple formats (JSON, CSV)
+- **Configurable**: Customize scraping behavior through configuration files
 
 ---
 
@@ -231,10 +124,10 @@ Accessible via the CLI "Configure Settings" menu:
 
 ## 📊 Data Output
 
-- **JSON Storage:** Structured data storage with metadata
-- **Daily Files:** Automatic daily file organization
-- **Complete/Incomplete Tracking:** Separate handling of successful and failed scrapes
-- **Metadata Tracking:** File information, processing statistics, and timestamps
+- **JSON Storage:** Structured data written under `output/json/`
+- **Daily Files:** Files named like `matches_DDMMYY.json` and `results_DDMMYY.json`
+- **Complete/Incomplete Tracking:** Separate handling of successful and skipped matches (with reasons)
+- **Metadata Tracking:** File info, processing statistics, timestamps
 
 ---
 
@@ -242,62 +135,101 @@ Accessible via the CLI "Configure Settings" menu:
 
 ```
 flashscore-scraper/
-├── main.py                # Main entry point (CLI only)
-├── config.py              # Root configuration file
-├── requirements.txt       # Dependencies
-├── pyproject.toml         # Project configuration
-├── drivers/               # Browser drivers storage
-├── output/                # Scraping output directory
-├── src/                   # Core scraper logic
-│   ├── __init__.py        # Package initialization
-│   ├── scraper.py         # Main scraper class
-│   ├── config.py          # Configuration management
-│   ├── config.json        # Configuration file
-│   ├── models.py          # Data models
-│   ├── driver.py          # WebDriver management (legacy)
-│   ├── api/               # API interfaces
-│   ├── cli/               # CLI interface
-│   │   ├── cli_manager.py # Main CLI manager
-│   │   ├── display.py     # Console display
-│   │   ├── progress.py    # Progress tracking
-│   │   ├── prompts.py     # User prompts
-│   │   ├── colors.py      # Color schemes
-│   │   ├── performance_display.py # Performance monitoring
-│   │   └── cli_settings.json # CLI-specific settings
-│   ├── core/              # Core functionality
-│   │   ├── batch_processor.py
-│   │   ├── error_handler.py
-│   │   ├── network_monitor.py
-│   │   ├── performance_monitor.py
-│   │   ├── tab_manager.py
-│   │   └── url_verifier.py
-│   ├── data/              # Data processing
-│   ├── driver_manager/    # Driver management system
-│   │   └── driver_installer.py  # Driver installation
-│   ├── prediction/        # Match prediction system
-│   ├── scripts/           # Utility scripts
-│   ├── storage/           # Data storage
-│   ├── ui/                # User interface components
-│   └── utils/             # Utilities
-│       ├── cleanup.py     # Cleanup utility for corrupted installations
-│       ├── driver_manager.py # Legacy driver management
-│       ├── progress_monitor.py
-│       ├── selenium_utils.py
-│       └── utils.py
-├── docs/                  # Documentation
-│   ├── index.md           # Main documentation
-│   └── issues.md          # Known issues
+├── main.py                 # Main entry point (CLI + cleanup)
+├── config.py               # Root configuration (legacy hooks)
+├── requirements.txt        # Dependencies
+├── pyproject.toml          # Project configuration (entry points: fss, fss-cleanup)
+├── scripts/                # Root utilities
+│   ├── test_large_download.py
+│   ├── update_config_imports.py
+│   └── update_config_imports_to_utils.py
+├── drivers/                # Browser drivers storage
+├── output/                 # Outputs
+│   ├── json/               # `matches_DDMMYY.json`, `results_DDMMYY.json`
+│   └── logs/               # `scraper_*.log`, `chrome_*.log`
+└── src/                    # Core scraper logic
+    ├── __init__.py
+    ├── config.json         # Runtime configuration
+    ├── driver.py           # WebDriver bootstrap
+    ├── models.py           # Data models
+    ├── scraper.py          # Main scraping workflows
+    │
+    ├── cli/
+    │   ├── __init__.py
+    │   ├── cli_manager.py  # CLI entry (also exposed as `fss`)
+    │   ├── cli_settings.json
+    │   ├── colors.py
+    │   ├── display.py
+    │   ├── performance_display.py
+    │   ├── progress.py
+    │   └── prompts.py
+    │
+    ├── core/
+    │   ├── __init__.py
+    │   ├── batch_processor.py
+    │   ├── error_handler.py
+    │   ├── exceptions.py
+    │   ├── graceful_degradation.py
+    │   ├── network_monitor.py
+    │   ├── performance_monitor.py
+    │   ├── resource_manager.py
+    │   ├── retry_manager.py
+    │   ├── tab_manager.py
+    │   ├── url_builder.py
+    │   ├── url_verifier.py
+    │   └── worker_pool.py
+    │
+    ├── data/
+    │   ├── __init__.py
+    │   ├── elements_model.py
+    │   ├── extractor/
+    │   ├── loader/
+    │   └── verifier/
+    │
+    ├── driver_manager/
+    │   ├── __init__.py
+    │   ├── chrome_driver.py
+    │   ├── downloader.py
+    │   ├── driver_installer.py
+    │   ├── exceptions.py
+    │   ├── firefox_driver.py
+    │   ├── progress.py
+    │   └── web_driver_manager.py
+    │
+    ├── prediction/
+    │   ├── __init__.py
+    │   ├── calculator/
+    │   ├── example_usage.py
+    │   └── prediction_data_loader.py
+    │
+    ├── scripts/
+    │   ├── activate_and_run.py
+    │   ├── demo_performance_display.py
+    │   ├── run_cli.py
+    │   ├── setup_drivers.py
+    │   └── setup_platform.py
+    │
+    ├── storage/
+    │   └── json_storage.py
+    │
+    └── utils/
+        ├── __init__.py
+        ├── cleanup.py
+        ├── config_loader.py
+        ├── progress_monitor.py
+        └── selenium_utils.py
 ```
 
 ---
 
 ## ℹ️ Troubleshooting
 
-- **Driver Issues:**
-  - Use `fss --install-drivers` to reinstall drivers
-  - Use `fss --list-versions` to see available Chrome versions
+- **Driver issues:**
+  - `fss --install-drivers chrome [VERSION]`
+  - `fss --list-versions`
 - **Permission errors:** Run as administrator or check file permissions
 - **Network timeouts:** Increase timeout settings in `src/config.json`
+- **Logs location:** Check `output/logs/` for `scraper_*.log` and `chrome_*.log`
 - **Memory issues:** Reduce batch size in settings
 
 ---

@@ -24,36 +24,45 @@ class NetworkMonitor:
     """
     _instance = None
     _lock = threading.Lock()
+    _initialized = False
     
     def __new__(cls):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super(NetworkMonitor, cls).__new__(cls)
-        return cls._instance
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(NetworkMonitor, cls).__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
     
     def __init__(self):
         # Only initialize once
-        if hasattr(self, '_initialized'):
+        if self._initialized:
             return
             
-        self._initialized = True
-        self.logger = logging.getLogger(__name__)
-        self.monitoring = False
-        self.monitor_thread = None
-        self.connection_status = True  # Assume connected initially
-        self.check_interval = 5  # Check every 5 seconds
-        self.host = "8.8.8.8"  # Google DNS
-        self.timeout = 3  # Ping timeout in seconds
-        self.alert_callbacks = []
-        self.connection_quality_metrics = {
-            'total_checks': 0,
-            'successful_checks': 0,
-            'failed_checks': 0,
-            'average_response_time': 0.0,
-            'last_response_time': 0.0
-        }
-        self.status_callback = None
+        with self._lock:
+            if self._initialized:  # Double-checked locking pattern
+                return
+                
+            self.logger = logging.getLogger(__name__)
+            self.monitoring = False
+            self.monitor_thread = None
+            self.connection_status = True  # Assume connected initially
+            self.check_interval = 5  # Check every 5 seconds
+            self.host = "8.8.8.8"  # Google DNS
+            self.timeout = 3  # Ping timeout in seconds
+            self.alert_callbacks = []
+            self.connection_quality_metrics = {
+                'total_checks': 0,
+                'successful_checks': 0,
+                'failed_checks': 0,
+                'average_response_time': 0.0,
+                'last_response_time': 0.0
+            }
+            self.status_callback = None
+            self._initialized = True
+            
+            # Register cleanup on program exit
+            import atexit
+            atexit.register(self._cleanup_on_exit)
 
     def is_connected(self) -> bool:
         """
@@ -118,20 +127,71 @@ class NetworkMonitor:
         if status_callback:
             status_callback("🔍 Started real-time connection monitoring")
 
-    def stop_monitoring(self):
-        """Stop network monitoring."""
-        if not self.monitoring:
-            self.logger.debug("Network monitoring already stopped")
-            if self.status_callback:
-                self.status_callback("Network monitoring already stopped")
-            return
+    def _cleanup_on_exit(self):
+        """Cleanup method registered with atexit."""
+        self.stop_monitoring(suppress_logs=True)
+        
+        # Clear callbacks to prevent memory leaks
+        if hasattr(self, 'alert_callbacks'):
+            self.alert_callbacks.clear()
+            
+        # Clear any other resources
+        if hasattr(self, 'status_callback'):
+            self.status_callback = None
+            
+        self.logger.debug("NetworkMonitor cleanup completed")
+    
+    def stop_monitoring(self, suppress_logs: bool = False):
+        """
+        Stop network monitoring.
+        
+        Args:
+            suppress_logs: If True, suppress INFO/WARNING logs during shutdown
+        
+        Returns:
+            bool: True if monitoring was stopped, False if it wasn't running
+        """
+        if not hasattr(self, 'monitoring') or not self.monitoring:
+            if not suppress_logs:
+                self.logger.debug("Network monitoring already stopped")
+            return False
             
         self.monitoring = False
-        if self.monitor_thread and self.monitor_thread.is_alive():
-            self.monitor_thread.join(timeout=2)
-        self.logger.info("🛑 Stopped real-time connection monitoring")
-        if self.status_callback:
-            self.status_callback("🛑 Stopped real-time connection monitoring")
+        
+        # Safely stop the monitoring thread
+        thread_stopped = False
+        try:
+            if (hasattr(self, 'monitor_thread') and 
+                self.monitor_thread is not None and 
+                isinstance(self.monitor_thread, threading.Thread)):
+                
+                # Give the thread a moment to notice the flag
+                time.sleep(0.1)
+                
+                if self.monitor_thread.is_alive():
+                    self.monitor_thread.join(timeout=2)
+                    thread_stopped = not self.monitor_thread.is_alive()
+                    
+                    # If thread is still alive after join, it's likely stuck
+                    if not thread_stopped and not suppress_logs:
+                        self.logger.warning("Monitoring thread did not stop gracefully")
+        except Exception as e:
+            if not suppress_logs:
+                self.logger.error(f"Error stopping monitoring thread: {e}")
+            # Continue with cleanup even if thread stop failed
+        
+        # Clean up thread reference
+        self.monitor_thread = None
+        
+        if not suppress_logs:
+            self.logger.info("🛑 Stopped real-time connection monitoring")
+            if hasattr(self, 'status_callback') and self.status_callback:
+                try:
+                    self.status_callback("🛑 Stopped real-time connection monitoring")
+                except Exception as e:
+                    self.logger.error(f"Error in status callback: {e}")
+                
+        return thread_stopped
 
     def _monitor_loop(self):
         """Background monitoring loop."""

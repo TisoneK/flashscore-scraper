@@ -337,7 +337,7 @@ class DriverInstaller:
     def update_config_with_paths(self, chrome_path: Optional[str], chromedriver_path: Optional[str], version: str) -> None:
         """Update config file with installed driver paths."""
         try:
-            from src.config import CONFIG
+            from src.utils.config_loader import CONFIG, save_config
             
             # Get the actual binary paths from the version directory
             platform_key = self.detect_platform()
@@ -352,12 +352,12 @@ class DriverInstaller:
             
             # Update config with actual binary paths
             if chrome_binary.exists():
-                CONFIG.browser.chrome_binary_path = str(chrome_binary)
+                CONFIG.setdefault('browser', {})['chrome_binary_path'] = str(chrome_binary)
             if chromedriver_binary.exists():
-                CONFIG.browser.chromedriver_path = str(chromedriver_binary)
+                CONFIG.setdefault('browser', {})['chromedriver_path'] = str(chromedriver_binary)
             
             # Save updated config
-            CONFIG.save()
+            save_config(CONFIG)
             logger.info("[STATUS] ✅ Updated config with driver paths")
             
         except Exception as e:

@@ -1,4 +1,51 @@
-# ScoreWise Prediction Module Integration Guide
+# Flashscore Scraper Integration Guide
+
+## URL Structure
+
+### New URL Format
+
+The scraper now uses a new URL structure for Flashscore matches:
+
+```
+https://www.flashscore.co.ke/match/basketball/{home_slug}-{home_id}/{away_slug}-{away_id}/{path}/?mid={mid}
+```
+
+Where:
+- `{home_slug}`: Home team slug (e.g., 'instituto-de-cordoba')
+- `{home_id}`: Home team short ID (e.g., 'rJPlbMMq')
+- `{away_slug}`: Away team slug (e.g., 'olimpico')
+- `{away_id}`: Away team short ID (e.g., 'ERbTiFhJ')
+- `{path}`: The type of page (e.g., 'summary', 'h2h/overall')
+- `{mid}`: The match ID (e.g., 'raxc7DVh')
+
+### URL Builder Usage
+
+The `UrlBuilder` class provides a convenient way to generate these URLs:
+
+```python
+from src.core.url_builder import UrlBuilder
+
+# Full URL with all parameters
+url = UrlBuilder.summary(
+    mid="raxc7DVh",
+    home_slug="instituto-de-cordoba",
+    home_id="rJPlbMMq",
+    away_slug="olimpico",
+    away_id="ERbTiFhJ"
+)
+
+# Minimal URL (only match ID)
+minimal_url = UrlBuilder.from_mid("raxc7DVh")
+
+# Generate all URLs for a match
+all_urls = UrlBuilder.get_all_urls(
+    mid="raxc7DVh",
+    home_slug="instituto-de-cordoba",
+    home_id="rJPlbMMq",
+    away_slug="olimpico",
+    away_id="ERbTiFhJ"
+)
+```
 
 ## Quick Start
 
@@ -21,7 +68,32 @@ if result.success:
     print(f"Average Rate: {prediction.average_rate:.2f}")
 ```
 
-### 2. Integration with Existing Scraper
+### 2. Integration with Loaders
+
+All loader classes now accept an optional `team_info` parameter for generating canonical URLs:
+
+```python
+from src.data.loader.match_data_loader import MatchDataLoader
+
+# Initialize loader with driver
+loader = MatchDataLoader(driver)
+
+# Load match with team info for canonical URL
+match_loaded = loader.load_match(
+    match_id="raxc7DVh",
+    team_info={
+        'home_slug': 'instituto-de-cordoba',
+        'home_id': 'rJPlbMMq',
+        'away_slug': 'olimpico',
+        'away_id': 'ERbTiFhJ'
+    }
+)
+
+# Fallback to minimal URL if team info is not available
+match_loaded_minimal = loader.load_match(match_id="raxc7DVh")
+```
+
+### 3. Integration with Existing Scraper
 
 ```python
 from src.prediction import PredictionService

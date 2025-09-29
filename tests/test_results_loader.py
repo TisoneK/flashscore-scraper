@@ -25,7 +25,18 @@ class TestResultsDataLoader(unittest.TestCase):
     def test_load_and_extract_match_results(self):
         print(f"\n[DEBUG] test: Loading match summary for match_id: {self.match_id}")
         try:
-            result = self.loader.load_match_summary(self.match_id, status_callback=print)
+            # Test with team info for canonical URL
+            team_info = {
+                'home_slug': 'instituto-de-cordoba',
+                'home_id': 'rJPlbMMq',
+                'away_slug': 'olimpico',
+                'away_id': 'ERbTiFhJ'
+            }
+            result = self.loader.load_match_summary(
+                self.match_id, 
+                team_info=team_info,
+                status_callback=print
+            )
             # print(f"[DEBUG] Load result: {result}")
             # print(f"[DEBUG] Final score element: {self.loader.elements.final_score}")
             # print(f"[DEBUG] Home score element: {self.loader.elements.home_score}")
@@ -46,9 +57,29 @@ class TestResultsDataLoader(unittest.TestCase):
             print(f"[ERROR] test: Exception during test: {e}")
             raise
 
+    def test_load_match_summary_with_invalid_id(self):
+        """Test loading a match with an invalid ID."""
+        # Test with minimal URL (only match ID)
+        result = self.loader.load_match_summary("invalid_id")
+        # Test with team info
+        team_info = {
+            'home_slug': 'invalid',
+            'home_id': 'invalid',
+            'away_slug': 'invalid',
+            'away_id': 'invalid'
+        }
+        result_with_team_info = self.loader.load_match_summary("invalid_id", team_info=team_info)
+
     def test_extract_scores_from_real_window_title(self):
         """Test extracting scores from the real window title after loading a real match page."""
-        self.loader.load_match_summary(self.match_id, status_callback=print)
+        team_info = {
+            'home_slug': 'instituto-de-cordoba',
+            'home_id': 'rJPlbMMq',
+            'away_slug': 'olimpico',
+            'away_id': 'ERbTiFhJ'
+        }
+        # Load the match page with team info
+        self.loader.load_match_summary(self.match_id, team_info=team_info, status_callback=print)
         # Use get_window_title() if match is finished, else fallback to driver.title
         title = self.loader.get_window_title() or self.driver.title
         print(f"[DEBUG] Real window title: {title}")

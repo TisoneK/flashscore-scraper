@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Set
 from pathlib import Path
 
 from src.models import MatchModel
-from src.config import MIN_H2H_MATCHES
+from src.utils.config_loader import MIN_H2H_MATCHES
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +111,12 @@ class JSONStorage:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
-            logger.debug(f"JSON file updated for match {matches[0].match_id if matches else None}. Total complete: {len(final_complete_list)}, total skipped: {len(final_skipped_list)}.")
-            logger.info(f"JSON file updated for match {matches[0].match_id}. Total complete: {len(final_complete_list)}, total skipped: {len(final_skipped_list)}.")
+            if matches:
+                logger.debug(f"JSON file updated for match {matches[0].match_id}. Total complete: {len(final_complete_list)}, total skipped: {len(final_skipped_list)}.")
+                logger.info(f"JSON file updated for match {matches[0].match_id}. Total complete: {len(final_complete_list)}, total skipped: {len(final_skipped_list)}.")
+            else:
+                logger.debug(f"JSON file updated with no new matches. Total complete: {len(final_complete_list)}, total skipped: {len(final_skipped_list)}.")
+                logger.info(f"JSON file updated with no new matches. Total complete: {len(final_complete_list)}, total skipped: {len(final_skipped_list)}.")
             return True
         except Exception as e:
             logger.debug(f"Error saving matches to {filepath}: {str(e)}")
@@ -179,4 +183,47 @@ class JSONStorage:
             
         except Exception as e:
             logger.error(f"Error loading matches from JSON: {e}")
-            raise 
+            raise
+
+    def save_results(self, results: List[Dict], filename: str) -> bool:
+        """Save results data to a JSON file.
+        
+        Args:
+            results: List of result dictionaries to save
+            filename: Name of the JSON file to save to
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            filepath = self.base_dir / filename
+            
+            # Create results data structure
+            data = {
+                'metadata': {
+                    'total_results': len(results),
+                    'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'file_info': {
+                        'filename': filename,
+                        'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                },
+                'results': results
+            }
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            size_bytes = filepath.stat().st_size
+            data['metadata']['file_info']['size_bytes'] = size_bytes
+            
+            # Update file with size info
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Results saved to {filepath}: {len(results)} results")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving results to {filepath}: {str(e)}")
+            return False 

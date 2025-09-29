@@ -61,11 +61,19 @@ class ScraperPrompts:
         ).execute()
         
         if category == "Browser Settings":
+            # Initialize browser settings if not exists
+            if 'browser' not in settings:
+                settings['browser'] = {}
+                
             # Browser settings
-            settings['headless'] = inquirer.confirm(
+            settings['browser']['headless'] = inquirer.confirm(
                 message="Run browser in headless mode?",
                 default=True
             ).execute()
+            
+            # Add more browser settings if needed
+            settings['browser']['window_size'] = [1920, 1080]  # Default window size
+            settings['browser']['disable_images'] = False  # Default image loading setting
             
         elif category == "Driver Management":
             # Driver management
