@@ -23,10 +23,10 @@ def load_matches(date_filter: Optional[str] = None, status: str = "complete", de
     
     # Pre-filter files by date if date_filter is provided
     if date_filter:
-        # Convert date filter to file pattern (ddmmyy format)
+        # Convert date filter to file pattern (YYYYMMDD format)
         try:
             day, month, year = date_filter.split('.')
-            file_pattern = f"matches_{day.zfill(2)}{month.zfill(2)}{year[-2:]}.json"
+            file_pattern = f"matches_{year}{month.zfill(2)}{day.zfill(2)}.json"
             match_files = glob.glob(os.path.join(json_dir, file_pattern))
             if debug:
                 logger.debug(f"Looking for files matching pattern: {file_pattern}")
