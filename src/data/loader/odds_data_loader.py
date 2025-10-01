@@ -363,15 +363,6 @@ class OddsDataLoader:
             self.elements.over_odds = self.get_over_odds(all_totals, selected_total=self.elements.match_total)
             self.elements.under_odds = self.get_under_odds(all_totals, selected_total=self.elements.match_total)
 
-            # Log only the final selected alternative and its odds
-            try:
-                selected_total_text = self.elements.match_total.text.strip() if self.elements.match_total and hasattr(self.elements.match_total, 'text') else None
-                over_text = self.elements.over_odds.text.strip() if self.elements.over_odds and hasattr(self.elements.over_odds, 'text') else None
-                under_text = self.elements.under_odds.text.strip() if self.elements.under_odds and hasattr(self.elements.under_odds, 'text') else None
-                if selected_total_text and over_text and under_text:
-                    logger.debug(f"Selected total: {selected_total_text}, over: {over_text}, under: {under_text}")
-            except Exception:
-                pass
             
             # Check if we have valid over/under data
             if not self.elements.match_total or not self.elements.over_odds or not self.elements.under_odds:

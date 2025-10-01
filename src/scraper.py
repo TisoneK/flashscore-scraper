@@ -186,8 +186,13 @@ class FlashscoreScraper:
                     status_callback(f"Found {len(match_ids)} matches for tomorrow.")
         return match_ids
 
-    def check_and_get_processed_matches(self):
-        processed_matches = self.json_storage.get_processed_match_ids()
+    def check_and_get_processed_matches(self, day: str):
+        """Return processed match ids and reasons for the given day.
+        Ensures we read from the same daily file we write to.
+        """
+        file_date = get_ddmmyy_date(day)
+        filename = f"matches_{file_date}.json"
+        processed_matches = self.json_storage.get_processed_match_ids(filename=filename)
         processed_match_ids = {mid for mid, _ in processed_matches}
         processed_reasons = {mid: reason for mid, reason in processed_matches}
         return processed_match_ids, processed_reasons
@@ -315,6 +320,10 @@ class FlashscoreScraper:
             match_total = float(selected['alternative']) if selected['alternative'] else None
             over_odds = float(selected['over']) if selected['over'] else None
             under_odds = float(selected['under']) if selected['under'] else None
+            
+            # Log the selected alternative
+            logger.debug(f"Selected total: {match_total}, over: {over_odds}, under: {under_odds}")
+            
             return match_total, over_odds, under_odds
         return None, None, None
 
@@ -516,7 +525,7 @@ class FlashscoreScraper:
                         status_callback("No matches found for scraping.")
                     return
 
-                processed_match_ids, processed_reasons = self.check_and_get_processed_matches()
+                processed_match_ids, processed_reasons = self.check_and_get_processed_matches(day)
 
                 # Collect immutable URLs upfront (no fallbacks)
                 url_snapshots = self.match_loader.collect_match_urls()
