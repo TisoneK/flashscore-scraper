@@ -460,6 +460,9 @@ class FlashscoreScraper:
             import threading
             threading.current_thread()._is_shutting_down = True
             
+            # Mark scraper as closing to prevent new operations
+            self._is_closing = True
+            
             # Stop network monitoring with suppressed logs
             if hasattr(self, 'network_monitor') and self.network_monitor is not None:
                 try:
@@ -467,9 +470,22 @@ class FlashscoreScraper:
                 except Exception as e:
                     logger.debug(f"Network monitor stop failed: {e}")
             
+            # Disable urllib3 retries during cleanup to prevent connection attempts
+            try:
+                import urllib3
+                urllib3.disable_warnings()
+                # Temporarily disable retries
+                from urllib3.util.retry import Retry
+                original_retry = urllib3.util.retry.Retry.DEFAULT
+                urllib3.util.retry.Retry.DEFAULT = Retry(total=0, connect=0, read=0, redirect=0, status=0, backoff_factor=0)
+            except Exception:
+                pass  # If urllib3 configuration fails, continue with cleanup
+            
             # Fast path: just quit the driver once, then force cleanup
             if self._driver is not None:
                 try:
+                    # Set a short timeout for driver operations during cleanup
+                    self._driver.implicitly_wait(0.1)
                     self._driver.quit()
                 except Exception as e:
                     logger.debug(f"Driver quit failed during shutdown: {e}")
@@ -493,6 +509,13 @@ class FlashscoreScraper:
             # Clear callbacks
             if hasattr(self, 'status_callback'):
                 self.status_callback = None
+                
+            # Restore urllib3 retries if we modified them
+            try:
+                if 'original_retry' in locals():
+                    urllib3.util.retry.Retry.DEFAULT = original_retry
+            except Exception:
+                pass
                 
         except Exception as e:
             logger.debug(f"Error during cleanup: {e}")
@@ -523,7 +546,7 @@ class FlashscoreScraper:
                 if not match_ids:
                     if status_callback:
                         status_callback("No matches found for scraping.")
-                    return
+                    return []
 
                 processed_match_ids, processed_reasons = self.check_and_get_processed_matches(day)
 
@@ -531,8 +554,8 @@ class FlashscoreScraper:
                 url_snapshots = self.match_loader.collect_match_urls()
                 # Align to ids discovered earlier: filter/keep ordering based on match_ids
                 mid_to_urls = {u['mid']: u for u in url_snapshots}
-
-                matches = []
+                
+                matches = []  # Initialize matches list inside main_scrape
                 MAX_MATCHES = len(match_ids)
 
                 for i, match_id in enumerate(match_ids[:MAX_MATCHES]):
@@ -550,7 +573,7 @@ class FlashscoreScraper:
                     match_display = f"match {match_id}"
                     
                     if progress_callback:
-                        progress_callback(i+1, MAX_MATCHES)
+                        progress_callback(i+1, MAX_MATCHES, "Loading match data")
                     if not progress_callback:
                         logger.info(f'Processing {match_display} ({i+1}/{MAX_MATCHES})')
                     if match_id in processed_match_ids:
@@ -577,6 +600,8 @@ class FlashscoreScraper:
                         odds = OddsModel(match_id=match_id)
 
                         # Load odds data for scheduled matches
+                        if progress_callback:
+                            progress_callback(i+1, MAX_MATCHES, "Extracting odds data")
                         if self.load_home_away_odds(match_id, status_callback=status_callback):
                             odds.home_odds, odds.away_odds = self.extract_home_away_odds(status_callback=status_callback)
                         else:
@@ -606,6 +631,8 @@ class FlashscoreScraper:
                                 status_callback(warn_msg)
 
                         # Load H2H data for scheduled matches
+                        if progress_callback:
+                            progress_callback(i+1, MAX_MATCHES, "Loading H2H data")
                         h2h_matches = []
                         h2h_count = 0
                         if self.load_h2h_data(match_id, status_callback=status_callback):
@@ -649,6 +676,8 @@ class FlashscoreScraper:
                             skip_reason=skip_reason
                         )
                         matches.append(match)
+                        if progress_callback:
+                            progress_callback(i+1, MAX_MATCHES, "Saving match data")
                         self.save_match_data(match, day=day)
                         # Log this match's full info immediately after processing
                         FlashscoreScraper.log_match_info(match)
@@ -665,9 +694,25 @@ class FlashscoreScraper:
                     status_callback(summary_msg)
                 for m in matches:
                     FlashscoreScraper.log_match_info(m)
+                
+                return matches  # Return the matches list
 
-            # Run the main scrape with retry logic
-            self.retry_manager.retry_network_operation(main_scrape)
+            # Run the main scrape with retry logic and get the matches
+            matches = self.retry_manager.retry_network_operation(main_scrape)
+            
+            # Handle case where main_scrape returns None or empty list
+            if matches is None:
+                matches = []
+            
+            # Return the results
+            return {
+                'total_collected': len(matches),
+                'new_matches': len(matches),
+                'skipped_matches': 0,
+                'complete_matches': len([m for m in matches if m.status == 'complete']),
+                'incomplete_matches': len([m for m in matches if m.status != 'complete']),
+                'matches': matches
+            }
         finally:
             self.close()
 

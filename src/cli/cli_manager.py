@@ -1065,13 +1065,22 @@ class CLIManager:
                 except Exception as e:
                     self.logger.error(f"Error updating performance metrics: {e}")
             
-            def progress_callback(current, total):
+            def progress_callback(current, total, task_description=None):
                 try:
                     if total > 0:
                         progress_percent = (current / total) * 100
                         self.performance_display.update_progress(current, total, "Overall")
-                        self.performance_display.update_batch_progress(current % 10, 10, f"Batch {current//10 + 1}")
-                        self.performance_display.update_current_task(f"Processing match {current} of {total}")
+                        # Fix batch progress calculation
+                        batch_size = 10
+                        batch_number = (current - 1) // batch_size + 1
+                        batch_progress = ((current - 1) % batch_size) + 1
+                        self.performance_display.update_batch_progress(batch_progress, batch_size, f"Batch {batch_number}")
+                        
+                        # Enhanced task display
+                        if task_description:
+                            self.performance_display.update_current_task(f"{task_description} ({current}/{total})")
+                        else:
+                            self.performance_display.update_current_task(f"Processing match {current} of {total}")
                         
                         # Log progress periodically
                         if current % 5 == 0 or current == total:
@@ -1090,7 +1099,11 @@ class CLIManager:
                 try:
                     with self._allow_status_messages():
                         # Pass both progress_callback and status_callback to the scraper
-                        self.scraper.scrape(progress_callback=progress_callback, day=day, status_callback=self._status_update, stop_callback=lambda: self._should_stop_scraper)
+                        results = self.scraper.scrape(progress_callback=progress_callback, day=day, status_callback=self._status_update, stop_callback=lambda: self._should_stop_scraper)
+                        
+                        # Store the results
+                        if results:
+                            self.scraping_results = results
                         
                         # If we get here, scraping completed successfully
                         scraping_result.append(True)
@@ -1120,10 +1133,12 @@ class CLIManager:
                 raise scraping_exception[0]
             elif scraping_result:
                 self.performance_display.show_alert("Scraping completed!", alert_type="success")
+                # Automatically stop the display after completion
+                self.performance_display.stop()
             
-            # Wait 5 seconds, then clear screen and show summary
+            # Wait 3 seconds, then clear screen and show summary
             import time
-            time.sleep(5)
+            time.sleep(3)
             self.clear_terminal()
             
             # Check if any matches were found and processed
@@ -1139,6 +1154,13 @@ class CLIManager:
             else:
                 # Show summary even if no new matches but some were skipped
                 self.display_show_scraping_results(self.scraping_results, self.critical_messages)
+            
+            # Automatically navigate to results if matches were found
+            if total_matches > 0:
+                self.logger.info("Automatically navigating to results...")
+                time.sleep(1.0)
+                self.display_show_scraping_results(self.scraping_results, self.critical_messages)
+                time.sleep(2.0)
             
             self.logger.info("Returning to main menu...")
             time.sleep(1.2)
