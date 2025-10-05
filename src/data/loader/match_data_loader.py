@@ -83,7 +83,7 @@ class MatchDataLoader:
             self.update_match_id(match_ids)
             return True
         try:
-            # Execute with retry logic
+            # Execute with retry logic (no cooperative stop passed here yet)
             result = self.retry_manager.retry_network_operation(_load_operation)
             if status_callback:
                 status_callback("Main basketball page loaded.")

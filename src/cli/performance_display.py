@@ -48,6 +48,7 @@ from rich.text import Text
 from threading import Lock
 import time
 from typing import Dict, Any, Optional
+from collections import deque
 
 class PerformanceDisplay:
     """
@@ -69,6 +70,9 @@ class PerformanceDisplay:
         self.batch_current = 0
         self.batch_desc = ""
         self.current_task = ""
+        self.current_match = ""
+        self.subtasks = deque(maxlen=6)
+        self.status_indicators: Dict[str, str] = {}
         self.alert_message = None
         self.alert_type = "info"
         self.lock = Lock()
@@ -238,15 +242,53 @@ class PerformanceDisplay:
         # Compose progress panels
         progress_panel = Panel(self._progress, title="[bold green]Overall Progress", border_style="green")
         batch_panel = Panel(self._batch_progress, title="[bold yellow]Batch Progress", border_style="yellow")
-        task_panel = Panel(Text(self.current_task or "--", style="bold white"), title="[bold blue]Current Task", border_style="blue")
+
+        # Build Current Task content: match header, subtasks list, and recent messages
+        task_table = Table.grid(padding=(0,1))
+        task_table.add_column(justify="left")
+
+        # Match-level line
+        header_line = self.current_task or self.current_match or "Waiting..."
+        task_table.add_row(Text(str(header_line), style="bold white"))
+
+        # Subtasks
+        if self.subtasks:
+            task_table.add_row(Text("", style="dim"))
+            task_table.add_row(Text("Subtasks:", style="bold cyan"))
+            for st in list(self.subtasks)[-6:]:
+                task_table.add_row(Text(f"• {st}", style="white"))
+
+        # Status indicators (bottom of panel)
+        if self.status_indicators:
+            def dot(state: str) -> Text:
+                state_l = (state or "").lower()
+                color = "green" if state_l in ("on", "ok", "healthy", "green") else ("yellow" if state_l in ("warn", "warning", "paused", "degraded", "yellow") else "red")
+                return Text("●", style=f"bold {color}")
+
+            items = list(self.status_indicators.items())
+            status_table = Table.grid(expand=True, padding=(0,1))
+            # Add one centered column per indicator
+            for _ in items:
+                status_table.add_column(justify="center")
+            if items:
+                cells = []
+                for name, state in items:
+                    cells.append(Text.assemble(dot(state), Text(f" {name}", style="bold white")))
+                status_table.add_row(*cells)
+
+            status_inner = Panel(status_table, title="[bold white]Status", border_style="bright_black", expand=True)
+            task_table.add_row(Text("", style="dim"))
+            task_table.add_row(status_inner)
+
+        task_panel = Panel(task_table, title="[bold blue]Current Task", border_style="blue")
         controls_panel = self._render_controls()
         # Stack vertically using split
         progress_stack = Layout(name="progress_stack")
         progress_stack.split(
             Layout(progress_panel, size=4),
             Layout(batch_panel, size=4),
-            Layout(task_panel, size=3),
-            Layout(controls_panel, size=8)  # Increased from 3 to 8 for more width
+            Layout(task_panel, size=12),
+            Layout(controls_panel, size=8)  # Increased width/height for clarity
         )
         return progress_stack
 
@@ -327,6 +369,33 @@ class PerformanceDisplay:
         with self.lock:
             self.current_task = task
             self._refresh_layout()
+
+    def update_current_match(self, task: str):
+        with self.lock:
+            self.current_match = task
+            self._refresh_layout()
+
+    def clear_subtasks(self):
+        with self.lock:
+            self.subtasks.clear()
+            self._refresh_layout()
+
+    def add_subtask(self, subtask: str):
+        with self.lock:
+            if subtask:
+                self.subtasks.append(subtask)
+                self._refresh_layout()
+
+    def update_status_indicators(self, indicators: Dict[str, str]):
+        with self.lock:
+            self.status_indicators = dict(indicators or {})
+            self._refresh_layout()
+
+    def add_message(self, message: str, level: str = "info"):
+        with self.lock:
+            if message:
+                self.messages.append((message, level))
+                self._refresh_layout()
 
     def show_alert(self, message: str, alert_type: str = "info", persist: bool = False, duration: float = 3.0):
         with self.lock:

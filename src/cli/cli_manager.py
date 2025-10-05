@@ -1064,6 +1064,8 @@ class CLIManager:
             self.scraper = FlashscoreScraper(status_callback=self._status_update)
             self._should_stop_scraper = False
             self.performance_display.set_stop_callback(self._stop_scraper)
+            # Reset per-match UI trackers
+            self._last_progress_current = 0
 
             def update_performance_metrics():
                 import time as _time
@@ -1089,6 +1091,60 @@ class CLIManager:
                             'average_processing_time': stats.get('average_match_time', 0)
                         }
                         self.performance_display.update_metrics(metrics)
+
+                        # Build status indicators: Driver, Network, Scraper
+                        try:
+                            driver_state = "red"
+                            if hasattr(self, 'scraper') and getattr(self.scraper, '_driver_manager', None):
+                                dm = self.scraper._driver_manager
+                                # Red only if closing/failed; yellow while initializing
+                                if getattr(dm, '_is_closing', False):
+                                    driver_state = "red"
+                                else:
+                                    drv = getattr(dm, 'driver', None)
+                                    if drv is None:
+                                        driver_state = "yellow"  # initializing
+                                    else:
+                                        # Prefer manager's validity check if available
+                                        try:
+                                            is_valid = False
+                                            if hasattr(dm, '_is_valid_session') and callable(getattr(dm, '_is_valid_session')):
+                                                is_valid = dm._is_valid_session()
+                                            else:
+                                                _ = drv.current_url
+                                                is_valid = True
+                                        except Exception:
+                                            is_valid = False
+                                        driver_state = "green" if is_valid else "yellow"
+                            # Network
+                            from src.core.network_monitor import NetworkMonitor
+                            nm = NetworkMonitor()
+                            # Not monitoring yet → yellow (starting/paused)
+                            if not getattr(nm, 'monitoring', False):
+                                net_state = "yellow"
+                            else:
+                                net_state = "green" if getattr(nm, 'connection_status', True) else "red"
+                                # If consecutive failures detected, degrade to yellow
+                                try:
+                                    net_stats = nm.get_network_stats()
+                                    if net_stats.get('consecutive_failures', 0) > 0 and net_state == "green":
+                                        net_state = "yellow"
+                                except Exception:
+                                    pass
+                            # Scraper paused/stopping
+                            scraper_state = "green"
+                            if getattr(self, '_should_stop_scraper', False):
+                                scraper_state = "red"
+                            elif getattr(self.performance_display, '_paused', False):
+                                scraper_state = "yellow"
+
+                            self.performance_display.update_status_indicators({
+                                'Driver': driver_state,
+                                'Network': net_state,
+                                'Scraper': scraper_state,
+                            })
+                        except Exception:
+                            pass
                         _time.sleep(1)  # Update every second
                 except Exception as e:
                     self.logger.error(f"Error updating performance metrics: {e}")
@@ -1154,9 +1210,18 @@ class CLIManager:
                         batch_desc = f"Batch {batch_number}   ({processed_in_batch}/{batch_total})   {batch_pct:.0f}%"
                         self.performance_display.update_batch_progress(processed_in_batch, batch_total, batch_desc)
                         
-                        # Enhanced task display
+                        # Match change: clear subtasks and set header
+                        if current != getattr(self, "_last_progress_current", 0):
+                            self.performance_display.clear_subtasks()
+                            self.performance_display.update_current_match(f"Processing match {current}/{total}")
+                            self._last_progress_current = current
+
+                        # Enhanced task display and subtasks
                         if task_description:
-                            self.performance_display.update_current_task(f"{task_description} ({current}/{total})")
+                            desc = f"{task_description}"
+                            self.performance_display.update_current_task(f"{desc} ({current}/{total})")
+                            # Also record as a subtask step
+                            self.performance_display.add_subtask(desc + "...")
                         else:
                             self.performance_display.update_current_task(f"Processing match {current} of {total}")
                         
@@ -1200,6 +1265,11 @@ class CLIManager:
 
             try:
                 # Update status and start live display
+                # Startup phase messaging
+                self.performance_display.update_current_task("Initializing...")
+                self.performance_display.clear_subtasks()
+                self.performance_display.add_subtask("Initializing driver...")
+                self.performance_display.add_subtask("Checking network...")
                 self.performance_display.show_status("Scraping in progress...")
                 # Auto-stop the display when the scraper thread finishes
                 def _auto_stop_display():
@@ -1520,6 +1590,16 @@ class CLIManager:
                     self.display.console.print(f"[yellow]⚠️  {display_message}[/yellow]")
                 else:
                     self.display.console.print(display_message)
+
+        # Heuristic: treat certain info lines as subtasks for the current match (but do not store messages)
+        try:
+            display_msg = message.replace('[STATUS]', '').strip()
+            lower = display_msg.lower()
+            if any(v in lower for v in ["loading", "extracting", "verifying", "saving", "parsing", "retrying"]):
+                short = display_msg if len(display_msg) <= 100 else (display_msg[:97] + "...")
+                self.performance_display.add_subtask(short)
+        except Exception:
+            pass
 
         # Surface warnings/errors to the Alerts panel
         try:

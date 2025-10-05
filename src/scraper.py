@@ -712,7 +712,8 @@ class FlashscoreScraper:
                 return matches  # Return the matches list
 
             # Run the main scrape with retry logic and get the matches
-            matches = self.retry_manager.retry_network_operation(main_scrape)
+            # Pass cooperative stop checker so retries bail out during shutdown
+            matches = self.retry_manager.retry_network_operation(main_scrape, stop_checker=(stop_callback if callable(stop_callback) else None))
             
             # Handle case where main_scrape returns None or empty list
             if matches is None:
