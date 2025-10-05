@@ -446,7 +446,15 @@ class FlashscoreScraper:
                 lines.append(f"    H2H {i}: {h2h.date} {h2h.home_team} {h2h.home_score} - {h2h.away_score} {h2h.away_team} ({h2h.competition})")
         lines.append("")
         log_text = '\n'.join(lines)
-        logger.info(log_text)
+        # Only log detailed block at INFO if explicitly enabled; otherwise, use DEBUG
+        try:
+            verbose_details = CONFIG.get('logging', {}).get('log_match_details', False)
+        except Exception:
+            verbose_details = False
+        if verbose_details:
+            logger.info(log_text)
+        else:
+            logger.debug(log_text)
 
     def close(self):
         """
@@ -692,8 +700,14 @@ class FlashscoreScraper:
                 logger.info(summary_msg)
                 if status_callback:
                     status_callback(summary_msg)
-                for m in matches:
-                    FlashscoreScraper.log_match_info(m)
+                # Optionally emit detailed per-match blocks after saving
+                try:
+                    verbose_details = CONFIG.get('logging', {}).get('log_match_details', False)
+                except Exception:
+                    verbose_details = False
+                if verbose_details:
+                    for m in matches:
+                        FlashscoreScraper.log_match_info(m)
                 
                 return matches  # Return the matches list
 

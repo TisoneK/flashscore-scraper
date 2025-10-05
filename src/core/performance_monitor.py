@@ -13,6 +13,9 @@ class MemoryMetrics:
     """Memory usage metrics."""
     current_memory_mb: float = 0.0
     peak_memory_mb: float = 0.0
+    system_memory_used_mb: float = 0.0
+    system_memory_total_mb: float = 0.0
+    system_memory_percent: float = 0.0
     memory_history: deque = field(default_factory=lambda: deque(maxlen=100))
     memory_warnings: int = 0
     memory_critical: int = 0
@@ -23,6 +26,7 @@ class CPUMetrics:
     """CPU usage metrics."""
     current_cpu_percent: float = 0.0
     average_cpu_percent: float = 0.0
+    system_cpu_percent: float = 0.0
     cpu_history: deque = field(default_factory=lambda: deque(maxlen=100))
     cpu_warnings: int = 0
 
@@ -129,6 +133,15 @@ class PerformanceMonitor:
             # Update peak memory
             if current_memory_mb > self.metrics.memory_metrics.peak_memory_mb:
                 self.metrics.memory_metrics.peak_memory_mb = current_memory_mb
+
+            # Update system-wide memory metrics
+            try:
+                vm = psutil.virtual_memory()
+                self.metrics.memory_metrics.system_memory_used_mb = vm.used / 1024 / 1024
+                self.metrics.memory_metrics.system_memory_total_mb = vm.total / 1024 / 1024
+                self.metrics.memory_metrics.system_memory_percent = float(vm.percent)
+            except Exception:
+                pass
                 
         except Exception as e:
             self.logger.debug(f"Error updating memory metrics: {e}")
@@ -145,6 +158,12 @@ class PerformanceMonitor:
             # Calculate average CPU usage
             if self.metrics.cpu_metrics.cpu_history:
                 self.metrics.cpu_metrics.average_cpu_percent = sum(self.metrics.cpu_metrics.cpu_history) / len(self.metrics.cpu_metrics.cpu_history)
+
+            # Update system-wide CPU usage
+            try:
+                self.metrics.cpu_metrics.system_cpu_percent = psutil.cpu_percent(interval=0.1)
+            except Exception:
+                pass
                 
         except Exception as e:
             self.logger.debug(f"Error updating CPU metrics: {e}")
@@ -209,6 +228,9 @@ class PerformanceMonitor:
         return {
             'current_memory_mb': self.metrics.memory_metrics.current_memory_mb,
             'peak_memory_mb': self.metrics.memory_metrics.peak_memory_mb,
+            'system_memory_used_mb': self.metrics.memory_metrics.system_memory_used_mb,
+            'system_memory_total_mb': self.metrics.memory_metrics.system_memory_total_mb,
+            'system_memory_percent': self.metrics.memory_metrics.system_memory_percent,
             'memory_warnings': self.metrics.memory_metrics.memory_warnings,
             'memory_critical': self.metrics.memory_metrics.memory_critical
         }
@@ -218,6 +240,7 @@ class PerformanceMonitor:
         return {
             'current_cpu_percent': self.metrics.cpu_metrics.current_cpu_percent,
             'average_cpu_percent': self.metrics.cpu_metrics.average_cpu_percent,
+            'system_cpu_percent': self.metrics.cpu_metrics.system_cpu_percent,
             'cpu_warnings': self.metrics.cpu_metrics.cpu_warnings
         }
 
@@ -319,6 +342,10 @@ class PerformanceMonitor:
             'memory_usage': memory_summary['current_memory_mb'],
             'peak_memory_usage': memory_summary['peak_memory_mb'],
             'cpu_usage': cpu_summary['current_cpu_percent'],
+            'system_cpu_percent': cpu_summary.get('system_cpu_percent', 0.0),
+            'system_memory_percent': memory_summary.get('system_memory_percent', 0.0),
+            'system_memory_used_mb': memory_summary.get('system_memory_used_mb', 0.0),
+            'system_memory_total_mb': memory_summary.get('system_memory_total_mb', 0.0),
             'average_cpu_usage': cpu_summary['average_cpu_percent'],
             'browser_processes': browser_summary['browser_processes'],
             'browser_memory': browser_summary['browser_memory_mb'],

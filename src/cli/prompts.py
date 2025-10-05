@@ -104,6 +104,11 @@ class ScraperPrompts:
                 choices=["INFO", "DEBUG", "WARNING", "ERROR"],
                 default="INFO"
             ).execute()
+            # Toggle detailed per-match logging
+            settings['log_match_details'] = inquirer.confirm(
+                message="Log detailed per-match blocks (verbose)?",
+                default=False
+            ).execute()
             
         elif category == "Day Selection":
             # Day selection settings

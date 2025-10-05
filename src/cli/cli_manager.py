@@ -85,6 +85,14 @@ class CLIManager:
         self.performance_display = PerformanceDisplay()
         self.performance_display.set_stop_callback(self._stop_scraper)
         self.performance_monitor = PerformanceMonitor()
+        # Batch UI state
+        self._batch_no = None
+        self._batch_start_ts = None
+        # Initial status in alerts panel
+        try:
+            self.performance_display.show_status("Scraping not started!")
+        except Exception:
+            pass
         
     def __del__(self):
         """Ensure cleanup when the object is garbage collected."""
@@ -531,7 +539,12 @@ class CLIManager:
                 self._stop_scraper()
                 # Finally null out scraper
                 self.scraper = None
-                return
+                # Exit the process explicitly to avoid lingering threads
+                try:
+                    import sys
+                    sys.exit(0)
+                except SystemExit:
+                    return
 
     def _clear_and_header(self, context):
         if self.user_settings.get('clear_terminal', True):
@@ -565,7 +578,6 @@ class CLIManager:
                 self.user_settings['default_day'] = selected_day
                 self._save_user_settings(self.user_settings)
             self.start_scraping_with_day(selected_day)
-            self.prompts.ask_back()
             # Do NOT clear after scraping; let user see results
             # Return to main menu on next loop
         elif scraping_mode == "Results":
@@ -1013,6 +1025,14 @@ class CLIManager:
             self.colored_display.console.print(f"  [bold]{k}:[/bold] {v}")
         print()
 
+    def display_show_scraping_results(self, results, critical_messages):
+        """Delegate to ConsoleDisplay to show scraping results summary."""
+        try:
+            if hasattr(self, 'display') and hasattr(self.display, 'show_scraping_results'):
+                self.display.show_scraping_results(results, critical_messages)
+        except Exception as e:
+            self.logger.error(f"Failed to display scraping results: {e}")
+
     def _show_log_file_info(self, log_path):
         """Display information about where logs are being written."""
         print(f"[blue]📝 Logs are being written to: {log_path}[/blue]")
@@ -1046,35 +1066,93 @@ class CLIManager:
             self.performance_display.set_stop_callback(self._stop_scraper)
 
             def update_performance_metrics():
+                import time as _time
                 try:
-                    while not self._should_stop_scraper:
+                    while not self._should_stop_scraper and getattr(self.performance_display, "_is_running", False):
                         # Get latest performance metrics
                         stats = self.performance_monitor.get_stats()
                         
-                        # Update the performance display
+                        # Update the performance display (prefer system-wide metrics when available)
+                        cpu_display = stats.get('system_cpu_percent', stats.get('cpu_usage', 0))
+                        # Show process memory (RSS) to reflect scraper consumption
+                        mem_display = stats.get('memory_usage', 0)
                         metrics = {
-                            'memory_usage': stats.get('memory_usage', 0),
-                            'cpu_usage': stats.get('cpu_usage', 0),
+                            'memory_usage': mem_display,
+                            'memory_system_total_mb': stats.get('system_memory_total_mb', 0),
+                            'memory_system_used_mb': stats.get('system_memory_used_mb', 0),
+                            'memory_system_percent': stats.get('system_memory_percent', 0),
+                            'memory_peak_mb': stats.get('peak_memory_usage', 0),
+                            'cpu_usage': cpu_display,
                             'active_workers': 1,  # Default to 1 worker for now
                             'tasks_processed': stats.get('successful_matches', 0) + stats.get('failed_matches', 0),
                             'success_rate': stats.get('success_rate', 0),
                             'average_processing_time': stats.get('average_match_time', 0)
                         }
                         self.performance_display.update_metrics(metrics)
-                        time.sleep(1)  # Update every second
+                        _time.sleep(1)  # Update every second
                 except Exception as e:
                     self.logger.error(f"Error updating performance metrics: {e}")
+                    # Surface errors to alert panel
+                    try:
+                        self.performance_display.show_alert(f"Performance monitor error: {e}", "error", persist=False, duration=5)
+                    except Exception:
+                        pass
             
+            # Initialize per-match timing tracker and rolling average (in seconds)
+            self._last_match_ts = None
+            self._avg_processing_time = 0.0
+            self._avg_count = 0
+
             def progress_callback(current, total, task_description=None):
                 try:
                     if total > 0:
                         progress_percent = (current / total) * 100
+                        # Overall progress from single source of truth
                         self.performance_display.update_progress(current, total, "Overall")
-                        # Fix batch progress calculation
-                        batch_size = 10
-                        batch_number = (current - 1) // batch_size + 1
-                        batch_progress = ((current - 1) % batch_size) + 1
-                        self.performance_display.update_batch_progress(batch_progress, batch_size, f"Batch {batch_number}")
+
+                        # Update performance monitor counters and timings
+                        try:
+                            pm = self.performance_monitor
+                            # Set total matches if not yet set or if higher value provided
+                            if not pm.metrics.total_matches or total > pm.metrics.total_matches:
+                                pm.metrics.total_matches = total
+                            # Count this as a successful processed match
+                            pm.metrics.successful_matches += 1
+                            # Calculate per-match time as delta from previous callback
+                            now_ts = time.time()
+                            if self._last_match_ts is not None and now_ts > self._last_match_ts:
+                                delta = now_ts - self._last_match_ts
+                                pm.record_match_time(f"match-{current}", delta)
+                                # Maintain simple rolling average locally for display fallback
+                                self._avg_count += 1
+                                self._avg_processing_time += (delta - self._avg_processing_time) / max(1, self._avg_count)
+                            self._last_match_ts = now_ts
+                        except Exception:
+                            pass
+
+                        # Batch progress with actual batch size for final/incomplete batch
+                        batch_size = 10  # logical batch window
+                        import math
+                        total_batches = math.ceil(total / batch_size)
+                        batch_number = math.ceil(current / batch_size)
+                        # Determine actual size of the current batch
+                        if batch_number < total_batches:
+                            batch_total = batch_size
+                        else:
+                            batch_total = total - batch_size * (total_batches - 1)
+                            if batch_total <= 0:
+                                batch_total = batch_size
+                        # Processed within this batch
+                        processed_in_batch = current - batch_size * (batch_number - 1)
+                        if processed_in_batch < 0:
+                            processed_in_batch = 0
+                        if processed_in_batch > batch_total:
+                            processed_in_batch = batch_total
+
+                        # Simplified batch label: show count and percentage only (no ETA)
+                        batch_pct = (processed_in_batch / batch_total) * 100 if batch_total else 0
+                        batch_desc = f"Batch {batch_number}   ({processed_in_batch}/{batch_total})   {batch_pct:.0f}%"
+                        self.performance_display.update_batch_progress(processed_in_batch, batch_total, batch_desc)
                         
                         # Enhanced task display
                         if task_description:
@@ -1089,6 +1167,10 @@ class CLIManager:
                 except Exception as e:
                     self.logger.error(f"Error in progress callback: {e}")
                     # Don't let the callback crash the scraper
+
+            # Start the performance metrics update thread
+            metrics_thread = threading.Thread(target=update_performance_metrics, daemon=True)
+            metrics_thread.start()
 
             log_thread = threading.Thread(target=self._monitor_logs, daemon=True)
             log_thread.start()
@@ -1117,6 +1199,28 @@ class CLIManager:
             self._scraper_thread.start()
 
             try:
+                # Update status and start live display
+                self.performance_display.show_status("Scraping in progress...")
+                # Auto-stop the display when the scraper thread finishes
+                def _auto_stop_display():
+                    try:
+                        import time as _t
+                        while True:
+                            if (hasattr(self, '_scraper_thread') and self._scraper_thread is not None and
+                                hasattr(self._scraper_thread, 'is_alive') and callable(self._scraper_thread.is_alive)):
+                                if not self._scraper_thread.is_alive():
+                                    try:
+                                        # Mark display to stop; alert will be updated in main flow
+                                        self.performance_display.stop()
+                                    except Exception:
+                                        pass
+                                    break
+                            else:
+                                break
+                            _t.sleep(0.2)
+                    except Exception:
+                        pass
+                threading.Thread(target=_auto_stop_display, daemon=True).start()
                 self.performance_display.start()  # This now runs in the main thread and handles controls
             except KeyboardInterrupt:
                 print("\nExiting on Ctrl+C")
@@ -1129,41 +1233,81 @@ class CLIManager:
                 self._should_stop_scraper = True
                 self._scraper_thread.join(timeout=2)
             if scraping_exception:
-                self.performance_display.show_alert("Scraping failed!", alert_type="error")
+                self.performance_display.show_alert("Scraping failed!", alert_type="error", persist=True)
                 raise scraping_exception[0]
             elif scraping_result:
-                self.performance_display.show_alert("Scraping completed!", alert_type="success")
+                # Show summary completion with elapsed time if available
+                try:
+                    total_time = self.performance_monitor.get_stats().get('total_time', 0.0)
+                except Exception:
+                    total_time = 0.0
+                def _fmt_secs(s):
+                    s = int(s)
+                    h = s // 3600
+                    m = (s % 3600) // 60
+                    s = s % 60
+                    return f"{h}h {m}m {s}s"
+                self.performance_display.show_alert(f"Scraping completed in {_fmt_secs(total_time)}", alert_type="success", persist=True)
                 # Automatically stop the display after completion
                 self.performance_display.stop()
             
-            # Wait 3 seconds, then clear screen and show summary
+            # Show summary and stay on results until user chooses to go back
             import time
             time.sleep(3)
             self.clear_terminal()
-            
-            # Check if any matches were found and processed
+
             total_matches = self.scraping_results.get('total_collected', 0)
             new_matches = self.scraping_results.get('new_matches', 0)
             skipped_matches = self.scraping_results.get('skipped_matches', 0)
-            
+            # Build specific reasons if nothing was processed
+            reasons = []
+            try:
+                from .prompts import ScraperPrompts
+            except Exception:
+                pass
+            try:
+                # If there were scheduled but all were already processed
+                scheduled = self.scraping_results.get('scheduled_matches')
+                processed_prev = self.scraping_results.get('processed_matches')
+                if scheduled is not None and processed_prev is not None and scheduled > 0 and new_matches == 0:
+                    reasons.append("All matches were already processed for the selected day.")
+                # If scheduling found zero
+                if scheduled == 0:
+                    reasons.append("No matches are scheduled for the selected day.")
+            except Exception:
+                pass
+
             if total_matches > 0:
+                try:
+                    stats = self.performance_monitor.get_stats()
+                    success = int(stats.get('successful_matches', 0) or 0)
+                    failed = int(stats.get('failed_matches', 0) or 0)
+                    total_pf = success + failed
+                    if total_pf > 0:
+                        self.scraping_results['complete_matches'] = success
+                        self.scraping_results['incomplete_matches'] = failed
+                        self.scraping_results['success_rate'] = float(stats.get('success_rate', 0.0) or 0.0)
+                except Exception:
+                    pass
                 self.display_show_scraping_results(self.scraping_results, self.critical_messages)
+                self.prompts.ask_back()
             elif new_matches == 0 and skipped_matches == 0:
-                # No matches found to process
-                self.display.show_no_matches_found()
+                self.display.show_no_matches_found(reasons if reasons else None)
+                self.prompts.ask_back()
             else:
-                # Show summary even if no new matches but some were skipped
+                try:
+                    stats = self.performance_monitor.get_stats()
+                    success = int(stats.get('successful_matches', 0) or 0)
+                    failed = int(stats.get('failed_matches', 0) or 0)
+                    total_pf = success + failed
+                    if total_pf > 0:
+                        self.scraping_results['complete_matches'] = success
+                        self.scraping_results['incomplete_matches'] = failed
+                        self.scraping_results['success_rate'] = float(stats.get('success_rate', 0.0) or 0.0)
+                except Exception:
+                    pass
                 self.display_show_scraping_results(self.scraping_results, self.critical_messages)
-            
-            # Automatically navigate to results if matches were found
-            if total_matches > 0:
-                self.logger.info("Automatically navigating to results...")
-                time.sleep(1.0)
-                self.display_show_scraping_results(self.scraping_results, self.critical_messages)
-                time.sleep(2.0)
-            
-            self.logger.info("Returning to main menu...")
-            time.sleep(1.2)
+                self.prompts.ask_back()
         except Exception as e:
             self.display.show_error(f"Scraping failed: {str(e)}")
             self.logger.error(f"Scraping error: {e}")
@@ -1202,14 +1346,21 @@ class CLIManager:
                         # Get latest performance metrics
                         stats = self.performance_monitor.get_stats()
                         
-                        # Update the performance display
+                        # Update the performance display (prefer system-wide metrics when available)
+                        cpu_display = stats.get('system_cpu_percent', stats.get('cpu_usage', 0))
+                        # Show process memory (RSS) to reflect scraper consumption
+                        mem_display = stats.get('memory_usage', 0)
                         metrics = {
-                            'memory_usage': stats.get('memory_usage', 0),
-                            'cpu_usage': stats.get('cpu_usage', 0),
+                            'memory_usage': mem_display,
+                            'memory_system_total_mb': stats.get('system_memory_total_mb', 0),
+                            'memory_system_used_mb': stats.get('system_memory_used_mb', 0),
+                            'memory_system_percent': stats.get('system_memory_percent', 0),
+                            'memory_peak_mb': stats.get('peak_memory_usage', 0),
+                            'cpu_usage': cpu_display,
                             'active_workers': 1,  # Default to 1 worker for now
                             'tasks_processed': stats.get('successful_matches', 0) + stats.get('failed_matches', 0),
                             'success_rate': stats.get('success_rate', 0),
-                            'average_processing_time': stats.get('average_match_time', 0)
+                            'average_processing_time': self._avg_processing_time or stats.get('average_match_time', 0)
                         }
                         self.performance_display.update_metrics(metrics)
                         time.sleep(1)  # Update every second
@@ -1370,6 +1521,15 @@ class CLIManager:
                 else:
                     self.display.console.print(display_message)
 
+        # Surface warnings/errors to the Alerts panel
+        try:
+            if level == "error":
+                self.performance_display.show_alert(clean_message, alert_type="error", persist=False, duration=6)
+            elif level == "warning":
+                self.performance_display.show_alert(clean_message, alert_type="warning", persist=False, duration=5)
+        except Exception:
+            pass
+
     def _is_browser_noise(self, message):
         """Check if a message is browser noise that should be filtered out."""
         for pattern in self.browser_noise_patterns:
@@ -1392,6 +1552,19 @@ class CLIManager:
             'timeout', 'not found', 'missing', 'invalid'
         ]):
             self.critical_messages.append(message)
+
+            # Heuristics: update performance monitor on failure lines for real-time stats
+            try:
+                pm = self.performance_monitor
+                msg = message.lower()
+                if 'failed to process match' in msg or 'worker timeout processing match' in msg or 'error processing match' in msg:
+                    pm.metrics.failed_matches += 1
+                # Keep total as sum of success + failed when non-zero
+                total_calc = pm.metrics.successful_matches + pm.metrics.failed_matches
+                if total_calc > 0 and total_calc >= pm.metrics.total_matches:
+                    pm.metrics.total_matches = total_calc
+            except Exception:
+                pass
 
     def _monitor_logs(self):
         """Monitor logs in background thread to capture all errors/warnings for summary display."""
@@ -1570,6 +1743,8 @@ class CLIManager:
             
             if settings.get('log_level'):
                 CONFIG.setdefault('logging', {})['log_level'] = settings['log_level']
+            if 'log_match_details' in settings:
+                CONFIG.setdefault('logging', {})['log_match_details'] = settings['log_match_details']
             
             # Save configuration
             from src.utils.config_loader import save_config

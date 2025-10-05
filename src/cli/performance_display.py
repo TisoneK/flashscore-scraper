@@ -148,6 +148,18 @@ class PerformanceDisplay:
         table.add_column(justify="right", style="bold")
         table.add_column(justify="left")
         metrics = self.metrics.copy()
+        # Helper for coloring percentages
+        def _pct_color(p: float) -> str:
+            try:
+                if p >= 80:
+                    return "red"
+                if p >= 50:
+                    return "yellow"
+                return "green"
+            except Exception:
+                return "white"
+
+        # Primary core metrics
         for key, label in [
             ("memory_usage", "Memory"),
             ("cpu_usage", "CPU"),
@@ -158,14 +170,65 @@ class PerformanceDisplay:
         ]:
             value = metrics.get(key, "--")
             if key == "memory_usage" and value != "--":
-                value = f"{value:.1f} MB"
+                try:
+                    mem_mb = float(value)
+                    if mem_mb >= 1024:
+                        value = f"{mem_mb/1024:.1f} GB"
+                    else:
+                        value = f"{mem_mb:.1f} MB"
+                except Exception:
+                    value = f"{value} MB"
             elif key == "cpu_usage" and value != "--":
-                value = f"{value:.1f}%"
+                try:
+                    cpu_pct = float(value)
+                    color = _pct_color(cpu_pct)
+                    value = Text(f"{cpu_pct:.1f}%", style=f"bold {color}")
+                except Exception:
+                    value = f"{value:.1f}%"
             elif key == "success_rate" and value != "--":
-                value = f"{value:.1f}%"
+                try:
+                    sr = float(value)
+                    # For success rate, invert (higher is better)
+                    color = "green" if sr >= 80 else ("yellow" if sr >= 50 else "red")
+                    value = Text(f"{sr:.1f}%", style=f"bold {color}")
+                except Exception:
+                    value = f"{value:.1f}%"
             elif key == "average_processing_time" and value != "--":
                 value = f"{value:.2f}s"
-            table.add_row(f"{label}", str(value))
+            label_text = Text(f"{label}", style="bold cyan")
+            value_text = value if isinstance(value, Text) else Text(str(value), style="bold white")
+            table.add_row(label_text, value_text)
+
+        # Expanded memory section if system stats are available
+        try:
+            sys_total = float(metrics.get("memory_system_total_mb", 0))
+            sys_used = float(metrics.get("memory_system_used_mb", 0))
+            sys_percent = float(metrics.get("memory_system_percent", 0))
+            peak_mb = float(metrics.get("memory_peak_mb", 0))
+            proc_mb = float(metrics.get("memory_usage", 0)) if metrics.get("memory_usage") is not None else 0.0
+            if sys_total > 0:
+                sys_free = max(0.0, sys_total - sys_used)
+                # Helper for formatting MB/GB
+                def fmt_mb(mb: float) -> str:
+                    return f"{mb/1024:.1f} GB" if mb >= 1024 else f"{mb:.1f} MB"
+                # System totals
+                table.add_row(Text("System Total", style="bold cyan"), Text(fmt_mb(sys_total), style="bold white"))
+                table.add_row(
+                    Text("System Used", style="bold cyan"),
+                    Text(f"{fmt_mb(sys_used)}  ({sys_percent:.1f}%)", style=f"bold {_pct_color(sys_percent)}")
+                )
+                table.add_row(Text("System Free", style="bold cyan"), Text(fmt_mb(sys_free), style="bold white"))
+                # Process memory and peak
+                if proc_mb > 0:
+                    proc_pct = (proc_mb / sys_total) * 100.0
+                    table.add_row(
+                        Text("Scraper (RSS)", style="bold cyan"),
+                        Text(f"{fmt_mb(proc_mb)}  ({proc_pct:.1f}% of total)", style=f"bold {_pct_color(proc_pct)}")
+                    )
+                if peak_mb > 0:
+                    table.add_row(Text("Peak (RSS)", style="bold cyan"), Text(fmt_mb(peak_mb), style="bold white"))
+        except Exception:
+            pass
         return Panel(table, title="[bold magenta]Performance Metrics", border_style="magenta")
 
     def _render_progress(self):
@@ -189,11 +252,13 @@ class PerformanceDisplay:
 
     def _action_pause(self):
         self._paused = not self._paused
-        msg = "Paused." if self._paused else "Resumed."
-        self.show_alert(msg, "info")
+        if self._paused:
+            self.show_status("Scraping paused.")
+        else:
+            self.show_status("Scraping in progress...")
 
     def _action_stop(self):
-        self.show_alert("Stopping scraper...", "error")
+        self.show_alert("Stopping scraper...", "error", persist=True)
         self._should_stop = True
         if self._stop_callback:
             self._stop_callback()
@@ -202,7 +267,7 @@ class PerformanceDisplay:
         self.show_alert("Use ↑/↓ to navigate, Enter to select. Actions: Pause, Stop, Help, Quit, Refresh.", "info")
 
     def _action_quit(self):
-        self.show_alert("Quitting to main menu...", "warning")
+        self.show_alert("Quitting to main menu...", "warning", persist=True)
         self._should_stop = True
         if self._stop_callback:
             self._stop_callback()
@@ -263,19 +328,24 @@ class PerformanceDisplay:
             self.current_task = task
             self._refresh_layout()
 
-    def show_alert(self, message: str, alert_type: str = "info"):
+    def show_alert(self, message: str, alert_type: str = "info", persist: bool = False, duration: float = 3.0):
         with self.lock:
             self.alert_message = message
             self.alert_type = alert_type
             self._refresh_layout()
-            # Auto-clear after 3 seconds
-            def clear():
-                time.sleep(3)
-                with self.lock:
-                    self.alert_message = None
-                    self._refresh_layout()
-            import threading
-            threading.Thread(target=clear, daemon=True).start()
+            if not persist:
+                # Auto-clear after duration seconds
+                def clear():
+                    time.sleep(duration)
+                    with self.lock:
+                        self.alert_message = None
+                        self._refresh_layout()
+                import threading
+                threading.Thread(target=clear, daemon=True).start()
+
+    def show_status(self, message: str):
+        """Show a persistent status message in the alert panel."""
+        self.show_alert(message, alert_type="info", persist=True)
 
     def start(self):
         """Start the display in a non-blocking way."""
