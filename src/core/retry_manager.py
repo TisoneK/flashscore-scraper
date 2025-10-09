@@ -172,8 +172,12 @@ class NetworkRetryManager(RetryManager):
         from src.core.network_monitor import NetworkMonitor
         import threading
         
-        # Check if we're in shutdown mode to suppress retry warnings
-        is_shutting_down = getattr(threading.current_thread(), '_is_shutting_down', False)
+        # Helper to check shutdown state dynamically on each iteration
+        def _is_shutting_down():
+            try:
+                return getattr(threading.current_thread(), '_is_shutting_down', False)
+            except Exception:
+                return False
         # Optional cooperative stop callback passed by callers
         stop_checker = kwargs.pop('stop_checker', None)
         
@@ -182,21 +186,21 @@ class NetworkRetryManager(RetryManager):
         for attempt in range(self.max_attempts):
             # Cooperative cancellation check
             try:
-                if is_shutting_down or (callable(stop_checker) and stop_checker()):
+                if _is_shutting_down() or (callable(stop_checker) and stop_checker()):
                     raise RuntimeError("Operation cancelled by shutdown")
             except Exception:
                 # If stop_checker raised, treat as shutdown
                 raise RuntimeError("Operation cancelled by shutdown")
             if not monitor.is_connected():
-                if not is_shutting_down:
+                if not _is_shutting_down():
                     self.logger.warning("Network down, waiting for reconnection before retrying...")
                 monitor.wait_for_connection(timeout=60)
-                if not is_shutting_down:
+                if not _is_shutting_down():
                     self.logger.info("Network reconnected. Resuming operation...")
             try:
                 with suppress_stderr():
                     result = operation(*args, **kwargs)
-                if attempt > 0 and not is_shutting_down:
+                if attempt > 0 and not _is_shutting_down():
                     self.logger.info(f"Operation succeeded on attempt {attempt + 1}")
                 return result
             except WebDriverException as e:
@@ -204,14 +208,14 @@ class NetworkRetryManager(RetryManager):
                 msg = getattr(e, 'msg', None)
                 msg = msg.splitlines()[0] if msg else str(e)
                 if self._is_network_error(e):
-                    if not is_shutting_down:
+                    if not _is_shutting_down():
                         self.logger.warning(f"Selenium network error: {msg}. Will wait for reconnection and retry.")
                     if attempt < self.max_attempts - 1:
                         delay = self.calculate_delay(attempt)
                         # Cooperative cancellation before sleeping
-                        if is_shutting_down or (callable(stop_checker) and stop_checker()):
+                        if _is_shutting_down() or (callable(stop_checker) and stop_checker()):
                             raise RuntimeError("Operation cancelled by shutdown")
-                        if not is_shutting_down:
+                        if not _is_shutting_down():
                             self.logger.warning(
                                 f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {msg}. "
                                 f"Retrying in {delay:.2f}s..."
@@ -219,7 +223,7 @@ class NetworkRetryManager(RetryManager):
                         time.sleep(delay)
                         continue
                 if attempt >= self.max_attempts - 1:
-                    if not is_shutting_down:
+                    if not _is_shutting_down():
                         self.logger.error(
                             f"Operation failed after {self.max_attempts} attempts. "
                             f"Last error: {e}", exc_info=True
@@ -227,9 +231,9 @@ class NetworkRetryManager(RetryManager):
                     raise
                 else:
                     delay = self.calculate_delay(attempt)
-                    if is_shutting_down or (callable(stop_checker) and stop_checker()):
+                    if _is_shutting_down() or (callable(stop_checker) and stop_checker()):
                         raise RuntimeError("Operation cancelled by shutdown")
-                    if not is_shutting_down:
+                    if not _is_shutting_down():
                         self.logger.warning(
                             f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {e}. "
                             f"Retrying in {delay:.2f}s..."
@@ -238,13 +242,13 @@ class NetworkRetryManager(RetryManager):
             except Exception as e:
                 last_exception = e
                 if self._is_network_error(e):
-                    if not is_shutting_down:
+                    if not _is_shutting_down():
                         self.logger.warning(f"Network error detected: {str(e)}. Will wait for reconnection and retry.")
                     if attempt < self.max_attempts - 1:
                         delay = self.calculate_delay(attempt)
-                        if is_shutting_down or (callable(stop_checker) and stop_checker()):
+                        if _is_shutting_down() or (callable(stop_checker) and stop_checker()):
                             raise RuntimeError("Operation cancelled by shutdown")
-                        if not is_shutting_down:
+                        if not _is_shutting_down():
                             self.logger.warning(
                                 f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {str(e)}. "
                                 f"Retrying in {delay:.2f}s..."
@@ -252,7 +256,7 @@ class NetworkRetryManager(RetryManager):
                         time.sleep(delay)
                         continue
                 if attempt >= self.max_attempts - 1:
-                    if not is_shutting_down:
+                    if not _is_shutting_down():
                         self.logger.error(
                             f"Operation failed after {self.max_attempts} attempts. "
                             f"Last error: {e}", exc_info=True
@@ -260,9 +264,9 @@ class NetworkRetryManager(RetryManager):
                     raise
                 else:
                     delay = self.calculate_delay(attempt)
-                    if is_shutting_down or (callable(stop_checker) and stop_checker()):
+                    if _is_shutting_down() or (callable(stop_checker) and stop_checker()):
                         raise RuntimeError("Operation cancelled by shutdown")
-                    if not is_shutting_down:
+                    if not _is_shutting_down():
                         self.logger.warning(
                             f"Operation failed on attempt {attempt + 1}/{self.max_attempts}: {e}. "
                             f"Retrying in {delay:.2f}s..."

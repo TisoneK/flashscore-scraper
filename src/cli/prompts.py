@@ -16,6 +16,14 @@ class ScraperPrompts:
             default="Start Scraping"
         ).execute()
 
+    def ask_main_action_dynamic(self, choices, default=None):
+        """Ask user for main action with dynamic choices."""
+        return inquirer.select(
+            message="What would you like to do?",
+            choices=choices,
+            default=default or (choices[0] if choices else None)
+        ).execute()
+
     def ask_scraping_day(self):
         """Ask user for which day to scrape."""
         return inquirer.select(
@@ -55,11 +63,15 @@ class ScraperPrompts:
                 "Output Settings",
                 "Logging Settings",
                 "Day Selection",
-                "Terminal Clearing"
+                "Terminal Clearing",
+                "Back"
             ],
             default="Browser Settings"
         ).execute()
         
+        if category == "Back":
+            return {"__back": True}
+
         if category == "Browser Settings":
             # Initialize browser settings if not exists
             if 'browser' not in settings:
@@ -278,6 +290,14 @@ class ScraperPrompts:
             default="Scheduled Matches"
         ).execute()
 
+    def ask_scraping_mode_dynamic(self, choices, default=None):
+        """Ask user for scraping mode with dynamic choices."""
+        return inquirer.select(
+            message="Select scraping mode:",
+            choices=choices,
+            default=default or (choices[0] if choices else None)
+        ).execute()
+
     def ask_results_date(self):
         """Ask user for results scraping date (Yesterday default, Custom Date, Back)."""
         return inquirer.select(
@@ -289,3 +309,71 @@ class ScraperPrompts:
             ],
             default="Yesterday"
         ).execute() 
+
+    # New: Frequency and scheduling prompts
+    def ask_frequency_mode(self):
+        """Ask user how often to run scraping."""
+        return inquirer.select(
+            message="Run scraping:",
+            choices=[
+                "Once",
+                "Repetitive",
+                "Back"
+            ],
+            default="Once"
+        ).execute()
+
+    def ask_repetitive_interval(self):
+        """Ask for a predefined repetitive interval or custom."""
+        return inquirer.select(
+            message="Select frequency:",
+            choices=[
+                "Every 30 minutes",
+                "Every 1 hour",
+                "Every 2 hours",
+                "Every 6 hours",
+                "Every 12 hours",
+                "Every 24 hours",
+                "Set Custom Time",
+                "Back"
+            ],
+            default="Every 1 hour"
+        ).execute()
+
+    def ask_custom_interval_text(self):
+        """Ask for a custom interval (flexible formats)."""
+        return inquirer.text(
+            message="Enter custom interval (e.g., '45m', '45 minutes', 'Every 45 minutes'):"
+        ).execute()
+
+    def ask_start_time(self):
+        """Ask when to start the schedule."""
+        return inquirer.select(
+            message="Start time:",
+            choices=[
+                "Now",
+                "Midday",
+                "Midnight",
+                "Set Custom",
+                "Back"
+            ],
+            default="Now"
+        ).execute()
+
+    def ask_custom_start_time(self):
+        """Ask for a custom start time (HH:MM 24h)."""
+        return inquirer.text(
+            message="Enter start time (HH:MM, 24-hour):"
+        ).execute()
+
+    def ask_schedule_post_action(self):
+        """Ask what to do with the active schedule after scraping finishes."""
+        return inquirer.select(
+            message="Schedule options:",
+            choices=[
+                "Keep schedule running (return to Main Menu)",
+                "Cancel schedule",
+                "Back"
+            ],
+            default="Keep schedule running (return to Main Menu)"
+        ).execute()

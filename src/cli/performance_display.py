@@ -12,6 +12,7 @@ import time
 import threading
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
+import logging
 # Simple color constants for ANSI escape codes
 class Colors:
     """Simple color constants for console output."""
@@ -48,6 +49,7 @@ from rich.text import Text
 from threading import Lock
 import time
 from typing import Dict, Any, Optional
+from datetime import datetime
 from collections import deque
 
 class PerformanceDisplay:
@@ -60,6 +62,8 @@ class PerformanceDisplay:
     - Thread-safe updates
     """
     def __init__(self):
+        # Local logger to avoid NameError in exception handlers
+        self._logger = logging.getLogger(__name__)
         self.console = Console()
         self.layout = Layout()
         self.metrics: Dict[str, Any] = {}
@@ -73,9 +77,13 @@ class PerformanceDisplay:
         self.current_match = ""
         self.subtasks = deque(maxlen=6)
         self.status_indicators: Dict[str, str] = {}
+        self.schedule_label: str = ""
+        self.schedule_next_text: str = ""
+        self._schedule_next_dt: Optional[datetime] = None
         self.alert_message = None
         self.alert_type = "info"
         self.lock = Lock()
+        self._last_schedule_refresh_ts = 0.0
         
         # Initialize progress bars first
         self._progress = Progress(
@@ -258,38 +266,87 @@ class PerformanceDisplay:
             for st in list(self.subtasks)[-6:]:
                 task_table.add_row(Text(f"• {st}", style="white"))
 
-        # Status indicators (bottom of panel)
+        # Status indicators removed from Current Task panel (now rendered as a separate panel below)
+
+        task_panel = Panel(task_table, title="[bold blue]Current Task", border_style="blue")
+        controls_panel = self._render_controls()
+        # Optional schedule panel (separate, centered)
+        schedule_panel = None
+        if self.schedule_label or self.schedule_next_text:
+            schedule_row = Table.grid(expand=True)
+            schedule_row.add_column(justify="center")
+            text_parts = []
+            if self.schedule_label:
+                text_parts.append(Text(f"Schedule: {self.schedule_label}", style="bold cyan"))
+            if self.schedule_next_text:
+                if text_parts:
+                    text_parts.append(Text("  •  ", style="dim"))
+                # Compute countdown if we have a parsed datetime
+                countdown_suffix = ""
+                try:
+                    if self._schedule_next_dt:
+                        remaining = int((self._schedule_next_dt - datetime.now()).total_seconds())
+                        if remaining < 0:
+                            remaining = 0
+                        mins, secs = divmod(remaining, 60)
+                        hours, mins = divmod(mins, 60)
+                        if hours > 0:
+                            countdown_suffix = f" (in {hours}h {mins}m {secs}s)"
+                        else:
+                            countdown_suffix = f" (in {mins}m {secs}s)"
+                except Exception:
+                    countdown_suffix = ""
+                text_parts.append(Text(f"Next: {self.schedule_next_text}{countdown_suffix}", style="bold white"))
+            if text_parts:
+                schedule_line = Text()
+                for part in text_parts:
+                    schedule_line.append(part)
+                schedule_row.add_row(schedule_line)
+                schedule_panel = Panel(schedule_row, title="[bold white]Schedule", border_style="bright_black", expand=True)
+
+        # Optional status panel (separate, centered below schedule)
+        status_panel = None
         if self.status_indicators:
             def dot(state: str) -> Text:
                 state_l = (state or "").lower()
                 color = "green" if state_l in ("on", "ok", "healthy", "green") else ("yellow" if state_l in ("warn", "warning", "paused", "degraded", "yellow") else "red")
                 return Text("●", style=f"bold {color}")
-
-            items = list(self.status_indicators.items())
             status_table = Table.grid(expand=True, padding=(0,1))
-            # Add one centered column per indicator
-            for _ in items:
-                status_table.add_column(justify="center")
+            items = list(self.status_indicators.items())
             if items:
+                for _ in items:
+                    status_table.add_column(justify="center")
                 cells = []
                 for name, state in items:
                     cells.append(Text.assemble(dot(state), Text(f" {name}", style="bold white")))
                 status_table.add_row(*cells)
+                status_panel = Panel(status_table, title="[bold white]Status", border_style="bright_black", expand=True)
 
-            status_inner = Panel(status_table, title="[bold white]Status", border_style="bright_black", expand=True)
-            task_table.add_row(Text("", style="dim"))
-            task_table.add_row(status_inner)
-
-        task_panel = Panel(task_table, title="[bold blue]Current Task", border_style="blue")
-        controls_panel = self._render_controls()
         # Stack vertically using split
         progress_stack = Layout(name="progress_stack")
-        progress_stack.split(
+        # Compose the list of layouts in order
+        # Dynamically size the Current Task panel to free vertical space when content is short
+        try:
+            base_lines = 3  # title + header line + padding
+            subtask_lines = len(self.subtasks) if self.subtasks else 0
+            extra_lines = 2 if subtask_lines > 0 else 0  # "Subtasks:" header + spacer
+            computed = base_lines + extra_lines + subtask_lines
+            # Clamp between 6 and 12 rows
+            task_panel_height = max(6, min(12, computed))
+        except Exception:
+            task_panel_height = 12
+
+        layouts = [
             Layout(progress_panel, size=4),
             Layout(batch_panel, size=4),
-            Layout(task_panel, size=12),
-            Layout(controls_panel, size=8)  # Increased width/height for clarity
-        )
+            Layout(task_panel, size=task_panel_height)
+        ]
+        if schedule_panel is not None:
+            layouts.append(Layout(schedule_panel, size=3))
+        if status_panel is not None:
+            layouts.append(Layout(status_panel, size=3))
+        layouts.append(Layout(controls_panel, size=8))
+        progress_stack.split(*layouts)
         return progress_stack
 
     def _action_pause(self):
@@ -391,6 +448,23 @@ class PerformanceDisplay:
             self.status_indicators = dict(indicators or {})
             self._refresh_layout()
 
+    def update_schedule_info(self, label: Optional[str], next_text: Optional[str]):
+        with self.lock:
+            self.schedule_label = label or ""
+            self.schedule_next_text = next_text or ""
+            # Best-effort parse of next run time for countdown rendering
+            self._schedule_next_dt = None
+            try:
+                if self.schedule_next_text and self.schedule_next_text.lower() != "now":
+                    # Expecting format like 'YYYY-MM-DD HH:MM'
+                    self._schedule_next_dt = datetime.strptime(self.schedule_next_text, '%Y-%m-%d %H:%M')
+                else:
+                    # Immediate run
+                    self._schedule_next_dt = datetime.now()
+            except Exception:
+                self._schedule_next_dt = None
+            self._refresh_layout()
+
     def add_message(self, message: str, level: str = "info"):
         with self.lock:
             if message:
@@ -440,14 +514,20 @@ class PerformanceDisplay:
                 self._update_display()
                 time.sleep(0.1)  # More responsive to input
         except Exception as e:
-            logger.error(f"Error in display loop: {e}")
+            try:
+                self._logger.error(f"Error in display loop: {e}")
+            except Exception:
+                pass
             raise
         finally:
             if self._live is not None:
                 try:
                     self._live.__exit__(None, None, None)
                 except Exception as e:
-                    logger.error(f"Error stopping live display: {e}")
+                    try:
+                        self._logger.error(f"Error stopping live display: {e}")
+                    except Exception:
+                        pass
                 finally:
                     self._live = None
 
@@ -519,3 +599,13 @@ class PerformanceDisplay:
             self._should_stop = True
             if self._stop_callback:
                 self._stop_callback() 
+        finally:
+            # Ensure the schedule countdown stays live by refreshing roughly once per second
+            try:
+                if self._schedule_next_dt is not None:
+                    now_ts = time.time()
+                    if now_ts - self._last_schedule_refresh_ts >= 1.0:
+                        self._last_schedule_refresh_ts = now_ts
+                        self._refresh_layout()
+            except Exception:
+                pass

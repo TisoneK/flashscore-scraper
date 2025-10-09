@@ -47,6 +47,7 @@ class CLIManager:
         self.user_settings = self._load_user_settings()
         self.display = ConsoleDisplay()
         self.prompts = ScraperPrompts()
+        # No toolbar: use window title for live countdown overlay
         self.colored_display = ColoredDisplay()
         self._is_running = False
         self._should_stop_scraper = False
@@ -85,6 +86,9 @@ class CLIManager:
         self.performance_display = PerformanceDisplay()
         self.performance_display.set_stop_callback(self._stop_scraper)
         self.performance_monitor = PerformanceMonitor()
+        # Schedule tracking for main menu snapshot
+        self._schedule_label = ""
+        self._schedule_next_run = None
         # Batch UI state
         self._batch_no = None
         self._batch_start_ts = None
@@ -518,10 +522,44 @@ class CLIManager:
     def show_main_menu(self):
         while True:
             self._clear_and_header('main')
-            action = self.prompts.ask_main_action()
+            # If a schedule is running, show a snapshot of countdown in the main menu
+            try:
+                self._print_schedule_snapshot_in_main_menu()
+            except Exception:
+                pass
+            try:
+                # Build dynamic main menu choices
+                choices = []
+                if hasattr(self, '_schedule_thread') and self._schedule_thread and self._schedule_thread.is_alive():
+                    choices.append("Stop Running Schedule")
+                choices.extend([
+                    "Start Scraping",
+                    "Configure Settings",
+                    "View Status",
+                    "Prediction",
+                    "Exit"
+                ])
+                action = self.prompts.ask_main_action_dynamic(choices, default=choices[0])
+            except RuntimeError as e:
+                # Recover from PromptToolkit executor shutdown by recreating prompt loop
+                try:
+                    self.logger.warning(f"Prompt recovered after executor shutdown: {e}")
+                except Exception:
+                    pass
+                continue
             
             if action == "Start Scraping":
                 self.handle_scraping_selection()
+            elif action == "Stop Running Schedule":
+                # Gracefully stop background schedule
+                self._stop_background_schedule()
+                try:
+                    self.performance_display.update_schedule_info("", "")
+                except Exception:
+                    pass
+                self._schedule_label = ""
+                self._schedule_next_run = None
+                print("\n[Schedule] Background schedule canceled.\n")
             elif action == "Configure Settings":
                 self.configure_settings()
             elif action == "View Status":
@@ -529,6 +567,28 @@ class CLIManager:
             elif action == "Prediction":
                 self.run_prediction_menu()
             elif action == "Exit":
+                # Stop background schedule if running and notify
+                try:
+                    was_running = hasattr(self, '_schedule_thread') and self._schedule_thread and self._schedule_thread.is_alive()
+                except Exception:
+                    was_running = False
+                try:
+                    self._stop_background_schedule()
+                except Exception:
+                    pass
+                # Clear schedule info in UI and snapshot
+                try:
+                    self.performance_display.update_schedule_info("", "")
+                except Exception:
+                    pass
+                self._schedule_label = ""
+                self._schedule_next_run = None
+                if was_running:
+                    try:
+                        print("\n[Schedule] Background schedule canceled.\n")
+                    except Exception:
+                        pass
+                # Now show goodbye and proceed to shutdown
                 self.colored_display.show_goodbye()
                 self._is_running = False
                 self._is_closing = True
@@ -565,9 +625,27 @@ class CLIManager:
     def handle_scraping_selection(self):
         self._clear_and_header('scraping')
         # New: Ask for scraping mode
-        scraping_mode = self.prompts.ask_scraping_mode()
+        # Build dynamic scraping choices
+        choices = []
+        if hasattr(self, '_schedule_thread') and self._schedule_thread and self._schedule_thread.is_alive():
+            # Scheduling actions first when active
+            choices.append("Start on schedule")
+            choices.append("Run scheduled scraper now")
+        choices.extend([
+            "Scheduled Matches",
+            "Results",
+            "Back"
+        ])
+        scraping_mode = self.prompts.ask_scraping_mode_dynamic(choices, default=choices[0])
         if scraping_mode == "Back":
             return  # Go back to main menu
+        if scraping_mode == "Start on schedule":
+            # Do nothing; background scheduler will run at the planned time
+            return
+        if scraping_mode == "Run scheduled scraper now":
+            # Start scraping immediately; keep the background schedule intact
+            self.start_scraping_with_day(self.user_settings.get('default_day', 'Today'))
+            return
         if scraping_mode == "Scheduled Matches":
             # Existing scheduled matches flow
             default_day = self.user_settings.get('default_day', 'Today')
@@ -577,7 +655,76 @@ class CLIManager:
             if selected_day != default_day:
                 self.user_settings['default_day'] = selected_day
                 self._save_user_settings(self.user_settings)
-            self.start_scraping_with_day(selected_day)
+            # New: frequency and start-time flow
+            freq_mode = self.prompts.ask_frequency_mode()
+            if freq_mode == "Back":
+                return
+            if freq_mode == "Once":
+                try:
+                    self.performance_display.update_schedule_info("Once", "Now")
+                except Exception:
+                    pass
+                self.start_scraping_with_day(selected_day)
+            else:
+                # Repetitive
+                interval_choice = self.prompts.ask_repetitive_interval()
+                if interval_choice == "Back":
+                    return
+                if interval_choice == "Set Custom Time":
+                    custom_text = self.prompts.ask_custom_interval_text()
+                    interval_seconds = self._parse_interval_to_seconds(custom_text)
+                else:
+                    interval_seconds = self._map_interval_choice(interval_choice)
+                if not interval_seconds or interval_seconds <= 0:
+                    self.display.show_error("Invalid interval. Please try again.")
+                    return
+
+                start_choice = self.prompts.ask_start_time()
+                if start_choice == "Back":
+                    return
+                start_dt = self._resolve_start_time(start_choice)
+                if start_dt is None:
+                    custom_time = self.prompts.ask_custom_start_time()
+                    start_dt = self._parse_custom_start_time(custom_time)
+                    if start_dt is None:
+                        self.display.show_error("Invalid start time format. Use HH:MM (24-hour).")
+                        return
+
+                # Determine frequency label once
+                try:
+                    label = f"Every {interval_choice.split('Every ')[1]}" if interval_choice != "Set Custom Time" else f"Every {custom_text}"
+                except Exception:
+                    label = "Repetitive"
+                # If start time is now/past: run first cycle interactively, then background schedule
+                from datetime import datetime, timedelta
+                now_dt = datetime.now()
+                if start_dt <= now_dt:
+                    # Compute and show the true next run BEFORE starting immediate scraping
+                    next_dt = now_dt + timedelta(seconds=interval_seconds)
+                    try:
+                        self.performance_display.update_schedule_info(label, next_dt.strftime('%Y-%m-%d %H:%M'))
+                        self._schedule_label = label
+                        self._schedule_next_run = next_dt
+                    except Exception:
+                        pass
+                    self.start_scraping_with_day(selected_day)
+                    self._start_background_schedule(selected_day, interval_seconds, next_dt)
+                else:
+                    # First run is in the future: start scheduler immediately
+                    try:
+                        self.performance_display.update_schedule_info(label, start_dt.strftime('%Y-%m-%d %H:%M'))
+                        self._schedule_label = label
+                        self._schedule_next_run = start_dt
+                    except Exception:
+                        pass
+                    self._start_background_schedule(selected_day, interval_seconds, start_dt)
+
+                # Prompt user what to do with schedule
+                choice = self.prompts.ask_schedule_post_action()
+                if choice == "Cancel schedule":
+                    self._stop_background_schedule()
+                    self.performance_display.update_schedule_info("", "")
+                # If keep running or back, return to main menu; countdown continues
             # Do NOT clear after scraping; let user see results
             # Return to main menu on next loop
         elif scraping_mode == "Results":
@@ -1775,10 +1922,302 @@ class CLIManager:
         numbers = re.findall(r'\d+', text)
         return int(numbers[0]) if numbers else 0
 
+    # =====================
+    # Scheduling utilities
+    # =====================
+    def _map_interval_choice(self, choice: str) -> int:
+        """Map predefined interval choice to seconds."""
+        mapping = {
+            "Every 30 minutes": 30 * 60,
+            "Every 1 hour": 60 * 60,
+            "Every 2 hours": 2 * 60 * 60,
+            "Every 6 hours": 6 * 60 * 60,
+            "Every 12 hours": 12 * 60 * 60,
+            "Every 24 hours": 24 * 60 * 60,
+        }
+        return mapping.get(choice, 0)
+
+    def _parse_interval_to_seconds(self, text: str) -> int:
+        """Parse flexible interval strings into seconds.
+        Accepts: 'Every 45 minutes', '45 minutes', '45 mins', '45 min', '45 m', '45m', '2h', '2 hours'.
+        """
+        try:
+            if not text:
+                return 0
+            s = text.strip().lower()
+            if s.startswith("every "):
+                s = s[6:].strip()
+            import re as _re
+            m = _re.match(r"^(\d+)\s*([a-z]+)?$", s) or _re.match(r"^(\d+)([a-z]+)$", s)
+            if not m:
+                return 0
+            value = int(m.group(1))
+            unit = (m.group(2) or "m").lower()
+            if unit in ("m", "min", "mins", "minute", "minutes"):
+                return value * 60
+            if unit in ("h", "hr", "hrs", "hour", "hours"):
+                return value * 60 * 60
+            return 0
+        except Exception:
+            return 0
+
+    def _resolve_start_time(self, start_choice):
+        """Return datetime for Now/Midday/Midnight; None for custom."""
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        if start_choice == "Now":
+            return now
+        if start_choice == "Midday":
+            dt = now.replace(hour=12, minute=0, second=0, microsecond=0)
+            return dt if dt > now else dt + timedelta(days=1)
+        if start_choice == "Midnight":
+            dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            return dt if dt > now else dt + timedelta(days=1)
+        if start_choice == "Set Custom":
+            return None
+        return now
+
+    def _parse_custom_start_time(self, time_text: str):
+        """Parse HH:MM 24-hour to next occurrence datetime."""
+        from datetime import datetime, timedelta
+        try:
+            if not time_text:
+                return None
+            t = time_text.strip()
+            hh, mm = t.split(":")
+            hh = int(hh)
+            mm = int(mm)
+            now = datetime.now()
+            dt = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if dt <= now:
+                dt = dt + timedelta(days=1)
+            return dt
+        except Exception:
+            return None
+
+    def _run_repetitive_schedule(self, day: str, interval_seconds: int, start_dt):
+        """Run scraping on a repetitive schedule until user stops (blocking)."""
+        import time as _time
+        from datetime import datetime, timedelta
+        next_run = start_dt if start_dt else datetime.now()
+        self._clear_and_header('scraping')
+        # Simple banner
+        freq_label = f"{interval_seconds//60} min" if interval_seconds < 3600 else f"{interval_seconds//3600} hr"
+        print(f"Scheduling: every {freq_label} starting at {next_run.strftime('%Y-%m-%d %H:%M')}")
+        try:
+            while True:
+                now = datetime.now()
+                if now < next_run:
+                    remaining = int((next_run - now).total_seconds())
+                    mins, secs = divmod(remaining, 60)
+                    print(f"Next run in {mins:02d}:{secs:02d} (at {next_run.strftime('%H:%M')})\r", end="")
+                    # Keep schedule info fresh in UI
+                    try:
+                        freq_label = f"{interval_seconds//60} min" if interval_seconds < 3600 else f"{interval_seconds//3600} hr"
+                        # Feed absolute time for precise countdown in Schedule panel
+                        next_text = next_run.strftime('%Y-%m-%d %H:%M')
+                        self.performance_display.update_schedule_info(f"Every {freq_label}", next_text)
+                        # Keep snapshot state for main menu
+                        self._schedule_label = f"Every {freq_label}"
+                        self._schedule_next_run = next_run
+                    except Exception:
+                        pass
+                    _time.sleep(1)
+                    if getattr(self, '_is_closing', False):
+                        break
+                    continue
+                print("\nStarting scheduled scraping...")
+                self.start_scraping_with_day(day)
+                next_run = next_run + timedelta(seconds=interval_seconds)
+                while next_run <= datetime.now():
+                    next_run = next_run + timedelta(seconds=interval_seconds)
+                # Update next run in UI after completion
+                try:
+                    freq_label = f"{interval_seconds//60} min" if interval_seconds < 3600 else f"{interval_seconds//3600} hr"
+                    next_text = next_run.strftime('%Y-%m-%d %H:%M')
+                    self.performance_display.update_schedule_info(f"Every {freq_label}", next_text)
+                    self._schedule_label = f"Every {freq_label}"
+                    self._schedule_next_run = next_run
+                except Exception:
+                    pass
+                if getattr(self, '_is_closing', False):
+                    break
+        except KeyboardInterrupt:
+            print("\nSchedule stopped by user.")
+
+    def _start_background_schedule(self, day: str, interval_seconds: int, start_dt):
+        """Start the scheduler in a background thread and keep countdown visible in UI."""
+        import threading
+        self._schedule_stop_flag = False
+        # Start or refresh a window-title countdown updater
+        try:
+            self._start_window_title_countdown()
+        except Exception:
+            pass
+
+        def _runner():
+            import time as _time
+            from datetime import datetime, timedelta
+            next_run = start_dt if start_dt else datetime.now()
+            try:
+                while not getattr(self, '_schedule_stop_flag', False):
+                    now = datetime.now()
+                    if now < next_run:
+                        # Update schedule info frequently
+                        try:
+                            freq_label = f"{interval_seconds//60} min" if interval_seconds < 3600 else f"{interval_seconds//3600} hr"
+                            next_text = next_run.strftime('%Y-%m-%d %H:%M')
+                            self.performance_display.update_schedule_info(f"Every {freq_label}", next_text)
+                            self._schedule_label = f"Every {freq_label}"
+                            self._schedule_next_run = next_run
+                        except Exception:
+                            pass
+                        _time.sleep(1)
+                        continue
+                    # Run scraping once (silent, no prompts/UI)
+                    try:
+                        self._run_scrape_silent(day)
+                    except Exception:
+                        pass
+                    # Compute next
+                    next_run = next_run + timedelta(seconds=interval_seconds)
+                    while next_run <= datetime.now():
+                        next_run = next_run + timedelta(seconds=interval_seconds)
+                    # Reflect new next_run in snapshot right away
+                    try:
+                        freq_label = f"{interval_seconds//60} min" if interval_seconds < 3600 else f"{interval_seconds//3600} hr"
+                        self.performance_display.update_schedule_info(f"Every {freq_label}", next_run.strftime('%Y-%m-%d %H:%M'))
+                        self._schedule_label = f"Every {freq_label}"
+                        self._schedule_next_run = next_run
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        self._schedule_thread = threading.Thread(target=_runner, daemon=True)
+        self._schedule_thread.start()
+
+    def _print_schedule_snapshot_in_main_menu(self):
+        """Render a single-line countdown snapshot in the main menu if a schedule exists."""
+        try:
+            label = self._schedule_label or getattr(self.performance_display, 'schedule_label', '')
+            next_dt = self._schedule_next_run
+            # Best-effort parse from display if local state missing
+            if next_dt is None:
+                next_text = getattr(self.performance_display, 'schedule_next_text', '')
+                try:
+                    if next_text and next_text.lower() != 'now':
+                        next_dt = datetime.strptime(next_text, '%Y-%m-%d %H:%M')
+                    else:
+                        next_dt = datetime.now()
+                except Exception:
+                    next_dt = None
+            if label and next_dt:
+                remaining = int((next_dt - datetime.now()).total_seconds())
+                if remaining < 0:
+                    remaining = 0
+                mins, secs = divmod(remaining, 60)
+                hours, mins = divmod(mins, 60)
+                countdown = f"{hours}h {mins}m {secs}s" if hours > 0 else f"{mins}m {secs}s"
+                print(f"[Schedule] {label}  |  Next run in {countdown} (at {next_dt.strftime('%H:%M')})\n")
+        except Exception:
+            pass
+
+    # Removed intrusive menu countdown updater; now using Inquirer bottom_toolbar.
+
+    def _stop_background_schedule(self):
+        """Signal the background scheduler to stop and join thread."""
+        try:
+            self._schedule_stop_flag = True
+            if hasattr(self, '_schedule_thread') and self._schedule_thread and self._schedule_thread.is_alive():
+                self._schedule_thread.join(timeout=2)
+            # Stop window title updater
+            self._stop_window_title_countdown()
+        except Exception:
+            pass
+
+    def _start_window_title_countdown(self):
+        """Update the terminal window title with countdown every second (non-intrusive)."""
+        try:
+            if getattr(self, '_title_updater_thread', None) and self._title_updater_thread.is_alive():
+                return
+            self._title_updater_stop = False
+            import threading
+            def _tick():
+                import time as _t
+                while not getattr(self, '_title_updater_stop', False):
+                    try:
+                        label = self._schedule_label or getattr(self.performance_display, 'schedule_label', '')
+                        next_dt = self._schedule_next_run
+                        if next_dt is None:
+                            next_text = getattr(self.performance_display, 'schedule_next_text', '')
+                            if next_text and next_text.lower() != 'now':
+                                next_dt = datetime.strptime(next_text, '%Y-%m-%d %H:%M')
+                        if label and next_dt:
+                            remaining = int((next_dt - datetime.now()).total_seconds())
+                            if remaining < 0:
+                                remaining = 0
+                            mins, secs = divmod(remaining, 60)
+                            hours, mins = divmod(mins, 60)
+                            countdown = f"{hours}h {mins}m {secs}s" if hours > 0 else f"{mins}m {secs}s"
+                            title = f"Flashscore Scraper - Next in {countdown} (at {next_dt.strftime('%H:%M')})"
+                            # Windows Powershell compatible title set
+                            sys.stdout.write(f"\33]0;{title}\7")
+                            try:
+                                sys.stdout.flush()
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    _t.sleep(1)
+            self._title_updater_thread = threading.Thread(target=_tick, daemon=True)
+            self._title_updater_thread.start()
+        except Exception:
+            pass
+
+    def _stop_window_title_countdown(self):
+        try:
+            self._title_updater_stop = True
+            t = getattr(self, '_title_updater_thread', None)
+            if t and t.is_alive():
+                t.join(timeout=0.5)
+            # Clear title suffix
+            try:
+                sys.stdout.write("\33]0;Flashscore Scraper\7")
+                sys.stdout.flush()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _run_scrape_silent(self, day: str):
+        """Run a single scrape cycle without interactive UI or prompts (for background scheduling)."""
+        try:
+            # Minimal logging setup
+            logging_config = CONFIG.get('logging', {})
+            logging_config['log_to_console'] = False
+            log_dir = logging_config.get('log_directory', 'logs')
+            os.makedirs(log_dir, exist_ok=True)
+            file_date = get_scraping_date(day)
+            scraper_log_path = os.path.join(log_dir, f"scraper_{file_date}.log")
+            ensure_logging_configured(scraper_log_path)
+
+            # Create scraper and run
+            scraper = FlashscoreScraper(status_callback=self._status_update)
+            scraper.scrape(progress_callback=None, day=day, status_callback=self._status_update, stop_callback=lambda: getattr(self, '_schedule_stop_flag', False))
+        except Exception as e:
+            try:
+                self.logger.error(f"Background schedule scrape error: {e}")
+            except Exception:
+                pass
+
     def configure_settings(self):
         self._clear_and_header('settings')
         settings = self.prompts.ask_settings()
         try:
+            # If user chose Back, just return
+            if isinstance(settings, dict) and settings.get('__back'):
+                return
             # Handle driver management actions
             if 'driver_action' in settings:
                 driver_action = settings['driver_action']
