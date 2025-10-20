@@ -78,6 +78,7 @@
     "selectors": {
         "match": {
             "scheduled": "div.event__match--scheduled",
+            "link": "a.eventRowLink[href*=\"basketball\"]",
             "teams": {
                 "home": "div.duelParticipant__home .participant__participantName",
                 "away": "div.duelParticipant__away .participant__participantName",

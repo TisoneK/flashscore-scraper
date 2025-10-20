@@ -47,13 +47,16 @@ class NetworkMonitor:
             self.monitor_thread = None
             self.connection_status = True  # Assume connected initially
             self.check_interval = 5  # Check every 5 seconds
-            self.host = "8.8.8.8"  # Google DNS
+            # Prefer Cloudflare DNS for broader ICMP allowance; allow override via env
+            import os
+            self.host = os.getenv("FS_NET_MONITOR_HOST", "1.1.1.1")  # Cloudflare DNS
             self.timeout = 3  # Ping timeout in seconds
             self.alert_callbacks = []
             self.connection_quality_metrics = {
                 'total_checks': 0,
                 'successful_checks': 0,
                 'failed_checks': 0,
+                'consecutive_failures': 0,
                 'average_response_time': 0.0,
                 'last_response_time': 0.0
             }
@@ -72,11 +75,13 @@ class NetworkMonitor:
             True if connected, False otherwise
         """
         try:
-            response_time = ping(self.host, timeout=self.timeout)
+            response_time = ping(self.host, timeout=self.timeout, unit="ms")
             if response_time is not None:
                 self.connection_quality_metrics['last_response_time'] = response_time
                 self.connection_quality_metrics['total_checks'] += 1
                 self.connection_quality_metrics['successful_checks'] += 1
+                # Reset consecutive failures on success
+                self.connection_quality_metrics['consecutive_failures'] = 0
                 # Update average response time
                 total_checks = self.connection_quality_metrics['total_checks']
                 current_avg = self.connection_quality_metrics['average_response_time']
@@ -87,11 +92,13 @@ class NetworkMonitor:
             else:
                 self.connection_quality_metrics['total_checks'] += 1
                 self.connection_quality_metrics['failed_checks'] += 1
+                self.connection_quality_metrics['consecutive_failures'] += 1
                 return False
         except Exception as e:
             self.logger.debug(f"Ping failed: {e}")
             self.connection_quality_metrics['total_checks'] += 1
             self.connection_quality_metrics['failed_checks'] += 1
+            self.connection_quality_metrics['consecutive_failures'] += 1
             return False
 
     def wait_for_connection(self, timeout: int = 60) -> bool:
@@ -286,7 +293,11 @@ class NetworkMonitor:
             True if connection is degraded, False otherwise
         """
         quality = self.get_connection_quality()
-        return quality['success_rate'] < 0.8  # Less than 80% success rate
+        # Degrade only when there is enough signal: require at least 5 checks
+        if quality.get('total_checks', 0) < 5:
+            return False
+        # Less than 80% success rate indicates degradation
+        return quality['success_rate'] < 0.8
 
     def record_response_time(self, response_time: float) -> None:
         """Record a response time measurement.
@@ -317,11 +328,13 @@ class NetworkMonitor:
         """Record a network failure."""
         self.connection_quality_metrics['failed_checks'] += 1
         self.connection_quality_metrics['successful_checks'] = 0
+        self.connection_quality_metrics['consecutive_failures'] = self.connection_quality_metrics.get('consecutive_failures', 0) + 1
 
     def record_success(self) -> None:
         """Record a network success."""
         self.connection_quality_metrics['successful_checks'] = self.connection_quality_metrics['total_checks']
         self.connection_quality_metrics['failed_checks'] = 0
+        self.connection_quality_metrics['consecutive_failures'] = 0
 
     def get_network_stats(self) -> Dict:
         """Get current network statistics.
@@ -334,7 +347,7 @@ class NetworkMonitor:
         
         stats = {
             'is_healthy': self.connection_quality_metrics['successful_checks'] > 0,
-            'consecutive_failures': self.connection_quality_metrics['failed_checks'],
+            'consecutive_failures': self.connection_quality_metrics.get('consecutive_failures', 0),
             'last_check_time': self.connection_quality_metrics['last_response_time']
         }
         

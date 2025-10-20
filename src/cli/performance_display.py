@@ -136,16 +136,24 @@ class PerformanceDisplay:
             Layout(self._render_alert(), name="alert", size=3)
         )
         
-        # Create the body layout with metrics and progress
+        # Create the body layout: left column holds Metrics (top) and Controls (below),
+        # right column holds the progress and task stack
         self.layout["body"].split_row(
-            Layout(self._render_metrics(), name="metrics", ratio=1),
+            Layout(name="left", ratio=1),
             Layout(self._render_progress(), name="progress", ratio=2)
+        )
+        # Left column split to place Controls below Performance Metrics
+        self.layout["body"]["left"].split(
+            Layout(self._render_metrics(), name="metrics", size=16),
+            Layout(name="status", size=3),
+            Layout(self._render_controls(), name="controls", ratio=1)
         )
         
         # Ensure all panels have proper borders and titles
         self.layout["header"].update(self._render_header())
-        self.layout["body"]["metrics"].update(self._render_metrics())
+        self.layout["body"]["left"]["metrics"].update(self._render_metrics())
         self.layout["body"]["progress"].update(self._render_progress())
+        self.layout["body"]["left"]["controls"].update(self._render_controls())
         self.layout["alert"].update(self._render_alert())
 
     def _render_header(self):
@@ -206,7 +214,13 @@ class PerformanceDisplay:
                 except Exception:
                     value = f"{value:.1f}%"
             elif key == "average_processing_time" and value != "--":
-                value = f"{value:.2f}s"
+                try:
+                    v = float(value)
+                    if v > 0 and v < 0.01:
+                        v = 0.01
+                    value = f"{v:.2f}s"
+                except Exception:
+                    value = f"{value:.2f}s"
             label_text = Text(f"{label}", style="bold cyan")
             value_text = value if isinstance(value, Text) else Text(str(value), style="bold white")
             table.add_row(label_text, value_text)
@@ -269,7 +283,6 @@ class PerformanceDisplay:
         # Status indicators removed from Current Task panel (now rendered as a separate panel below)
 
         task_panel = Panel(task_table, title="[bold blue]Current Task", border_style="blue")
-        controls_panel = self._render_controls()
         # Optional schedule panel (separate, centered)
         schedule_panel = None
         if self.schedule_label or self.schedule_next_text:
@@ -302,50 +315,36 @@ class PerformanceDisplay:
                 for part in text_parts:
                     schedule_line.append(part)
                 schedule_row.add_row(schedule_line)
-                schedule_panel = Panel(schedule_row, title="[bold white]Schedule", border_style="bright_black", expand=True)
+                # Use a distinct border color for the schedule panel for better visibility
+                schedule_panel = Panel(schedule_row, title="[bold white]Schedule", border_style="cyan", expand=True)
 
-        # Optional status panel (separate, centered below schedule)
-        status_panel = None
-        if self.status_indicators:
-            def dot(state: str) -> Text:
-                state_l = (state or "").lower()
-                color = "green" if state_l in ("on", "ok", "healthy", "green") else ("yellow" if state_l in ("warn", "warning", "paused", "degraded", "yellow") else "red")
-                return Text("●", style=f"bold {color}")
-            status_table = Table.grid(expand=True, padding=(0,1))
-            items = list(self.status_indicators.items())
-            if items:
-                for _ in items:
-                    status_table.add_column(justify="center")
-                cells = []
-                for name, state in items:
-                    cells.append(Text.assemble(dot(state), Text(f" {name}", style="bold white")))
-                status_table.add_row(*cells)
-                status_panel = Panel(status_table, title="[bold white]Status", border_style="bright_black", expand=True)
+        # Tip panel shown under schedule with guidance for terminal zoom
+        tip_text = Text()
+        tip_text.append("• If text appears too large or panels overlap, reduce terminal zoom with Ctrl + -\n", style="bold cyan")
+        tip_text.append("• If text appears too small, increase terminal zoom with Ctrl + +", style="bold cyan")
+        tip_panel = Panel(
+            tip_text,
+            title="[bold white]Tip",
+            border_style="bright_black",
+            expand=True
+        )
+
+        # Status panel now rendered in left column below metrics; omit here
 
         # Stack vertically using split
         progress_stack = Layout(name="progress_stack")
         # Compose the list of layouts in order
-        # Dynamically size the Current Task panel to free vertical space when content is short
-        try:
-            base_lines = 3  # title + header line + padding
-            subtask_lines = len(self.subtasks) if self.subtasks else 0
-            extra_lines = 2 if subtask_lines > 0 else 0  # "Subtasks:" header + spacer
-            computed = base_lines + extra_lines + subtask_lines
-            # Clamp between 6 and 12 rows
-            task_panel_height = max(6, min(12, computed))
-        except Exception:
-            task_panel_height = 12
+        # Make Current Task expand vertically to take remaining space
 
         layouts = [
             Layout(progress_panel, size=4),
             Layout(batch_panel, size=4),
-            Layout(task_panel, size=task_panel_height)
+            Layout(task_panel, ratio=1)
         ]
         if schedule_panel is not None:
             layouts.append(Layout(schedule_panel, size=3))
-        if status_panel is not None:
-            layouts.append(Layout(status_panel, size=3))
-        layouts.append(Layout(controls_panel, size=8))
+        # Always show the tip panel below schedule; give extra height for readability
+        layouts.append(Layout(tip_panel, size=4))
         progress_stack.split(*layouts)
         return progress_stack
 
@@ -397,8 +396,31 @@ class PerformanceDisplay:
 
     def _refresh_layout(self):
         self.layout["header"].update(self._render_header())
-        self.layout["body"]["metrics"].update(self._render_metrics())
+        # Update all panels once to render initial state
+        self.layout["body"]["left"]["metrics"].update(self._render_metrics())
+        # Render status indicators between metrics and controls
+        try:
+            status_panel = None
+            if self.status_indicators:
+                def dot(state: str) -> Text:
+                    state_l = (state or "").lower()
+                    color = "green" if state_l in ("on", "ok", "healthy", "green") else ("yellow" if state_l in ("warn", "warning", "paused", "degraded", "yellow") else "red")
+                    return Text("●", style=f"bold {color}")
+                status_table = Table.grid(expand=True, padding=(0,1))
+                items = list(self.status_indicators.items())
+                if items:
+                    for _ in items:
+                        status_table.add_column(justify="center")
+                    cells = []
+                    for name, state in items:
+                        cells.append(Text.assemble(dot(state), Text(f" {name}", style="bold white")))
+                    status_table.add_row(*cells)
+                    status_panel = Panel(status_table, title="[bold white]Status", border_style="bright_black", expand=True)
+            self.layout["body"]["left"]["status"].update(status_panel or Panel("", border_style="bright_black"))
+        except Exception:
+            self.layout["body"]["left"]["status"].update(Panel("", border_style="bright_black"))
         self.layout["body"]["progress"].update(self._render_progress())
+        self.layout["body"]["left"]["controls"].update(self._render_controls())
         self.layout["alert"].update(self._render_alert())
 
     def update_metrics(self, metrics: Dict[str, Any]):
@@ -418,6 +440,28 @@ class PerformanceDisplay:
         with self.lock:
             self.batch_current = current
             self.batch_total = total
+            if description:
+                self.batch_desc = description
+            self._refresh_layout()
+
+    def reset_batch_progress(self, total: int, description: Optional[str] = None):
+        """Reset the batch progress timer and counters by recreating the task.
+        This ensures the elapsed time column reflects per-batch time.
+        """
+        with self.lock:
+            try:
+                if hasattr(self, "_batch_task"):
+                    self._batch_progress.remove_task(self._batch_task)
+            except Exception:
+                pass
+            # Recreate task with new total; completed starts at 0
+            try:
+                self._batch_task = self._batch_progress.add_task("Batch", total=max(int(total), 1))
+            except Exception:
+                # Fallback in case add_task fails
+                self._batch_task = self._batch_progress.add_task("Batch", total=1)
+            self.batch_current = 0
+            self.batch_total = int(total) if total else 1
             if description:
                 self.batch_desc = description
             self._refresh_layout()

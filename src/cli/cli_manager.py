@@ -1208,11 +1208,90 @@ class CLIManager:
                 self.logger.info(f"✅ Logging configured: {logging_status['log_file']}")
             else:
                 self.logger.warning("⚠️ Logging not properly configured")
-            self.scraper = FlashscoreScraper(status_callback=self._status_update)
+            
+            # Define progress_callback before creating scraper
+            def progress_callback(current, total, task_description=None):
+                try:
+                    if total > 0:
+                        progress_percent = (current / total) * 100
+                        # Overall progress from single source of truth
+                        self.performance_display.update_progress(current, total, f"Overall ({current}/{total})")
+                        self._last_progress_current = current
+                except Exception as e:
+                    self.logger.debug(f"Progress callback error: {e}")
+            
+            # Provide match_finalized callback to align timing with data persistence
+            def match_finalized_callback(match_id: str):
+                try:
+                    now_ts = time.time()
+                    # If we were timing a current match, close it on finalize
+                    idx = getattr(self, "_last_progress_current", 0)
+                    start_ts = getattr(self, "_current_match_start_ts", None)
+                    if start_ts is not None and idx > 0:
+                        duration = max(0.0, now_ts - start_ts)
+                        # Avoid double-counting: remove any provisional index-based record before recording by match_id
+                        try:
+                            if hasattr(self.performance_monitor, 'metrics') and hasattr(self.performance_monitor.metrics, 'match_processing_times'):
+                                self.performance_monitor.metrics.match_processing_times.pop(f"match-{idx}", None)
+                        except Exception:
+                            pass
+                        # Record using the actual match_id for authoritative timing
+                        self.performance_monitor.record_match_time(str(match_id), duration)
+                        self.performance_monitor.metrics.successful_matches = max(self.performance_monitor.metrics.successful_matches, idx)
+                        self._avg_count += 1
+                        self._avg_processing_time += (duration - self._avg_processing_time) / max(1, self._avg_count)
+                        # Optional debug logging guarded by config
+                        try:
+                            if CONFIG.get('logging', {}).get('perf_debug', False):
+                                self.logger.debug(f"[Perf] finalize match_id={match_id} idx={idx} duration={duration:.3f}s avg={self._avg_processing_time:.3f}s count={self._avg_count}")
+                        except Exception:
+                            pass
+                        # Reset start marker to avoid double-closing; next boundary will re-start timing
+                        self._current_match_start_ts = None
+                        # Force an immediate UI update with the new average to avoid 0.00s between ticks
+                        try:
+                            avg_time_display = self._avg_processing_time
+                            if avg_time_display > 0 and avg_time_display < 0.01:
+                                avg_time_display = 0.01
+                            stats = self.performance_monitor.get_stats()
+                            cpu_display = stats.get('system_cpu_percent', stats.get('cpu_usage', 0))
+                            mem_display = stats.get('memory_usage', 0)
+                            metrics = {
+                                'memory_usage': mem_display,
+                                'memory_system_total_mb': stats.get('system_memory_total_mb', 0),
+                                'memory_system_used_mb': stats.get('system_memory_used_mb', 0),
+                                'memory_system_percent': stats.get('system_memory_percent', 0),
+                                'memory_peak_mb': stats.get('peak_memory_usage', 0),
+                                'cpu_usage': cpu_display,
+                                'active_workers': 1,
+                                'tasks_processed': stats.get('successful_matches', 0) + stats.get('failed_matches', 0),
+                                'success_rate': stats.get('success_rate', 0),
+                                'average_processing_time': avg_time_display,
+                            }
+                            self.performance_display.update_metrics(metrics)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            from src.reporting import CallbackReporter
+            self.scraper = FlashscoreScraper(
+                status_callback=self._status_update,
+                progress_callback=progress_callback,
+                reporter=CallbackReporter(status_callback=self._status_update, progress_callback=progress_callback, match_finalized_callback=match_finalized_callback)
+            )
             self._should_stop_scraper = False
             self.performance_display.set_stop_callback(self._stop_scraper)
             # Reset per-match UI trackers
             self._last_progress_current = 0
+            # Ensure network monitoring is on to avoid false red indicator at startup
+            try:
+                from src.core.network_monitor import NetworkMonitor
+                _nm_boot = NetworkMonitor()
+                if not getattr(_nm_boot, 'monitoring', False):
+                    _nm_boot.start_monitoring(status_callback=self._status_update)
+            except Exception:
+                pass
 
             def update_performance_metrics():
                 import time as _time
@@ -1225,6 +1304,14 @@ class CLIManager:
                         cpu_display = stats.get('system_cpu_percent', stats.get('cpu_usage', 0))
                         # Show process memory (RSS) to reflect scraper consumption
                         mem_display = stats.get('memory_usage', 0)
+                        # Clamp tiny average values to ensure non-zero visibility once timings exist
+                        avg_time_display = (self._avg_processing_time if getattr(self, '_avg_processing_time', 0) else stats.get('average_match_time', 0))
+                        try:
+                            if avg_time_display and avg_time_display > 0 and avg_time_display < 0.01:
+                                avg_time_display = 0.01
+                        except Exception:
+                            pass
+
                         metrics = {
                             'memory_usage': mem_display,
                             'memory_system_total_mb': stats.get('system_memory_total_mb', 0),
@@ -1235,7 +1322,7 @@ class CLIManager:
                             'active_workers': 1,  # Default to 1 worker for now
                             'tasks_processed': stats.get('successful_matches', 0) + stats.get('failed_matches', 0),
                             'success_rate': stats.get('success_rate', 0),
-                            'average_processing_time': stats.get('average_match_time', 0)
+                            'average_processing_time': avg_time_display
                         }
                         self.performance_display.update_metrics(metrics)
 
@@ -1244,13 +1331,13 @@ class CLIManager:
                             driver_state = "red"
                             if hasattr(self, 'scraper') and getattr(self.scraper, '_driver_manager', None):
                                 dm = self.scraper._driver_manager
-                                # Red only if closing/failed; yellow while initializing
+                                # Red (off) if closing/failed; red while not initialized
                                 if getattr(dm, '_is_closing', False):
                                     driver_state = "red"
                                 else:
                                     drv = getattr(dm, 'driver', None)
                                     if drv is None:
-                                        driver_state = "yellow"  # initializing
+                                        driver_state = "red"  # not started/off
                                     else:
                                         # Prefer manager's validity check if available
                                         try:
@@ -1262,28 +1349,32 @@ class CLIManager:
                                                 is_valid = True
                                         except Exception:
                                             is_valid = False
-                                        driver_state = "green" if is_valid else "yellow"
+                                        driver_state = "green" if is_valid else "yellow"  # yellow = down (session error)
                             # Network
                             from src.core.network_monitor import NetworkMonitor
                             nm = NetworkMonitor()
-                            # Not monitoring yet → yellow (starting/paused)
+                            # Not monitoring yet → try a quick connectivity probe; show red only if unknown
                             if not getattr(nm, 'monitoring', False):
-                                net_state = "yellow"
-                            else:
-                                net_state = "green" if getattr(nm, 'connection_status', True) else "red"
-                                # If consecutive failures detected, degrade to yellow
                                 try:
-                                    net_stats = nm.get_network_stats()
-                                    if net_stats.get('consecutive_failures', 0) > 0 and net_state == "green":
-                                        net_state = "yellow"
+                                    quick_ok = nm.is_connected()
+                                    net_state = "green" if quick_ok else "yellow"
                                 except Exception:
-                                    pass
+                                    net_state = "red"
+                            else:
+                                if not getattr(nm, 'connection_status', True):
+                                    net_state = "yellow"  # down
+                                else:
+                                    try:
+                                        net_state = "yellow" if nm.is_connection_degraded() else "green"
+                                    except Exception:
+                                        # Fallback to green if degradation check fails but connected
+                                        net_state = "green"
                             # Scraper paused/stopping
                             scraper_state = "green"
                             if getattr(self, '_should_stop_scraper', False):
-                                scraper_state = "red"
+                                scraper_state = "red"  # off
                             elif getattr(self.performance_display, '_paused', False):
-                                scraper_state = "yellow"
+                                scraper_state = "yellow"  # down/paused
 
                             self.performance_display.update_status_indicators({
                                 'Driver': driver_state,
@@ -1306,79 +1397,103 @@ class CLIManager:
             self._avg_processing_time = 0.0
             self._avg_count = 0
 
+            # Update the existing progress_callback to include performance monitoring
+            original_progress_callback = progress_callback
             def progress_callback(current, total, task_description=None):
+                # Call the original progress callback
+                original_progress_callback(current, total, task_description)
+                
+                # Update performance monitor counters and timings
                 try:
-                    if total > 0:
-                        progress_percent = (current / total) * 100
-                        # Overall progress from single source of truth
-                        self.performance_display.update_progress(current, total, "Overall")
+                    pm = self.performance_monitor
+                    # Set total matches if not yet set or if higher value provided
+                    if not pm.metrics.total_matches or total > pm.metrics.total_matches:
+                        pm.metrics.total_matches = total
+                except Exception:
+                    pass
 
-                        # Update performance monitor counters and timings
+                # Batch progress with actual batch size for final/incomplete batch
+                batch_size = 10  # logical batch window
+                import math
+                total_batches = math.ceil(total / batch_size)
+                batch_number = math.ceil(current / batch_size)
+                # Determine actual size of the current batch
+                if batch_number < total_batches:
+                    batch_total = batch_size
+                else:
+                    batch_total = total - batch_size * (total_batches - 1)
+                    if batch_total <= 0:
+                        batch_total = batch_size
+                # Processed within this batch
+                processed_in_batch = current - batch_size * (batch_number - 1)
+                if processed_in_batch < 0:
+                    processed_in_batch = 0
+                if processed_in_batch > batch_total:
+                    processed_in_batch = batch_total
+
+                # If new batch started, reset batch timer and counters
+                if batch_number != getattr(self, "_last_batch_number", None):
+                    self.performance_display.reset_batch_progress(batch_total, f"Batch {batch_number}   (0/{batch_total})")
+                    self._last_batch_number = batch_number
+                # Update within-batch progress
+                batch_desc = f"Batch {batch_number}   ({processed_in_batch}/{batch_total})"
+                self.performance_display.update_batch_progress(processed_in_batch, batch_total, batch_desc)
+                
+                # Match boundary: only when index increases
+                if current != getattr(self, "_last_progress_current", 0):
+                    try:
+                        pm = self.performance_monitor
+                        now_ts = time.time()
+                        # Finalize previous match timing if any
+                        if getattr(self, "_current_match_start_ts", None) is not None and getattr(self, "_last_progress_current", 0) > 0:
+                            prev_idx = getattr(self, "_last_progress_current", 0)
+                            duration = max(0.0, now_ts - self._current_match_start_ts)
+                            pm.record_match_time(f"match-{prev_idx}", duration)
+                            # Count processed matches accurately by index
+                            pm.metrics.successful_matches = max(pm.metrics.successful_matches, prev_idx)
+                            # Update rolling average immediately after first duration recorded
+                            self._avg_count += 1
+                            self._avg_processing_time += (duration - self._avg_processing_time) / max(1, self._avg_count)
+                        # Start timer for the new match index
+                        self._current_match_start_ts = now_ts
+                    except Exception:
+                        pass
+                    self.performance_display.clear_subtasks()
+                    self.performance_display.update_current_match(f"Processing match {current}/{total}")
+                    self._last_progress_current = current
+
+                # Enhanced task display and subtasks
+                if task_description:
+                    desc = f"{task_description}"
+                    self.performance_display.update_current_task(f"{desc} ({current}/{total})")
+                    # Also record as a subtask step
+                    self.performance_display.add_subtask(desc + "...")
+                else:
+                    self.performance_display.update_current_task(f"Processing match {current} of {total}")
+                
+                # Log progress periodically
+                if current % 5 == 0 or current == total:
+                    progress_percent = (current / total) * 100 if total > 0 else 0
+                    self.logger.info(f"Progress: {current}/{total} ({progress_percent:.1f}%)")
+
+                # If we are at the final match, record its duration as well
+                try:
+                    if total > 0 and current == total and hasattr(self, "_current_match_start_ts") and self._current_match_start_ts is not None:
+                        end_ts = time.time()
+                        duration = max(0.0, end_ts - self._current_match_start_ts)
+                        self.performance_monitor.record_match_time(f"match-{current}", duration)
+                        # Ensure counts reflect completion
                         try:
                             pm = self.performance_monitor
-                            # Set total matches if not yet set or if higher value provided
-                            if not pm.metrics.total_matches or total > pm.metrics.total_matches:
-                                pm.metrics.total_matches = total
-                            # Count this as a successful processed match
-                            pm.metrics.successful_matches += 1
-                            # Calculate per-match time as delta from previous callback
-                            now_ts = time.time()
-                            if self._last_match_ts is not None and now_ts > self._last_match_ts:
-                                delta = now_ts - self._last_match_ts
-                                pm.record_match_time(f"match-{current}", delta)
-                                # Maintain simple rolling average locally for display fallback
-                                self._avg_count += 1
-                                self._avg_processing_time += (delta - self._avg_processing_time) / max(1, self._avg_count)
-                            self._last_match_ts = now_ts
+                            pm.metrics.successful_matches = max(pm.metrics.successful_matches, total)
+                            # Update rolling average fallback too
+                            self._avg_count += 1
+                            self._avg_processing_time += (duration - self._avg_processing_time) / max(1, self._avg_count)
                         except Exception:
                             pass
-
-                        # Batch progress with actual batch size for final/incomplete batch
-                        batch_size = 10  # logical batch window
-                        import math
-                        total_batches = math.ceil(total / batch_size)
-                        batch_number = math.ceil(current / batch_size)
-                        # Determine actual size of the current batch
-                        if batch_number < total_batches:
-                            batch_total = batch_size
-                        else:
-                            batch_total = total - batch_size * (total_batches - 1)
-                            if batch_total <= 0:
-                                batch_total = batch_size
-                        # Processed within this batch
-                        processed_in_batch = current - batch_size * (batch_number - 1)
-                        if processed_in_batch < 0:
-                            processed_in_batch = 0
-                        if processed_in_batch > batch_total:
-                            processed_in_batch = batch_total
-
-                        # Simplified batch label: show count and percentage only (no ETA)
-                        batch_pct = (processed_in_batch / batch_total) * 100 if batch_total else 0
-                        batch_desc = f"Batch {batch_number}   ({processed_in_batch}/{batch_total})   {batch_pct:.0f}%"
-                        self.performance_display.update_batch_progress(processed_in_batch, batch_total, batch_desc)
-                        
-                        # Match change: clear subtasks and set header
-                        if current != getattr(self, "_last_progress_current", 0):
-                            self.performance_display.clear_subtasks()
-                            self.performance_display.update_current_match(f"Processing match {current}/{total}")
-                            self._last_progress_current = current
-
-                        # Enhanced task display and subtasks
-                        if task_description:
-                            desc = f"{task_description}"
-                            self.performance_display.update_current_task(f"{desc} ({current}/{total})")
-                            # Also record as a subtask step
-                            self.performance_display.add_subtask(desc + "...")
-                        else:
-                            self.performance_display.update_current_task(f"Processing match {current} of {total}")
-                        
-                        # Log progress periodically
-                        if current % 5 == 0 or current == total:
-                            self.logger.info(f"Progress: {current}/{total} ({progress_percent:.1f}%)")
-                            
-                except Exception as e:
-                    self.logger.error(f"Error in progress callback: {e}")
-                    # Don't let the callback crash the scraper
+                except Exception:
+                    pass
+                
 
             # Start the performance metrics update thread
             metrics_thread = threading.Thread(target=update_performance_metrics, daemon=True)
@@ -1553,7 +1668,22 @@ class CLIManager:
                 self.logger.info(f"✅ Logging configured: {logging_status['log_file']}")
             else:
                 self.logger.warning("⚠️ Logging not properly configured")
-            self.scraper = FlashscoreScraper(status_callback=self._status_update)
+            
+            # Define progress_callback for results scraping
+            def progress_callback(current, total, task_description=None):
+                try:
+                    if total > 0:
+                        progress_percent = (current / total) * 100
+                        self.performance_display.update_progress(current, total, "Results")
+                except Exception as e:
+                    self.logger.debug(f"Progress callback error: {e}")
+            
+            from src.reporting import CallbackReporter
+            self.scraper = FlashscoreScraper(
+                status_callback=self._status_update,
+                progress_callback=progress_callback,
+                reporter=CallbackReporter(status_callback=self._status_update, progress_callback=progress_callback, match_finalized_callback=None)
+            )
             self._should_stop_scraper = False
             self.performance_display.set_stop_callback(self._stop_scraper)
             
@@ -1737,6 +1867,11 @@ class CLIManager:
                     self.display.console.print(f"[yellow]⚠️  {display_message}[/yellow]")
                 else:
                     self.display.console.print(display_message)
+                # Also reflect latest status as current task in the performance display
+                try:
+                    self.performance_display.update_current_task(display_message)
+                except Exception:
+                    pass
 
         # Heuristic: treat certain info lines as subtasks for the current match (but do not store messages)
         try:
@@ -1745,6 +1880,18 @@ class CLIManager:
             if any(v in lower for v in ["loading", "extracting", "verifying", "saving", "parsing", "retrying"]):
                 short = display_msg if len(display_msg) <= 100 else (display_msg[:97] + "...")
                 self.performance_display.add_subtask(short)
+                # Also promote a concise version to the main Current Task header
+                try:
+                    concise = display_msg
+                    # Trim URLs to avoid clutter in header
+                    if "http" in concise:
+                        concise = concise.split("http")[0].strip()
+                    # Remove trailing punctuation/ellipsis
+                    concise = concise.rstrip('.').rstrip('…').rstrip(':').strip()
+                    if concise:
+                        self.performance_display.update_current_task(concise)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -2203,7 +2350,12 @@ class CLIManager:
             ensure_logging_configured(scraper_log_path)
 
             # Create scraper and run
-            scraper = FlashscoreScraper(status_callback=self._status_update)
+            def progress_callback(current, total, task_description=None):
+                # Simple progress callback for background scraping
+                pass
+            
+            from src.reporting import CallbackReporter
+            scraper = FlashscoreScraper(status_callback=self._status_update, progress_callback=progress_callback, reporter=CallbackReporter(status_callback=self._status_update, progress_callback=progress_callback, match_finalized_callback=None))
             scraper.scrape(progress_callback=None, day=day, status_callback=self._status_update, stop_callback=lambda: getattr(self, '_schedule_stop_flag', False))
         except Exception as e:
             try:

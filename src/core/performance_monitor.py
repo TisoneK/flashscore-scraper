@@ -303,9 +303,17 @@ class PerformanceMonitor:
 
     def get_average_match_time(self) -> float:
         """Calculate average match processing time."""
-        if not self.metrics.match_processing_times:
-            return 0.0
-        return sum(self.metrics.match_processing_times.values()) / len(self.metrics.match_processing_times)
+        if self.metrics.match_processing_times:
+            return sum(self.metrics.match_processing_times.values()) / len(self.metrics.match_processing_times)
+        # Fallback: derive average from elapsed time and processed count when no per-match timings yet
+        try:
+            total_processed = (self.metrics.successful_matches + self.metrics.failed_matches)
+            if total_processed > 0:
+                elapsed = time.time() - self._start_time
+                return elapsed / max(1, total_processed)
+        except Exception:
+            pass
+        return 0.0
 
     def log_progress(self, current_batch_time: Optional[float] = None) -> None:
         """Log current progress and performance metrics."""
@@ -331,13 +339,25 @@ class PerformanceMonitor:
         cpu_summary = self.get_cpu_summary()
         browser_summary = self.get_browser_summary()
         
+        # Derive robust average match time: prefer recorded timings, else fall back to elapsed/processed
+        avg_match_time = self.get_average_match_time()
+        try:
+            total_processed = (self.metrics.successful_matches + self.metrics.failed_matches)
+            if (not avg_match_time or avg_match_time <= 0) and total_processed > 0:
+                avg_match_time = total_time / max(1, total_processed)
+            # Clamp to minimal visible value if non-zero but very small
+            if avg_match_time > 0 and avg_match_time < 0.01:
+                avg_match_time = 0.01
+        except Exception:
+            pass
+
         return {
             'total_time': total_time,
             'total_matches': self.metrics.total_matches,
             'successful_matches': self.metrics.successful_matches,
             'failed_matches': self.metrics.failed_matches,
             'success_rate': (self.metrics.successful_matches/self.metrics.total_matches*100) if self.metrics.total_matches > 0 else 0,
-            'average_match_time': self.get_average_match_time(),
+            'average_match_time': avg_match_time,
             'average_batch_time': self.get_average_batch_time(),
             'memory_usage': memory_summary['current_memory_mb'],
             'peak_memory_usage': memory_summary['peak_memory_mb'],

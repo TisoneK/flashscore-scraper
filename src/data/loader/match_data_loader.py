@@ -117,8 +117,8 @@ class MatchDataLoader:
 
             for idx, element in enumerate(match_elements):
                 try:
-                    # Strict single-selector strategy: anchor with match path
-                    anchor = self.selenium_utils.find_element_in_parent(element, "css", 'a[href*="/match/"]')
+                    # Use the configured selector for match links
+                    anchor = self.selenium_utils.find_element_in_parent(element, "css", SELECTORS["match"]["link"])
                     if not anchor:
                         continue
                     href = anchor.get_attribute('href')

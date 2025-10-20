@@ -3,7 +3,7 @@ import os
 import time
 import logging
 import datetime
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Tuple, Union, Callable
 
 # Import configuration
 from src.utils.config_loader import CONFIG, SELECTORS, MIN_H2H_MATCHES
@@ -26,6 +26,8 @@ from datetime import datetime
 from src.data.loader.results_data_loader import ResultsDataLoader
 from src.data.extractor.results_data_extractor import ResultsDataExtractor
 from src.core.performance_monitor import PerformanceMonitor
+from typing import Protocol
+from src.reporting import Reporter, CallbackReporter
 
 # Global variables for logging paths
 log_dir = CONFIG.get('logging', {}).get('log_directory', 'logs')
@@ -46,22 +48,44 @@ def get_ddmmyy_date(day: str) -> str:
     else:
         return datetime.now().strftime("%Y%m%d")
 
+class DriverManagerLike(Protocol):
+    def initialize(self) -> None: ...
+    def get_driver(self): ...
+    def close(self, force: bool = False) -> None: ...
+
+
 class FlashscoreScraper:
-    def __init__(self, status_callback=None):
-        self._driver_manager = WebDriverManager(chrome_log_path=chrome_log_path)
+    def __init__(
+        self,
+        status_callback=None,
+        progress_callback=None,
+        *,
+        driver_factory: Optional[Callable[[], DriverManagerLike]] = None,
+        storage: Optional[JSONStorage] = None,
+        config_snapshot: Optional[Dict[str, Any]] = None,
+        reporter: Optional[Reporter] = None,
+    ):
+        # Dependencies with safe defaults to preserve CLI behavior
+        self._driver_manager = (driver_factory() if driver_factory else WebDriverManager(chrome_log_path=chrome_log_path))
         self._driver = None  # Private, use driver property
         self.selenium_utils = None
         self.url_verifier = None
-        self.json_storage = JSONStorage()
+        self.json_storage = storage if storage is not None else JSONStorage()
         self.match_loader = None
         self.odds_loader = None
         self.home_away_loader = None
         self.over_under_loader = None
         self.h2h_loader = None
+        # Frozen config for this instance (optional)
+        self.config = config_snapshot if config_snapshot is not None else CONFIG
         # Network resilience components
         self.network_monitor = NetworkMonitor()
         self.retry_manager = NetworkRetryManager()
+        # Reporter abstraction; fallback to simple callbacks for backward compatibility
+        self.reporter = reporter if reporter is not None else CallbackReporter(status_callback=status_callback, progress_callback=progress_callback, match_finalized_callback=None)
+        # Back-compat field used by existing calls
         self.status_callback = status_callback
+        self.progress_callback = progress_callback
         
     def has_active_driver(self) -> bool:
         """Check if there's an active driver without creating a new one."""
@@ -116,8 +140,7 @@ class FlashscoreScraper:
             status_callback = self.status_callback
             
         try:
-            if status_callback:
-                status_callback("Launching browser and initializing driver...")
+            self.reporter.status("Launching browser and initializing driver...")
                 
             # Initialize the driver manager and get the driver
             self._driver_manager.initialize()
@@ -129,8 +152,7 @@ class FlashscoreScraper:
             elapsed = time.time() - start_time
             logger.info(f"✅ WebDriver created in {elapsed:.2f}s")
             
-            if status_callback:
-                status_callback("Browser ready!")
+            self.reporter.status("Browser ready!")
             
             # Initialize utilities with the driver
             self.selenium_utils = SeleniumUtils(driver)
@@ -154,36 +176,28 @@ class FlashscoreScraper:
             raise
 
     def load_initial_data(self, day="Today", status_callback=None):
-        if status_callback:
-            status_callback('--- Loading main page ---')
+        self.reporter.status('--- Loading main page ---')
         logger.info('--- Loading main page ---')
         self.match_loader = MatchDataLoader(self.driver, selenium_utils=self.selenium_utils)
         self.odds_loader = OddsDataLoader(self.driver, selenium_utils=self.selenium_utils)
         self.match_loader.load_main_page()
         logger.info('Main page loaded.')
-        if status_callback:
-            status_callback('Main page loaded.')
+        self.reporter.status('Main page loaded.')
         if day == "Tomorrow":
             logger.info("Loading tomorrow's matches...")
-            if status_callback:
-                status_callback("Loading tomorrow's matches...")
+            self.reporter.status("Loading tomorrow's matches...")
             match_ids = self.match_loader.get_tomorrow_match_ids()
-            if status_callback:
-                status_callback(f"Found {len(match_ids)} matches for tomorrow.")
+            self.reporter.status(f"Found {len(match_ids)} matches for tomorrow.")
         else:
             logger.info("Loading today's matches...")
-            if status_callback:
-                status_callback("Loading today's matches...")
+            self.reporter.status("Loading today's matches...")
             match_ids = self.match_loader.get_today_match_ids()
-            if status_callback:
-                status_callback(f"Found {len(match_ids)} matches for today.")
+            self.reporter.status(f"Found {len(match_ids)} matches for today.")
             if not match_ids:
                 logger.info("No matches found for today. Checking tomorrow's schedule.")
-                if status_callback:
-                    status_callback("No matches found for today. Checking tomorrow's schedule.")
+                self.reporter.status("No matches found for today. Checking tomorrow's schedule.")
                 match_ids = self.match_loader.get_tomorrow_match_ids()
-                if status_callback:
-                    status_callback(f"Found {len(match_ids)} matches for tomorrow.")
+                self.reporter.status(f"Found {len(match_ids)} matches for tomorrow.")
         return match_ids
 
     def check_and_get_processed_matches(self, day: str):
@@ -256,15 +270,13 @@ class FlashscoreScraper:
             team_names = self._get_team_names_from_element(match_element)
             match_display = team_names if team_names else f"match {match_id}"
             
-            if status_callback:
-                status_callback(f"Loading match details for {match_display}...")
+            self.reporter.status(f"Loading match details for {match_display}...")
                 
             return self.match_loader.load_match(url_builder, status_callback=status_callback)
             
         except Exception as e:
             logger.error(f"Error creating UrlBuilder from match element: {e}")
-            if status_callback:
-                status_callback(f"Error loading match: {str(e)}")
+            self.reporter.status(f"Error loading match: {str(e)}")
             return False
 
     def extract_match_data(self, status_callback=None):
@@ -548,12 +560,32 @@ class FlashscoreScraper:
         if status_callback:
             status_callback(f"=== Starting scraping for {day} ===")
         self.initialize(status_callback=status_callback)
+
+        # If a progress/status callback is provided at call-time, refresh the reporter to use it
+        try:
+            if progress_callback is not None or status_callback is not None:
+                from src.reporting import CallbackReporter
+                effective_status_cb = status_callback if status_callback is not None else getattr(self, 'status_callback', None)
+                effective_progress_cb = progress_callback if progress_callback is not None else None
+                # Preserve any existing match_finalized callback if already configured by caller
+                existing_match_finalized_cb = None
+                try:
+                    if isinstance(self.reporter, CallbackReporter):
+                        existing_match_finalized_cb = getattr(self.reporter, '_match_finalized_cb', None)
+                except Exception:
+                    existing_match_finalized_cb = None
+                self.reporter = CallbackReporter(
+                    status_callback=effective_status_cb,
+                    progress_callback=effective_progress_cb,
+                    match_finalized_callback=existing_match_finalized_cb
+                )
+        except Exception:
+            pass
         try:
             def main_scrape():
                 match_ids = self.load_initial_data(day, status_callback=status_callback)
                 if not match_ids:
-                    if status_callback:
-                        status_callback("No matches found for scraping.")
+                    self.reporter.status("No matches found for scraping.")
                     return []
 
                 processed_match_ids, processed_reasons = self.check_and_get_processed_matches(day)
@@ -574,16 +606,13 @@ class FlashscoreScraper:
                     # Check for stop signal
                     if stop_callback and stop_callback():
                         logger.info("🛑 Stop signal received, stopping scraper...")
-                        if status_callback:
-                            status_callback("🛑 Stop signal received, stopping scraper...")
+                        self.reporter.status("🛑 Stop signal received, stopping scraper...")
                         break
                     
                     match_display = f"match {match_id}"
                     
-                    if progress_callback:
-                        progress_callback(i+1, MAX_MATCHES, "Loading match data")
-                    if not progress_callback:
-                        logger.info(f'Processing {match_display} ({i+1}/{MAX_MATCHES})')
+                    self.reporter.progress(i+1, MAX_MATCHES, "Loading match data")
+                    logger.info(f'Processing {match_display} ({i+1}/{MAX_MATCHES})')
                     if match_id in processed_match_ids:
                         msg = f"Skipping already processed match: {match_display} (reason: {processed_reasons.get(match_id, 'already processed')})"
                         logger.info(msg)
@@ -592,55 +621,50 @@ class FlashscoreScraper:
                         continue
 
                     msg = f"Processing {match_display}..."
-                    if status_callback:
-                        status_callback(msg)
+                    self.reporter.status(msg)
                     logger.info(msg)
 
                     # Build UrlBuilder from captured summary URL
                     from src.core.url_builder import UrlBuilder
                     summary_url = mid_to_urls[match_id]['summary']
                     self.current_url_builder = UrlBuilder.from_summary_url(summary_url)
+                    self.reporter.progress(i+1, MAX_MATCHES, "Loading match page")
                     if self.match_loader.load_match(self.current_url_builder, status_callback=status_callback):
                         # For scheduled matches, we don't need to check status - we know they are scheduled
                         # and we want to process them to get odds and H2H data
                         
+                        self.reporter.progress(i+1, MAX_MATCHES, "Extracting match data")
                         match_data = self.extract_match_data(status_callback=status_callback)
                         odds = OddsModel(match_id=match_id)
 
                         # Load odds data for scheduled matches
-                        if progress_callback:
-                            progress_callback(i+1, MAX_MATCHES, "Extracting odds data")
+                        self.reporter.progress(i+1, MAX_MATCHES, "Extracting odds data")
                         if self.load_home_away_odds(match_id, status_callback=status_callback):
                             odds.home_odds, odds.away_odds = self.extract_home_away_odds(status_callback=status_callback)
                         else:
                             warn_msg = f'  - Failed to load home/away odds for {match_display}'
                             logger.warning(warn_msg)
-                            if status_callback:
-                                status_callback(warn_msg)
+                            self.reporter.status(warn_msg)
 
                         if self.load_over_under_odds(match_id, status_callback=status_callback):
                             odds.match_total, odds.over_odds, odds.under_odds = self.extract_over_under_odds(status_callback=status_callback)
                             if odds.match_total is None:
                                 warn_msg = f"  - No selected over/under alternative available for {match_display}"
                                 logger.warning(warn_msg)
-                                if status_callback:
-                                    status_callback(warn_msg)
+                                self.reporter.status(warn_msg)
                         else:
                             warn_msg = f'  - Failed to load over/under odds for {match_display}'
                             logger.warning(warn_msg)
-                            if status_callback:
-                                status_callback(warn_msg)
+                            self.reporter.status(warn_msg)
 
                         odds_incomplete, missing_odds_fields = self.validate_odds_data(odds)
                         if odds_incomplete:
                             warn_msg = f"  - Missing compulsory odds fields for {match_display}: {', '.join(missing_odds_fields)}"
                             logger.warning(warn_msg)
-                            if status_callback:
-                                status_callback(warn_msg)
+                            self.reporter.status(warn_msg)
 
                         # Load H2H data for scheduled matches
-                        if progress_callback:
-                            progress_callback(i+1, MAX_MATCHES, "Loading H2H data")
+                        self.reporter.progress(i+1, MAX_MATCHES, "Loading H2H data")
                         h2h_matches = []
                         h2h_count = 0
                         if self.load_h2h_data(match_id, status_callback=status_callback):
@@ -648,24 +672,20 @@ class FlashscoreScraper:
                                 h2h_matches, h2h_count = self.extract_h2h_matches(match_id, status_callback=status_callback)
                             except Exception as e:
                                 logger.warning(f"Failed to extract H2H data for match {match_id}: {e}")
-                                if status_callback:
-                                    status_callback(f"Skipping H2H data for match {match_id} due to extraction error")
+                                self.reporter.status(f"Skipping H2H data for match {match_id} due to extraction error")
                                 h2h_matches, h2h_count = [], 0
                             
                             msg = f'  - H2H matches found: {h2h_count} (required: {MIN_H2H_MATCHES})'
                             logger.info(msg)
-                            if status_callback:
-                                status_callback(msg)
+                            self.reporter.status(msg)
                             if h2h_count < MIN_H2H_MATCHES:
                                 warn_msg = f'  - Insufficient H2H matches for {match_display}: {h2h_count} found, {MIN_H2H_MATCHES} required'
                                 logger.warning(warn_msg)
-                                if status_callback:
-                                    status_callback(warn_msg)
+                                self.reporter.status(warn_msg)
                         else:
                             warn_msg = f'  - Failed to load H2H data for {match_display}'
                             logger.warning(warn_msg)
-                            if status_callback:
-                                status_callback(warn_msg)
+                            self.reporter.status(warn_msg)
 
                         skip_reason = self.compose_skip_reason(odds_incomplete, missing_odds_fields, h2h_count)
                         status = "complete" if not skip_reason else "incomplete"
@@ -684,9 +704,13 @@ class FlashscoreScraper:
                             skip_reason=skip_reason
                         )
                         matches.append(match)
-                        if progress_callback:
-                            progress_callback(i+1, MAX_MATCHES, "Saving match data")
+                        self.reporter.progress(i+1, MAX_MATCHES, "Saving match data")
                         self.save_match_data(match, day=day)
+                        # Emit match finalized event after data is saved
+                        try:
+                            self.reporter.match_finalized(match_id)
+                        except Exception:
+                            pass
                         # Log this match's full info immediately after processing
                         FlashscoreScraper.log_match_info(match)
                     else:
@@ -698,8 +722,7 @@ class FlashscoreScraper:
 
                 summary_msg = f"\n--- Summary: Collected {len(matches)} matches for {day.lower()} ---"
                 logger.info(summary_msg)
-                if status_callback:
-                    status_callback(summary_msg)
+                self.reporter.status(summary_msg)
                 # Optionally emit detailed per-match blocks after saving
                 try:
                     verbose_details = CONFIG.get('logging', {}).get('log_match_details', False)
