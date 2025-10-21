@@ -79,12 +79,24 @@ class UrlBuilder:
             raise ValueError("Missing match ID in URL")
 
         path_parts = [p for p in parsed.path.strip("/").split("/") if p]
-        if len(path_parts) < 5 or path_parts[0] != "match" or path_parts[1] != "basketball":
+        # Accept canonical forms with at least 4 parts:
+        # /match/basketball/{home_slug}-{home_id}/{away_slug}-{away_id}/...
+        if len(path_parts) < 4 or path_parts[0] != "match" or path_parts[1] != "basketball":
             raise ValueError("Malformed Flashscore match URL")
 
-        home_part, away_part = path_parts[2], path_parts[3]
-        home_slug, home_id = home_part.rsplit("-", 1)
-        away_slug, away_id = away_part.rsplit("-", 1)
+        # home and away parts are expected to be the 3rd and 4th segments
+        try:
+            home_part = path_parts[2]
+            away_part = path_parts[3]
+        except IndexError:
+            raise ValueError("Malformed Flashscore match URL")
+
+        # Split slug and id using the last hyphen; validate presence
+        try:
+            home_slug, home_id = home_part.rsplit("-", 1)
+            away_slug, away_id = away_part.rsplit("-", 1)
+        except ValueError:
+            raise ValueError("Malformed Flashscore match URL")
 
         return {
             "mid": mid,

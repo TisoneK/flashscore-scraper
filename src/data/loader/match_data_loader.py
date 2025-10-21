@@ -119,17 +119,34 @@ class MatchDataLoader:
                 try:
                     # Use the configured selector for match links
                     anchor = self.selenium_utils.find_element_in_parent(element, "css", SELECTORS["match"]["link"])
-                    if not anchor:
-                        continue
-                    href = anchor.get_attribute('href')
-                    if not href:
-                        continue
-                    builder = UrlBuilder.from_summary_url(href)
-                    urls_dict = builder.get_urls()
-                    urls_dict_with_mid = {**urls_dict, 'mid': builder.mid}
-                    collected.append(urls_dict_with_mid)
+                    href = None
+                    if anchor:
+                        href = anchor.get_attribute('href')
+
+                    # First try the fast path: parse the canonical summary URL if present
+                    try:
+                        if href:
+                            builder = UrlBuilder.from_summary_url(href)
+                        else:
+                            # No href available, fall back to parsing the element
+                            builder = UrlBuilder.from_element(element)
+                        urls_dict = builder.get_urls()
+                        urls_dict_with_mid = {**urls_dict, 'mid': builder.mid}
+                        collected.append(urls_dict_with_mid)
+                    except Exception:
+                        # Fallback: try a more robust element-based extraction which
+                        # inspects onclick attributes and alternative selectors.
+                        try:
+                            builder = UrlBuilder.from_element(element)
+                            urls_dict = builder.get_urls()
+                            urls_dict_with_mid = {**urls_dict, 'mid': builder.mid}
+                            collected.append(urls_dict_with_mid)
+                        except Exception as e:
+                            # Log at debug level; still skip to honor no-fallbacks policy
+                            logger.debug(f"Skipping match element index {idx} due to error: {e}")
+                            continue
                 except Exception as e:
-                    # Log at debug level; still skip to honor no-fallbacks policy
+                    # Any unexpected error - keep skipping but log for diagnostics
                     logger.debug(f"Skipping match element index {idx} due to error: {e}")
                     continue
             return collected
