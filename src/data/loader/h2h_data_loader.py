@@ -19,6 +19,10 @@ class H2HDataLoader:
         self.driver = driver
         self.elements = H2HElements()
         self.elements.h2h_row_count = 0  # Always track row count
+        # When True, indicates the H2H section explicitly contains a 'no data' marker
+        # meaning the match legitimately has no H2H games. This differs from a load
+        # failure or missing section.
+        self._explicit_empty = False
         self.selenium_utils = selenium_utils
         self.url_verifier = URLVerifier(driver)
         self.h2h_data_verifier = H2HDataVerifier(driver)
@@ -36,10 +40,23 @@ class H2HDataLoader:
             self.network_monitor.stop_monitoring()
 
     def get_h2h_section(self):
+        # Try to get H2H section(s). Flashscore sometimes renders multiple sections;
+        # historically the H2H section was at index 2 but this can change.
         sections = self._safe_find_elements('css', SELECTORS['h2h']['section'])
-        if not sections or len(sections) < 3:
-            return None
-        return sections[2]
+        if sections:
+            # Prefer the historically-indexed section if present, else return the first available
+            if len(sections) >= 3:
+                return sections[2]
+            return sections[0]
+
+        # Fallback: try the higher-level H2H container selector if present
+        container_selector = SELECTORS['h2h'].get('container')
+        if container_selector:
+            container = self._safe_find_element('css', container_selector)
+            if container:
+                return container
+
+        return None
 
     def get_h2h_rows(self, h2h_section):
         row_elements = self._safe_find_elements('css', SELECTORS['h2h']['row'], parent=h2h_section)
@@ -142,13 +159,17 @@ class H2HDataLoader:
             # Detect explicit no-data state and short-circuit without retries/exceptions
             try:
                 no_data_selector = SELECTORS['h2h'].get('no_data')
-                if no_data_selector and self.selenium_utils:
+                # Only check for the 'no data' indicator inside the resolved H2H section to avoid
+                # picking up unrelated global no-data elements elsewhere on the page.
+                if no_data_selector and self.selenium_utils and self.elements.h2h_section is not None:
                     # Suppress debug: absence is the normal case when rows exist
                     no_data_el = self.selenium_utils.find('css', no_data_selector, parent=self.elements.h2h_section, suppress_debug=True)
                     if no_data_el:
                         logger.info("'No H2H data' indicator present. Treating as valid empty state.")
                         self.elements.h2h_rows = []
                         self.elements.h2h_row_count = 0
+                        # Mark explicit empty so callers can treat this as expected
+                        self._explicit_empty = True
                         return True
             except Exception:
                 # Non-fatal: proceed with normal flow if detection fails
@@ -183,6 +204,9 @@ class H2HDataLoader:
             # Extract and verify H2H rows
             self.elements.h2h_rows = self.get_h2h_rows(self.elements.h2h_section)
             self.elements.h2h_row_count = self.get_h2h_row_count(self.elements.h2h_rows)
+            # If we found rows, it's not an explicit-empty state
+            if self.elements.h2h_row_count:
+                self._explicit_empty = False
             
             # Validation: treat insufficient rows as non-fatal (no exceptions, no retries)
             is_valid, error = self.h2h_data_verifier.verify_h2h_rows(self.elements.h2h_rows)
@@ -281,6 +305,10 @@ class H2HDataLoader:
     def get_total_h2h_matches(self):
         """Return the total number of available H2H matches (games)."""
         return self.h2h_row_count
+
+    def is_explicit_empty(self) -> bool:
+        """Return True if the H2H section explicitly indicated no data for this match."""
+        return bool(getattr(self, '_explicit_empty', False))
 
     def get_h2h_count(self):
         """Return the number of H2H matches found, capped at MIN_H2H_MATCHES."""

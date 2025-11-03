@@ -670,6 +670,19 @@ class FlashscoreScraper:
                         if self.load_h2h_data(match_id, status_callback=status_callback):
                             try:
                                 h2h_matches, h2h_count = self.extract_h2h_matches(match_id, status_callback=status_callback)
+                                # If the loader explicitly indicated 'no H2H data' for this match,
+                                # treat it as a valid empty state and do not mark it as a warning
+                                try:
+                                    if hasattr(self, 'h2h_loader') and self.h2h_loader is not None and self.h2h_loader.is_explicit_empty():
+                                        info_msg = f"  - No H2H matches available for {match_display} (expected)"
+                                        logger.info(info_msg)
+                                        self.reporter.status(info_msg)
+                                        # Keep h2h_matches as empty and h2h_count as 0; do not add warning
+                                        explicit_empty = True
+                                    else:
+                                        explicit_empty = False
+                                except Exception:
+                                    explicit_empty = False
                             except Exception as e:
                                 logger.warning(f"Failed to extract H2H data for match {match_id}: {e}")
                                 self.reporter.status(f"Skipping H2H data for match {match_id} due to extraction error")
@@ -678,7 +691,8 @@ class FlashscoreScraper:
                             msg = f'  - H2H matches found: {h2h_count} (required: {MIN_H2H_MATCHES})'
                             logger.info(msg)
                             self.reporter.status(msg)
-                            if h2h_count < MIN_H2H_MATCHES:
+                            # Only warn about insufficient H2H matches when not an explicit empty state
+                            if not explicit_empty and h2h_count < MIN_H2H_MATCHES:
                                 warn_msg = f'  - Insufficient H2H matches for {match_display}: {h2h_count} found, {MIN_H2H_MATCHES} required'
                                 logger.warning(warn_msg)
                                 self.reporter.status(warn_msg)
