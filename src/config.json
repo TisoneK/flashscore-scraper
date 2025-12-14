@@ -14,8 +14,8 @@
         "disable_javascript": false,
         "disable_css": false,
         "driver_path": null,
-        "chrome_binary_path": "C:\\Users\\PC\\OneDrive\\Documents\\Dev\\flashscore-scraper\\drivers\\windows\\chrome\\139.0.7205.0\\chrome.exe",
-        "chromedriver_path": "C:\\Users\\PC\\OneDrive\\Documents\\Dev\\flashscore-scraper\\drivers\\windows\\chrome\\139.0.7205.0\\chromedriver.exe"
+        "chrome_binary_path": "C:\\Users\\tison\\Dev\\flashscore-scraper\\drivers\\windows\\chrome\\143.0.7446.0\\chrome.exe",
+        "chromedriver_path": "C:\\Users\\tison\\Dev\\flashscore-scraper\\drivers\\windows\\chrome\\143.0.7446.0\\chromedriver.exe"
     },
     "timeout": {
         "page_load_timeout": 30,
@@ -78,7 +78,6 @@
     "selectors": {
         "match": {
             "scheduled": "div.event__match--scheduled",
-            "link": "a.eventRowLink[href*=\"basketball\"]",
             "teams": {
                 "home": "div.duelParticipant__home .participant__participantName",
                 "away": "div.duelParticipant__away .participant__participantName",
@@ -127,6 +126,7 @@
                     }
                 ]
             },
+            "link": "a.eventRowLink[href*=\"basketball\"]",
             "container": "div.event__match"
         },
         "odds": {
