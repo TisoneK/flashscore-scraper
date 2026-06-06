@@ -1,17 +1,7 @@
-# ──────────────────────────────────────────────────────────────────
-# Flashscore Scraper — Scheduled CI Run
-#
-# Runs the scraper daily and pushes JSON output to the `data` branch
-# so ScoreWise (Railway) can pull it via raw.githubusercontent.com.
-#
-# Optional: also POSTs to a ScoreWise webhook if WEBHOOK_URL is set.
-# ──────────────────────────────────────────────────────────────────
-
 name: Scrape Flashscore
 
 on:
   schedule:
-    # Run at 06:00 UTC daily (adjust for your timezone)
     - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
@@ -21,7 +11,7 @@ on:
         default: "Today"
 
 permissions:
-  contents: write   # needed to push JSON to the data branch
+  contents: write
 
 jobs:
   scrape:
@@ -29,23 +19,14 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      # ── Checkout ──────────────────────────────────────────────
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ── Install Chrome ────────────────────────────────────────
       - name: Install Chrome
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
 
-      - name: Install ChromeDriver
-        run: |
-          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
-          echo "Chrome version: $CHROME_VERSION"
-          # Use webdriver-manager or chromedriver-autoinstaller in Python
-
-      # ── Python setup ─────────────────────────────────────────
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
@@ -58,7 +39,6 @@ jobs:
           pip install -r requirements.txt
           pip install chromedriver-autoinstaller
 
-      # ── Use CI config ────────────────────────────────────────
       - name: Apply CI configuration
         run: |
           if [ -f config.ci.json ]; then
@@ -66,7 +46,6 @@ jobs:
             echo "CI config applied"
           fi
 
-      # ── Run scraper ──────────────────────────────────────────
       - name: Run scraper
         env:
           DAY: ${{ github.event.inputs.day || 'Today' }}
@@ -82,7 +61,6 @@ jobs:
           fi
           python run_scraper_ci.py $ARGS
 
-      # ── Upload JSON artifact ─────────────────────────────────
       - name: Upload JSON output
         uses: actions/upload-artifact@v4
         if: always()
@@ -91,22 +69,15 @@ jobs:
           path: output/json/
           retention-days: 30
 
-      # ── Push JSON to data branch ─────────────────────────────
       - name: Push JSON to data branch
         if: success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Create or switch to data branch
           git fetch origin data || true
           git checkout data 2>/dev/null || git checkout --orphan data
           git rm -rf . 2>/dev/null || true
-
-          # Copy scraped JSON into repo root
           cp -r output/json/*.json . 2>/dev/null || true
-
-          # Commit and push
           git add "*.json"
           git commit -m "scrape: $(date -u +%Y-%m-%d)" || echo "No changes to commit"
           git push origin data --force
