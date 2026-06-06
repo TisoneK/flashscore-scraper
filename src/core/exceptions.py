@@ -36,7 +36,7 @@ class ConfigError(FlashscoreScraperError):
     pass
 
 class UIError(FlashscoreScraperError):
-    """Raised for UI-related errors (CLI, GUI, display, etc)."""
+    """Raised for CLI display and interaction errors."""
     pass
 
 class WorkerPoolError(FlashscoreScraperError):

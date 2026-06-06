@@ -5,51 +5,36 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from src.config import CONFIG
+from src.utils.config_loader import CONFIG
 from src.driver_manager.web_driver_manager import WebDriverManager
-import time
 
-def test_headless_mode():
-    """Test if headless mode is properly configured."""
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    logger.info("🔍 Testing headless mode configuration...")
-    
-    # Check current config
-    logger.info(f"📋 Current headless setting: {CONFIG.browser.headless}")
-    
-    # Initialize driver
+
+def test_headless_config_exists():
+    """Test that headless configuration is present in CONFIG."""
+    assert 'browser' in CONFIG, "CONFIG should have 'browser' section"
+    assert 'headless' in CONFIG['browser'], "CONFIG['browser'] should have 'headless' key"
+
+
+def test_headless_default_is_true():
+    """Test that headless mode defaults to True."""
+    assert CONFIG['browser']['headless'] is True, "Headless should default to True"
+
+
+def test_webdriver_manager_instantiation():
+    """Test that WebDriverManager can be instantiated without a real browser."""
     driver_manager = WebDriverManager()
-    
-    try:
-        logger.info("🚀 Initializing WebDriver...")
-        driver_manager.initialize()
-        
-        driver = driver_manager.get_driver()
-        if driver:
-            logger.info("✅ WebDriver initialized successfully")
-            
-            # Check if headless mode is active
-            capabilities = driver.capabilities
-            logger.info(f"📊 Browser capabilities: {capabilities}")
-            
-            # Navigate to a simple page to test
-            logger.info("🌐 Navigating to test page...")
-            driver.get("https://www.google.com")
-            time.sleep(2)
-            
-            title = driver.title
-            logger.info(f"📄 Page title: {title}")
-            
-            logger.info("✅ Headless mode test completed successfully")
-            
-    except Exception as e:
-        logger.error(f"❌ Error during headless test: {e}")
-    finally:
-        if driver_manager.driver:
-            driver_manager.close()
-            logger.info("🔒 WebDriver closed")
+    assert driver_manager is not None
+    assert not driver_manager.is_active(), "Driver should not be active without initialization"
+
 
 if __name__ == "__main__":
-    test_headless_mode() 
+    test_headless_config_exists()
+    print("OK: Headless config exists")
+    
+    test_headless_default_is_true()
+    print("OK: Headless default is True")
+    
+    test_webdriver_manager_instantiation()
+    print("OK: WebDriverManager instantiation")
+    
+    print("All headless tests passed!")

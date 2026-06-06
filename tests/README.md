@@ -1,6 +1,6 @@
-# WebAutoPy Tests
+# Flashscore Scraper Tests
 
-This directory contains comprehensive tests for the WebAutoPy project, covering all components in the `/data` directory and beyond.
+This directory contains comprehensive tests for the Flashscore Scraper project, covering all components in the `/data` directory and beyond.
 
 ## Test Structure
 

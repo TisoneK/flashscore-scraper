@@ -13,6 +13,7 @@ import threading
 from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
 import logging
+
 # Simple color constants for ANSI escape codes
 class Colors:
     """Simple color constants for console output."""
@@ -47,8 +48,6 @@ from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, Pr
 from rich.align import Align
 from rich.text import Text
 from threading import Lock
-import time
-from typing import Dict, Any, Optional
 from datetime import datetime
 from collections import deque
 
@@ -82,6 +81,7 @@ class PerformanceDisplay:
         self._schedule_next_dt: Optional[datetime] = None
         self.alert_message = None
         self.alert_type = "info"
+        self.messages: List[tuple] = []
         self.lock = Lock()
         self._last_schedule_refresh_ts = 0.0
         
@@ -527,7 +527,6 @@ class PerformanceDisplay:
                     with self.lock:
                         self.alert_message = None
                         self._refresh_layout()
-                import threading
                 threading.Thread(target=clear, daemon=True).start()
 
     def show_status(self, message: str):

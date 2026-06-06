@@ -172,8 +172,8 @@ class JSONStorage:
                     league=match_data["league"],
                     home_team=match_data["home_team"],
                     away_team=match_data["away_team"],
-                    date=match_data["match_date"],
-                    time=match_data["match_time"],
+                    date=match_data.get("match_date", match_data.get("date", "")),
+                    time=match_data.get("match_time", match_data.get("time", "")),
                     match_id=match_data["match_id"]
                 )
                 matches.append(match)

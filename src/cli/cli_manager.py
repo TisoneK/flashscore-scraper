@@ -1565,15 +1565,19 @@ class CLIManager:
         return False
 
     def _display_log_update(self, message):
-        """Display log updates in the UI."""
+        """Display log updates in the UI.
+        
+        IMPORTANT: Do NOT call self.logger.info() here — this method is invoked
+        by the CaptureHandler attached to the root logger. Logging back through
+        any logger that propagates to root would create an infinite recursion
+        (log → CaptureHandler.emit → _display_log_update → log → …).
+        Only update in-memory UI state (critical_messages, performance monitor).
+        """
         # Filter out browser noise
         if any(re.search(pattern, message, re.IGNORECASE) for pattern in self.browser_noise_patterns):
             return
-            
-        # Display the message in the UI
-        self.logger.info(message)
         
-        # Check for critical messages
+        # Check for critical messages (in-memory only, no self.logger call!)
         if any(keyword in message.lower() for keyword in [
             'error', 'warning', 'exception', 'failed', 'critical',
             'timeout', 'not found', 'missing', 'invalid'

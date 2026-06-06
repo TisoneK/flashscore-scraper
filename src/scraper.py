@@ -133,20 +133,41 @@ class FlashscoreScraper:
         import time
         start_time = time.time()
         timeout = 90  # 90 seconds timeout for initialization
-        
+
         logger.info("🔄 Initializing scraper components...")
-        
+
         if status_callback is None:
             status_callback = self.status_callback
-            
+
+        # Pre-check: verify ChromeDriver is available before attempting to launch.
+        # This prevents infinite retry loops when the driver simply isn't installed.
+        try:
+            from src.driver_manager.chrome_driver import ChromeDriverManager
+            config_dict = dict(self.config) if not isinstance(self.config, dict) else self.config
+            chrome_mgr = ChromeDriverManager(config_dict)
+            _, chromedriver_path = chrome_mgr.find_latest_driver_paths()
+            if not chromedriver_path:
+                msg = ("ChromeDriver not found. Run 'fss --init chrome' to install drivers. "
+                       "Cannot proceed without a browser driver.")
+                logger.error(f"❌ {msg}")
+                if status_callback:
+                    status_callback(msg, level="error")
+                from src.core.exceptions import DriverError
+                raise DriverError(msg)
+        except ImportError:
+            pass  # If ChromeDriverManager can't be imported, let the normal flow handle it
+        except (TypeError, AttributeError) as e:
+            logger.warning(f"Pre-check skipped due to {type(e).__name__}: {e}. Proceeding with normal initialization.")
+            # Let the normal driver initialization flow handle it
+
         try:
             self.reporter.status("Launching browser and initializing driver...")
-                
+
             # Initialize the driver manager and get the driver
             self._driver_manager.initialize()
             elapsed = time.time() - start_time
             logger.info(f"✅ Driver manager initialized in {elapsed:.2f}s")
-            
+
             # This will trigger driver creation through the property
             driver = self.driver
             elapsed = time.time() - start_time

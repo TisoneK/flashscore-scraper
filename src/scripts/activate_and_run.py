@@ -51,7 +51,6 @@ def main():
         logger.info("Usage: python activate_and_run.py [command] [args...]")
         logger.info("Commands:")
         logger.info("  init    - Initialize project")
-        logger.info("  ui      - Launch GUI")
         logger.info("  cli     - Launch CLI")
         logger.info("  help    - Show help")
         return 1
@@ -62,14 +61,13 @@ def main():
     # Map commands to arguments
     command_map = {
         "init": ["--init"],
-        "ui": ["--ui"],
         "cli": ["--cli"],
         "help": ["--help"]
     }
     
     if command not in command_map:
         logger.error(f"❌ Unknown command: {command}")
-        logger.info("Available commands: init, ui, cli, help")
+        logger.info("Available commands: init, cli, help")
         return 1
     
     return run_in_venv(command_map[command] + args)

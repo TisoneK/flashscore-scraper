@@ -14,7 +14,7 @@ from typing import Dict, List, Any, Optional, Callable, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from src.core.performance_monitor import PerformanceMonitor
-from src.data.url_builder import UrlBuilder  # Import UrlBuilder
+from src.core.url_builder import UrlBuilder  # Import UrlBuilder
 
 
 @dataclass

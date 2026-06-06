@@ -9,234 +9,70 @@ import time
 import threading
 import pytest
 from unittest.mock import patch, MagicMock
-from src.cli.performance_display import PerformanceDisplay, ProgressBar, MetricsDisplay
+from src.cli.performance_display import PerformanceDisplay, DisplayLine, Colors
+
+
+class TestColors:
+    """Test cases for Colors class."""
+
+    def test_colors_has_reset(self):
+        """Test that Colors has RESET constant."""
+        assert hasattr(Colors, 'RESET')
+        assert isinstance(Colors.RESET, str)
+
+    def test_colors_has_standard_colors(self):
+        """Test that Colors has standard ANSI color codes."""
+        for color_name in ['RED', 'GREEN', 'YELLOW', 'BLUE', 'MAGENTA', 'CYAN', 'WHITE']:
+            assert hasattr(Colors, color_name)
+            assert isinstance(getattr(Colors, color_name), str)
+
+    def test_colors_has_styles(self):
+        """Test that Colors has style codes."""
+        assert hasattr(Colors, 'BOLD')
+        assert hasattr(Colors, 'DIM')
+
+
+class TestDisplayLine:
+    """Test cases for DisplayLine dataclass."""
+
+    def test_display_line_creation(self):
+        """Test creating a DisplayLine."""
+        line = DisplayLine(id="test", content="Hello", line_number=1)
+        assert line.id == "test"
+        assert line.content == "Hello"
+        assert line.line_number == 1
+        assert line.is_permanent is False
+        assert line.last_update == 0.0
+
+    def test_display_line_with_permanent(self):
+        """Test creating a permanent DisplayLine."""
+        line = DisplayLine(id="header", content="Header", line_number=0, is_permanent=True)
+        assert line.is_permanent is True
+
+    def test_display_line_with_timestamp(self):
+        """Test creating a DisplayLine with a timestamp."""
+        line = DisplayLine(id="test", content="Updated", line_number=2, last_update=12345.0)
+        assert line.last_update == 12345.0
 
 
 class TestPerformanceDisplay:
     """Test cases for PerformanceDisplay."""
-    
+
     def test_performance_display_initialization(self):
         """Test performance display initialization."""
-        # Mock the screen clearing to avoid affecting test output
-        with patch('os.system'):
-            display = PerformanceDisplay()
-            
-            assert display.display_lines is not None
-            assert len(display.permanent_lines) > 0
-            assert len(display.dynamic_lines) > 0
-            assert display.metrics_area_start >= 0
-            assert display.progress_area_start >= 0
-            
-    def test_add_permanent_line(self):
-        """Test adding permanent lines."""
-        with patch('os.system'):
-            display = PerformanceDisplay()
-            
-            # Add a permanent line
-            display.add_permanent_line("test_line", "Test Content")
-            
-            assert "test_line" in display.display_lines
-            assert display.display_lines["test_line"].is_permanent
-            assert "test_line" in display.permanent_lines
-            
-    def test_add_dynamic_line(self):
-        """Test adding dynamic lines."""
-        with patch('os.system'):
-            display = PerformanceDisplay()
-            
-            # Add a dynamic line
-            display.add_dynamic_line("test_dynamic", "Dynamic Content")
-            
-            assert "test_dynamic" in display.display_lines
-            assert not display.display_lines["test_dynamic"].is_permanent
-            assert "test_dynamic" in display.dynamic_lines
-            
-    def test_update_metric(self):
-        """Test updating performance metrics."""
-        with patch('os.system'), patch('sys.stdout.write'), patch('sys.stdout.flush'):
-            display = PerformanceDisplay()
-            
-            # Update a metric
-            display.update_metric("memory_usage", 512.5, " MB")
-            
-            line = display.display_lines["memory_usage"]
-            assert "512.5" in line.content
-            assert "MB" in line.content
-            
-    def test_update_progress_bar(self):
-        """Test updating progress bars."""
-        with patch('os.system'), patch('sys.stdout.write'), patch('sys.stdout.flush'):
-            display = PerformanceDisplay()
-            
-            # Update progress bar
-            display.update_progress_bar("overall_progress", 50, 100, "Overall")
-            
-            line = display.display_lines["overall_progress"]
-            assert "50%" in line.content
-            assert "50/100" in line.content
-            
-    def test_update_current_task(self):
-        """Test updating current task description."""
-        with patch('os.system'), patch('sys.stdout.write'), patch('sys.stdout.flush'):
-            display = PerformanceDisplay()
-            
-            # Update current task
-            display.update_current_task("Processing match data...")
-            
-            line = display.display_lines["current_task"]
-            assert "Processing match data" in line.content
-            
-    def test_update_performance_metrics(self):
-        """Test updating all performance metrics at once."""
-        with patch('os.system'), patch('sys.stdout.write'), patch('sys.stdout.flush'):
-            display = PerformanceDisplay()
-            
-            # Update multiple metrics
-            metrics = {
-                'memory_usage': 512.5,
-                'cpu_usage': 75.2,
-                'active_workers': 4,
-                'tasks_processed': 150,
-                'success_rate': 95.5,
-                'average_processing_time': 2.34
-            }
-            
-            display.update_performance_metrics(metrics)
-            
-            # Check that metrics were updated
-            memory_line = display.display_lines["memory_usage"]
-            cpu_line = display.display_lines["cpu_usage"]
-            
-            assert "512.5" in memory_line.content
-            assert "75.2" in cpu_line.content
-            
-    def test_show_alert(self):
-        """Test showing alert messages."""
-        with patch('os.system'), patch('sys.stdout.write'), patch('sys.stdout.flush'):
-            display = PerformanceDisplay()
-            
-            # Show an alert
-            display.show_alert("Test alert message", "info")
-            
-            # The alert should be displayed temporarily
-            # (In a real scenario, this would show on screen)
-            
-    def test_get_display_stats(self):
-        """Test getting display statistics."""
-        with patch('os.system'):
-            display = PerformanceDisplay()
-            
-            stats = display.get_display_stats()
-            
-            assert 'total_lines' in stats
-            assert 'permanent_lines' in stats
-            assert 'dynamic_lines' in stats
-            assert 'metrics_area_size' in stats
-            assert 'progress_area_size' in stats
-            
-            assert stats['total_lines'] > 0
-            assert stats['permanent_lines'] > 0
-            assert stats['dynamic_lines'] > 0
+        display = PerformanceDisplay()
+        assert hasattr(display, 'metrics')
+        assert isinstance(display.metrics, dict)
+        assert hasattr(display, 'lock')
+        assert hasattr(display, '_paused')
+        assert display._paused is False
+        assert hasattr(display, '_is_running')
+        assert display._is_running is True  # Created in running state; stop() sets to False
 
-
-class TestProgressBar:
-    """Test cases for ProgressBar."""
-    
-    def test_progress_bar_initialization(self):
-        """Test progress bar initialization."""
-        bar = ProgressBar("Test Progress", 100)
-        
-        assert bar.description == "Test Progress"
-        assert bar.total == 100
-        assert bar.current == 0
-        assert bar.start_time > 0
-        
-    def test_progress_bar_update(self):
-        """Test progress bar update."""
-        bar = ProgressBar("Test Progress", 100)
-        
-        # Update progress
-        bar.update(50)
-        
-        assert bar.current == 50
-        assert bar.total == 100
-        
-    def test_progress_bar_update_with_new_total(self):
-        """Test progress bar update with new total."""
-        bar = ProgressBar("Test Progress", 100)
-        
-        # Update with new total
-        bar.update(25, 50)
-        
-        assert bar.current == 25
-        assert bar.total == 50
-        
-    def test_get_bar_string(self):
-        """Test getting progress bar string."""
-        bar = ProgressBar("Test Progress", 100)
-        
-        # Test empty progress
-        bar_string = bar.get_bar_string()
-        assert "0%" in bar_string
-        assert "0/100" in bar_string
-        assert "░" * 20 in bar_string  # Empty bar
-        
-        # Test half progress
-        bar.update(50)
-        bar_string = bar.get_bar_string()
-        assert "50%" in bar_string
-        assert "50/100" in bar_string
-        assert "█" * 10 in bar_string  # Half filled
-        assert "░" * 10 in bar_string  # Half empty
-        
-        # Test full progress
-        bar.update(100)
-        bar_string = bar.get_bar_string()
-        assert "100%" in bar_string
-        assert "100/100" in bar_string
-        assert "█" * 20 in bar_string  # Full bar
-        
-    def test_get_bar_string_with_zero_total(self):
-        """Test progress bar string with zero total."""
-        bar = ProgressBar("Test Progress", 0)
-        
-        bar_string = bar.get_bar_string()
-        assert "0%" in bar_string
-        assert "░" * 20 in bar_string  # Empty bar
-
-
-class TestMetricsDisplay:
-    """Test cases for MetricsDisplay."""
-    
-    def test_metrics_display_initialization(self):
-        """Test metrics display initialization."""
-        metrics_display = MetricsDisplay()
-        
-        assert metrics_display.metrics == {}
-        assert metrics_display.last_update == 0.0
-        
     def test_update_metrics(self):
-        """Test updating metrics."""
-        metrics_display = MetricsDisplay()
-        
-        # Update metrics
-        new_metrics = {
-            'memory_usage': 512.5,
-            'cpu_usage': 75.2,
-            'active_workers': 4
-        }
-        
-        metrics_display.update_metrics(new_metrics)
-        
-        assert metrics_display.metrics == new_metrics
-        assert metrics_display.last_update > 0
-        
-    def test_get_formatted_metrics(self):
-        """Test getting formatted metrics."""
-        metrics_display = MetricsDisplay()
-        
-        # Set up metrics
-        metrics_display.metrics = {
+        """Test updating performance metrics."""
+        display = PerformanceDisplay()
+        metrics = {
             'memory_usage': 512.5,
             'cpu_usage': 75.2,
             'active_workers': 4,
@@ -244,101 +80,158 @@ class TestMetricsDisplay:
             'success_rate': 95.5,
             'average_processing_time': 2.34
         }
-        
-        formatted = metrics_display.get_formatted_metrics()
-        
-        assert 'memory_usage' in formatted
-        assert 'cpu_usage' in formatted
-        assert 'active_workers' in formatted
-        assert 'tasks_processed' in formatted
-        assert 'success_rate' in formatted
-        assert 'average_processing_time' in formatted
-        
-        # Check formatting
-        assert "512.5 MB" in formatted['memory_usage']
-        assert "75.2%" in formatted['cpu_usage']
-        assert "4" in formatted['active_workers']
-        assert "150" in formatted['tasks_processed']
-        assert "95.5%" in formatted['success_rate']
-        assert "2.34s" in formatted['average_processing_time']
+        display.update_metrics(metrics)
+        assert display.metrics['memory_usage'] == 512.5
+        assert display.metrics['cpu_usage'] == 75.2
+        assert display.metrics['active_workers'] == 4
+
+    def test_update_progress(self):
+        """Test updating overall progress."""
+        display = PerformanceDisplay()
+        display.update_progress(50, 100, description="Overall")
+        assert display.progress_current == 50
+        assert display.progress_total == 100
+        assert display.progress_desc == "Overall"
+
+    def test_update_batch_progress(self):
+        """Test updating batch progress."""
+        display = PerformanceDisplay()
+        display.update_batch_progress(15, 20, description="Batch")
+        assert display.batch_current == 15
+        assert display.batch_total == 20
+        assert display.batch_desc == "Batch"
+
+    def test_update_current_task(self):
+        """Test updating current task description."""
+        display = PerformanceDisplay()
+        display.update_current_task("Processing match data...")
+        assert display.current_task == "Processing match data..."
+
+    def test_update_current_match(self):
+        """Test updating current match description."""
+        display = PerformanceDisplay()
+        display.update_current_match("Lakers vs Celtics")
+        assert display.current_match == "Lakers vs Celtics"
+
+    def test_show_alert(self):
+        """Test showing alert messages."""
+        display = PerformanceDisplay()
+        display.show_alert("Test alert message", alert_type="info")
+        assert display.alert_message == "Test alert message"
+        assert display.alert_type == "info"
+
+    def test_show_status(self):
+        """Test showing status messages (persistent alert)."""
+        display = PerformanceDisplay()
+        display.show_status("Running...")
+        assert display.alert_message == "Running..."
+        assert display.alert_type == "info"
+
+    def test_update_status_indicators(self):
+        """Test updating status indicators."""
+        display = PerformanceDisplay()
+        indicators = {'network': 'green', 'driver': 'yellow', 'memory': 'red'}
+        display.update_status_indicators(indicators)
+        assert display.status_indicators == indicators
+
+    def test_update_schedule_info(self):
+        """Test updating schedule information."""
+        display = PerformanceDisplay()
+        display.update_schedule_info("Daily Run", "2026-06-07 09:00")
+        assert display.schedule_label == "Daily Run"
+        assert display.schedule_next_text == "2026-06-07 09:00"
+
+    def test_set_stop_callback(self):
+        """Test setting stop callback."""
+        display = PerformanceDisplay()
+        callback = MagicMock()
+        display.set_stop_callback(callback)
+        assert display._stop_callback == callback
+
+    def test_add_subtask(self):
+        """Test adding subtasks."""
+        display = PerformanceDisplay()
+        display.add_subtask("Loading odds...")
+        display.add_subtask("Extracting H2H...")
+        assert len(display.subtasks) == 2
+        assert "Loading odds..." in display.subtasks
+        assert "Extracting H2H..." in display.subtasks
+
+    def test_clear_subtasks(self):
+        """Test clearing subtasks."""
+        display = PerformanceDisplay()
+        display.add_subtask("Task 1")
+        display.add_subtask("Task 2")
+        display.clear_subtasks()
+        assert len(display.subtasks) == 0
+
+    def test_subtask_maxlen(self):
+        """Test subtask deque maxlen."""
+        display = PerformanceDisplay()
+        for i in range(10):
+            display.add_subtask(f"Task {i}")
+        assert len(display.subtasks) == 6
+        assert "Task 9" in display.subtasks
+
+    def test_reset_batch_progress(self):
+        """Test resetting batch progress."""
+        display = PerformanceDisplay()
+        display.update_batch_progress(10, 20, description="Old Batch")
+        display.reset_batch_progress(50, description="New Batch")
+        assert display.batch_total == 50
+        assert display.batch_desc == "New Batch"
+
+    def test_stop_sets_flag(self):
+        """Test that stop() sets the running flag to False."""
+        display = PerformanceDisplay()
+        display._is_running = True
+        display.stop()
+        assert display._is_running is False
 
 
-class TestPerformanceDisplayIntegration:
-    """Integration tests for performance display system."""
-    
-    def test_display_with_real_metrics(self):
-        """Test display with realistic performance metrics."""
-        with patch('os.system'), patch('sys.stdout.write'), patch('sys.stdout.flush'):
-            display = PerformanceDisplay()
-            
-            # Simulate real performance metrics
-            metrics = {
-                'memory_usage': 1024.5,
-                'cpu_usage': 85.3,
-                'active_workers': 3,
-                'tasks_processed': 250,
-                'success_rate': 92.8,
-                'average_processing_time': 1.45
-            }
-            
-            # Update display with metrics
-            display.update_performance_metrics(metrics)
-            
-            # Update progress
-            display.update_progress_bar("overall_progress", 75, 100, "Overall")
-            display.update_progress_bar("batch_progress", 15, 20, "Batch")
-            display.update_current_task("Extracting match data from page 15/20")
-            
-            # Verify updates
-            memory_line = display.display_lines["memory_usage"]
-            cpu_line = display.display_lines["cpu_usage"]
-            overall_line = display.display_lines["overall_progress"]
-            batch_line = display.display_lines["batch_progress"]
-            task_line = display.display_lines["current_task"]
-            
-            assert "1024.5" in memory_line.content
-            assert "85.3" in cpu_line.content
-            assert "75%" in overall_line.content
-            assert "75%" in batch_line.content
-            assert "Extracting match data" in task_line.content
-            
-    def test_thread_safety(self):
-        """Test thread safety of the display system."""
-        with patch('os.system'), patch('sys.stdout.write'), patch('sys.stdout.flush'):
-            display = PerformanceDisplay()
-            
-            # Create multiple threads updating the display
-            def update_metrics():
-                for i in range(10):
-                    metrics = {
-                        'memory_usage': 500 + i,
-                        'cpu_usage': 50 + i,
-                        'active_workers': i % 4 + 1
-                    }
-                    display.update_performance_metrics(metrics)
-                    time.sleep(0.01)
-                    
-            def update_progress():
-                for i in range(10):
-                    display.update_progress_bar("overall_progress", i, 10, "Overall")
-                    time.sleep(0.01)
-                    
-            # Start threads
-            thread1 = threading.Thread(target=update_metrics)
-            thread2 = threading.Thread(target=update_progress)
-            
-            thread1.start()
-            thread2.start()
-            
-            thread1.join()
-            thread2.join()
-            
-            # Display should remain stable despite concurrent updates
-            assert len(display.display_lines) > 0
-            assert display.metrics_area_start >= 0
-            assert display.progress_area_start >= 0
+class TestPerformanceDisplayThreadSafety:
+    """Test thread safety of the display system."""
+
+    def test_concurrent_metric_updates(self):
+        """Test that concurrent metric updates don't corrupt data."""
+        display = PerformanceDisplay()
+
+        def update_metrics(worker_id):
+            for i in range(50):
+                display.update_metrics({
+                    f'metric_{worker_id}': i,
+                    'shared_counter': i
+                })
+
+        threads = [
+            threading.Thread(target=update_metrics, args=(f"w{i}",))
+            for i in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        for i in range(4):
+            assert f'metric_w{i}' in display.metrics
+
+    def test_concurrent_progress_updates(self):
+        """Test that concurrent progress updates are handled safely."""
+        display = PerformanceDisplay()
+
+        def update_progress():
+            for i in range(50):
+                display.update_progress(i, 100)
+
+        threads = [
+            threading.Thread(target=update_progress)
+            for _ in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert 0 <= display.progress_current <= 100
 
 
 if __name__ == "__main__":
-    # Run all tests
-    pytest.main([__file__, "-v"]) 
+    pytest.main([__file__, "-v"])

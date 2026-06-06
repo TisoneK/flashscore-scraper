@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "flashscore-scraper"
 version = "1.0.0"
-description = "A web scraper for FlashScore basketball data with CLI and GUI interfaces"
+description = "A command-line basketball match data scraper for Flashscore"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -38,10 +38,10 @@ dependencies = [
     "InquirerPy>=0.3.4",
     "rich>=13.0.0",
     "tqdm>=4.65.0",
-    "pathlib2>=2.3.7",
     "typing-extensions>=4.9.0",
     "ping3",
-    "psutil>=5.9.0"
+    "psutil>=5.9.0",
+    "requests>=2.31.0"
 ]
 
 [project.optional-dependencies]
@@ -64,13 +64,12 @@ docs = [
     "sphinx-rtd-theme>=1.2.0",
     "myst-parser>=1.0.0",
 ]
-network = ["ping3>=4.0.8"]
 
 [project.urls]
-Homepage = "https://github.com/your-username/flashscore-scraper"
+Homepage = "https://github.com/TisoneK/flashscore-scraper"
 Documentation = "https://flashscore-scraper.readthedocs.io"
-Repository = "https://github.com/your-username/flashscore-scraper.git"
-"Bug Tracker" = "https://github.com/your-username/flashscore-scraper/issues"
+Repository = "https://github.com/TisoneK/flashscore-scraper.git"
+"Bug Tracker" = "https://github.com/TisoneK/flashscore-scraper/issues"
 
 [project.scripts]
 flashscore-scraper = "src.cli.cli_manager:main"
@@ -188,52 +187,4 @@ exclude = [
     "env",
 ]
 
-[tool.poetry]
-name = "flashscore-scraper"
-version = "1.0.0"
-description = "A web scraper for FlashScore basketball data with CLI and GUI interfaces"
-authors = ["FlashScore Scraper Team <dev@flashscore-scraper.com>"]
-readme = "README.md"
-packages = [{include = "src"}]
-
-[tool.poetry.dependencies]
-python = "^3.8"
-selenium = "^4.18.1"
-webdriver-manager = "^4.0.1"
-pandas = "^2.1.0"
-InquirerPy = "^0.3.4"
-rich = "^13.0.0"
-tqdm = "^4.65.0"
-pathlib2 = "^2.3.7"
-typing-extensions = "^4.9.0"
-psutil = "^5.9.0"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.0.0"
-pytest-cov = "^4.0.0"
-black = "^23.0.0"
-isort = "^5.12.0"
-flake8 = "^6.0.0"
-mypy = "^1.0.0"
-pre-commit = "^3.0.0"
-
-[tool.poetry.group.test.dependencies]
-pytest = "^7.0.0"
-pytest-cov = "^4.0.0"
-pytest-mock = "^3.10.0"
-
-[tool.poetry.group.docs.dependencies]
-sphinx = "^6.0.0"
-sphinx-rtd-theme = "^1.2.0"
-myst-parser = "^1.0.0"
-
-[tool.poetry.scripts]
-flashscore-scraper = "src.cli.cli_manager:main"
-fss = "src.cli.cli_manager:main"
-fss-cleanup = "src.utils.cleanup:main"
-
-[tool.poetry.urls]
-Homepage = "https://github.com/your-username/flashscore-scraper"
-Documentation = "https://flashscore-scraper.readthedocs.io"
-Repository = "https://github.com/your-username/flashscore-scraper.git"
-"Bug Tracker" = "https://github.com/your-username/flashscore-scraper/issues" 
+ 
