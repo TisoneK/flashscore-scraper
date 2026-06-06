@@ -2,7 +2,7 @@
 
 A powerful command-line basketball match data scraper designed to extract comprehensive match data from Flashscore.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Python 3.8+
@@ -46,7 +46,7 @@ fss --init firefox
 fss    # or: fss -c
 ```
 
-### 🛠️ Troubleshooting Installation Issues
+### Troubleshooting Installation Issues
 
 If you encounter corrupted package installations (e.g., `ModuleNotFoundError: No module named 'src'`), use the cleanup utility:
 
@@ -69,7 +69,7 @@ python -m src.utils.cleanup --clean  # Clean only (no reinstall)
 
 ---
 
-## 🖥️ CLI Quick Reference
+## CLI Quick Reference
 
 | Command | Description |
 |---------|-------------|
@@ -83,16 +83,18 @@ python -m src.utils.cleanup --clean  # Clean only (no reinstall)
 
 ---
 
-## 🎯 Features
+## Features
 
 - **CLI Interface**: Intuitive command-line interface with interactive menus and rich output
 - **Multi-threaded Scraping**: Efficient parallel processing of matches
 - **Data Export**: Save results in multiple formats (JSON, CSV)
 - **Configurable**: Customize scraping behavior through configuration files
+- **Scheduled Scraping**: Set up recurring scraping sessions with custom intervals
+- **Performance Monitoring**: Live resource and progress tracking
 
 ---
 
-## ⚙️ Settings
+## Settings
 
 Accessible via the CLI "Configure Settings" menu:
 - **Browser Settings:**
@@ -113,36 +115,32 @@ Accessible via the CLI "Configure Settings" menu:
 
 ---
 
-## 🔮 Prediction (ScoreWise)
-
-- Access the Prediction menu from the CLI main menu
-- Select prediction range: Yesterday, Today, Tomorrow, All
-- Uses the ScoreWise algorithm to analyze match data and generate predictions for Over/Under bets
-- View prediction results directly in the CLI
-
----
-
-## 📊 Data Output
+## Data Output
 
 - **JSON Storage:** Structured data written under `output/json/`
 - **Daily Files:** Files named like `matches_DDMMYY.json` and `results_DDMMYY.json`
 - **Complete/Incomplete Tracking:** Separate handling of successful and skipped matches (with reasons)
 - **Metadata Tracking:** File info, processing statistics, timestamps
 
+### Output Schema
+
+Each match record includes:
+- Match metadata: `match_id`, `home_team`, `away_team`, `date`, `league`, `status`
+- Odds: `over_under` line + bookmaker odds
+- H2H history: last N completed matches between the two teams
+- Results: final scores (when available)
+
+External tools consume this JSON directly — no API server required.
+
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 flashscore-scraper/
 ├── main.py                 # Main entry point (CLI + cleanup)
-├── config.py               # Root configuration (legacy hooks)
 ├── requirements.txt        # Dependencies
 ├── pyproject.toml          # Project configuration (entry points: fss, fss-cleanup)
-├── scripts/                # Root utilities
-│   ├── test_large_download.py
-│   ├── update_config_imports.py
-│   └── update_config_imports_to_utils.py
 ├── drivers/                # Browser drivers storage
 ├── output/                 # Outputs
 │   ├── json/               # `matches_DDMMYY.json`, `results_DDMMYY.json`
@@ -153,76 +151,19 @@ flashscore-scraper/
     ├── driver.py           # WebDriver bootstrap
     ├── models.py           # Data models
     ├── scraper.py          # Main scraping workflows
-    │
-    ├── cli/
-    │   ├── __init__.py
-    │   ├── cli_manager.py  # CLI entry (also exposed as `fss`)
-    │   ├── cli_settings.json
-    │   ├── colors.py
-    │   ├── display.py
-    │   ├── performance_display.py
-    │   ├── progress.py
-    │   └── prompts.py
-    │
-    ├── core/
-    │   ├── __init__.py
-    │   ├── batch_processor.py
-    │   ├── error_handler.py
-    │   ├── exceptions.py
-    │   ├── graceful_degradation.py
-    │   ├── network_monitor.py
-    │   ├── performance_monitor.py
-    │   ├── resource_manager.py
-    │   ├── retry_manager.py
-    │   ├── tab_manager.py
-    │   ├── url_builder.py
-    │   ├── url_verifier.py
-    │   └── worker_pool.py
-    │
-    ├── data/
-    │   ├── __init__.py
-    │   ├── elements_model.py
-    │   ├── extractor/
-    │   ├── loader/
-    │   └── verifier/
-    │
-    ├── driver_manager/
-    │   ├── __init__.py
-    │   ├── chrome_driver.py
-    │   ├── downloader.py
-    │   ├── driver_installer.py
-    │   ├── exceptions.py
-    │   ├── firefox_driver.py
-    │   ├── progress.py
-    │   └── web_driver_manager.py
-    │
-    ├── prediction/
-    │   ├── __init__.py
-    │   ├── calculator/
-    │   ├── example_usage.py
-    │   └── prediction_data_loader.py
-    │
-    ├── scripts/
-    │   ├── activate_and_run.py
-    │   ├── demo_performance_display.py
-    │   ├── run_cli.py
-    │   ├── setup_drivers.py
-    │   └── setup_platform.py
-    │
-    ├── storage/
-    │   └── json_storage.py
-    │
-    └── utils/
-        ├── __init__.py
-        ├── cleanup.py
-        ├── config_loader.py
-        ├── progress_monitor.py
-        └── selenium_utils.py
+    ├── cli/                # CLI interface (menus, display, prompts, colors, progress)
+    ├── core/               # Core utilities (batch, retry, network, tabs, URLs)
+    ├── data/               # Data layer (extractors, loaders, verifiers)
+    ├── driver_manager/     # Chrome/Firefox driver management
+    ├── reporting/          # Reporter interface
+    ├── scripts/            # Setup and run scripts
+    ├── storage/            # JSON and database storage
+    └── utils/              # Selenium utils, config loader, cleanup
 ```
 
 ---
 
-## ℹ️ Troubleshooting
+## Troubleshooting
 
 - **Driver issues:**
   - `fss --install-drivers chrome [VERSION]`
@@ -234,6 +175,6 @@ flashscore-scraper/
 
 ---
 
-## 📚 Documentation
+## Documentation
 
-See the `docs/` directory for more detailed guides and technical documentation. 
+See the `docs/` directory for more detailed guides and technical documentation.

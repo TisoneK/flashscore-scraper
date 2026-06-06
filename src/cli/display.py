@@ -35,14 +35,6 @@ class ConsoleDisplay:
         """
         self.console.print(Panel(settings_text, box=box.ROUNDED, expand=False))
 
-    def show_prediction_header(self):
-        """Show prediction menu header."""
-        prediction_text = """
-[bold purple]🔮 Match Predictions[/bold purple]
-[dim]Analyze match data and generate predictions[/dim]
-        """
-        self.console.print(Panel(prediction_text, box=box.ROUNDED, expand=False))
-
     def show_status_header(self):
         """Show status page header."""
         status_text = """

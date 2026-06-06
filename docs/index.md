@@ -1,76 +1,87 @@
-# ScoreWise Prediction Calculator Algorithm
+# Flashscore Scraper — Documentation Index
 
-> **Note:** The Flashscore Basketball Scraper is now CLI-only. All UI/GUI features and instructions have been removed. Please use the CLI for all scraping and configuration tasks.
-
----
-
-## Algorithm Steps
-
-### 1. Data Collection
-
-- Gather H2H data for at least 6 previous matchups between the two teams.
-- Collect bookmaker alternatives (total match score, team scores).
-
-### 2. Statistical Analysis
-
-- **Calculate total scores** for each historical matchup.
-- **Calculate averages**:
-  - Average match total
-  - Average home team score
-  - Average away team score
-- **Calculate rate values**:
-  - For each H2H match, compute the difference between the actual total score and the bookmaker's alternative (line).
-- **Calculate average rates**:
-  - Average the rate values across all H2H matches.
-- **Perform test adjustments**:
-  - Adjust the bookmaker's line by ±7 points to test the sensitivity of the prediction.
-
-### 3. Prediction Rules
-
-- **Over Bet**:
-  - The average rate is between +7 and +20,
-  - At least 4 out of 6 previous matches had higher scores than the bookmaker's line,
-  - The decrement test (number of matches above the line when the line is decreased by 7) is ≥ 1.
-- **Under Bet**:
-  - The average rate is between -7 and -20,
-  - At least 4 out of 6 previous matches had lower scores than the bookmaker's line,
-  - The increment test (number of matches below the line when the line is increased by 7) is ≤ -1.
-- **No Bet**:
-  - When neither Over nor Under criteria are fully satisfied.
+> **Note:** The Flashscore Basketball Scraper is a CLI-only tool focused on structured match data extraction. All prediction/ScoreWise functionality has been moved to a separate repository.
 
 ---
 
-## Example
+## Scraper Output Schema
 
-Suppose you have the following H2H totals and bookmaker line:
+The scraper produces structured JSON files under `output/<date>/matches_<date>.json`. Each match record contains:
 
-- H2H totals: 170, 175, 180, 165, 178, 172
-- Bookmaker line: 172
+### Match Metadata
+| Field | Type | Description |
+|-------|------|-------------|
+| `match_id` | `str` | Unique Flashscore match identifier |
+| `home_team` | `str` | Home team name |
+| `away_team` | `str` | Away team name |
+| `date` | `str` | Match date (DD.MM.YYYY) |
+| `time` | `str` | Match time (HH:MM) |
+| `league` | `str` | League/tournament name |
+| `country` | `str` | Country |
+| `status` | `str` | Match status (scheduled, in-progress, completed, etc.) |
 
-**Step 1:** Calculate rate values:  
-- 170-172 = -2  
-- 175-172 = +3  
-- 180-172 = +8  
-- 165-172 = -7  
-- 178-172 = +6  
-- 172-172 = 0  
+### Odds Data
+| Field | Type | Description |
+|-------|------|-------------|
+| `match_total` | `float` | Bookmaker over/under line |
+| `over_odds` | `float` | Over odds value |
+| `under_odds` | `float` | Under odds value |
+| `home_odds` | `float` | Home team moneyline odds |
+| `away_odds` | `float` | Away team moneyline odds |
 
-**Step 2:** Average rate:  
-(-2 + 3 + 8 - 7 + 6 + 0) / 6 = +1.33
+### H2H (Head-to-Head) History
+| Field | Type | Description |
+|-------|------|-------------|
+| `date` | `str` | H2H match date |
+| `home_team` | `str` | Home team in H2H match |
+| `away_team` | `str` | Away team in H2H match |
+| `home_score` | `int` | Home team score |
+| `away_score` | `int` | Away team score |
+| `competition` | `str` | Competition/league name |
 
-**Step 3:** Count matches above line:  
-3 out of 6
-
-**Step 4:** Test adjustments:  
-- Decrement test: Bookmaker line -7 = 165, count matches above 165
-- Increment test: Bookmaker line +7 = 179, count matches below 179
-
-**Step 5:** Apply rules:  
-- Average rate is not between +7 and +20 or -7 and -20, so **No Bet**.
+### Results (Final Scores)
+| Field | Type | Description |
+|-------|------|-------------|
+| `home_score` | `int` | Final home team score |
+| `away_score` | `int` | Final away team score |
+| `match_status` | `str` | Final match status |
 
 ---
 
-## References
+## Data Consumption
 
-- [ScoreWise README](https://github.com/TisoneK/ScoreWise/blob/master/README.md)
-- [ScoreWise Algorithm Documentation](https://github.com/TisoneK/ScoreWise/blob/master/scorewise_calculator_algorithm.md)
+External tools (e.g., ScoreWise) consume scraper output by reading the JSON files directly. No API server is required — the scraper writes structured data to disk, and downstream systems read from there.
+
+### Example: Reading match data programmatically
+
+```python
+import json
+from pathlib import Path
+
+# Load the latest match output
+output_dir = Path("output")
+date_dirs = sorted(output_dir.iterdir())
+latest = date_dirs[-1] if date_dirs else None
+
+if latest:
+    match_files = sorted(latest.glob("matches_*.json"))
+    if match_files:
+        with open(match_files[-1]) as f:
+            data = json.load(f)
+
+        for match in data.get("matches", []):
+            print(f"{match['home_team']} vs {match['away_team']}")
+            if match.get("odds"):
+                print(f"  Line: {match['odds'].get('match_total', 'N/A')}")
+            if match.get("h2h_matches"):
+                print(f"  H2H games: {len(match['h2h_matches'])}")
+```
+
+---
+
+## Related Documentation
+
+- [Fragile Selectors Watchlist](fragile_selectors_watchlist.md) — CSS selectors that may break with Flashscore UI updates
+- [Integration Guide](integration_guide.md) — Output schema and URL structure reference
+- [Results Update Guide](results_update_guide.md) — Workflow for updating match results
+- [Development Plan](dev/plan.md) — Scraper-only roadmap and priorities

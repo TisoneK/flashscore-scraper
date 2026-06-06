@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from core.performance_monitor import PerformanceMonitor
 from core.resource_manager import ResourceManager
 from driver_manager.chrome_driver import ChromeDriverManager
-from config import CONFIG
+from src.utils.config_loader import CONFIG
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

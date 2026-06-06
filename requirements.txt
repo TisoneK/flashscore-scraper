@@ -19,8 +19,4 @@ ping3
 requests>=2.31.0
 
 # Performance monitoring
-psutil==5.9.0 
-
-# API
-fastapi==0.112.2
-uvicorn[standard]==0.30.6
+psutil==5.9.0

@@ -35,10 +35,6 @@ class ConfigError(FlashscoreScraperError):
     """Raised for configuration errors (invalid/missing config, etc)."""
     pass
 
-class PredictionError(FlashscoreScraperError):
-    """Raised for prediction module errors (model, calculation, etc)."""
-    pass
-
 class UIError(FlashscoreScraperError):
     """Raised for UI-related errors (CLI, GUI, display, etc)."""
     pass

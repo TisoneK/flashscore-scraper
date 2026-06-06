@@ -29,9 +29,7 @@ from .prompts import ScraperPrompts
 from .display import ConsoleDisplay
 from .colors import ColoredDisplay
 from .progress import ProgressManager
-from src.prediction import PredictionService
 from src.models import MatchModel, OddsModel, H2HMatchModel
-from src.prediction.prediction_data_loader import load_matches
 from .performance_display import PerformanceDisplay
 from src.core.performance_monitor import PerformanceMonitor
 
@@ -547,7 +545,6 @@ class CLIManager:
                     "Start Scraping",
                     "Configure Settings",
                     "View Status",
-                    "Prediction",
                     "Exit"
                 ])
                 action = self.prompts.ask_main_action_dynamic(choices, default=choices[0])
@@ -575,8 +572,6 @@ class CLIManager:
                 self.configure_settings()
             elif action == "View Status":
                 self.view_status()
-            elif action == "Prediction":
-                self.run_prediction_menu()
             elif action == "Exit":
                 # Stop background schedule if running and notify
                 try:
@@ -626,8 +621,6 @@ class CLIManager:
             self.display.show_scraping_header()
         elif context == 'settings':
             self.display.show_settings_header()
-        elif context == 'prediction':
-            self.display.show_prediction_header()
         elif context == 'status':
             self.display.show_status_header()
         elif context == 'results_scraping':
@@ -766,203 +759,6 @@ class CLIManager:
                 self.prompts.ask_back()
                 break
 
-    def run_prediction_menu(self):
-        while True:
-            self._clear_and_header('prediction')
-            range_choice = self.prompts.ask_prediction_range()
-            if range_choice == "Back":
-                # Return to main menu (will clear and show header in next loop)
-                break
-            self.handle_prediction_range(range_choice)
-
-    def handle_prediction_range(self, range_choice):
-        from datetime import datetime, timedelta
-        from src.prediction import PredictionService
-        from src.prediction.prediction_data_loader import load_matches
-        from src.utils import get_scraping_date
-
-        today = datetime.now().strftime('%d.%m.%Y')
-        yesterday = (datetime.now() - timedelta(days=1)).strftime('%d.%m.%Y')
-        date_filter = None
-        if range_choice == "Today":
-            date_filter = today
-            day_for_file = "Today"
-        elif range_choice == "Yesterday":
-            date_filter = yesterday
-            day_for_file = "Yesterday"
-        elif range_choice == "Tomorrow":
-            date_filter = (datetime.now() + timedelta(days=1)).strftime('%d.%m.%Y')
-            day_for_file = "Tomorrow"
-        else:
-            day_for_file = "Today"
-        # else: All (no filter)
-
-        # Load all matches with debug flag
-        match_models = load_matches(date_filter=date_filter, status="complete", debug=self.debug)
-        if not match_models:
-            if range_choice == "Tomorrow":
-                self.colored_display.show_warning_message("No completed matches found for tomorrow. Try scraping tomorrow's matches first, then run predictions.")
-            elif range_choice == "Today":
-                self.colored_display.show_warning_message("No completed matches found for today. Try scraping today's matches first, then run predictions.")
-            elif range_choice == "Yesterday":
-                self.colored_display.show_warning_message("No completed matches found for yesterday. Try scraping yesterday's matches first, then run predictions.")
-            else:
-                self.colored_display.show_warning_message("No completed matches found for the selected range.")
-            # Wait for user to read the message
-            input("\nPress Enter to continue...")
-            return
-
-        # Run predictions first
-        prediction_service = PredictionService()
-        results = []
-        match_id_map = {}
-        for match in match_models:
-            result = prediction_service.generate_prediction(match)
-            if result.success and result.prediction:
-                pred = result.prediction
-                
-                # Calculate AVG (average H2H total)
-                h2h_totals = pred.h2h_totals
-                avg_h2h = sum(h2h_totals) / len(h2h_totals) if h2h_totals else 0
-                
-                # Calculate RATIO (how many times went over/under)
-                matches_above = pred.matches_above_line
-                matches_below = pred.matches_below_line
-                total_matches = pred.total_matches
-                
-                # Show appropriate ratio based on prediction type
-                if pred.recommendation.value == 'OVER':
-                    ratio = f"{matches_above}/{total_matches}"
-                elif pred.recommendation.value == 'UNDER':
-                    ratio = f"{matches_below}/{total_matches}"
-                else:  # NO_BET
-                    ratio = f"{matches_above}/{total_matches}"  # Default to matches_above
-                
-                # Format date properly
-                date_str = match.date if match.date else "N/A"
-                time_str = match.time if match.time else ""
-                date_time = f"{date_str} ({time_str})" if time_str else date_str
-                
-                # Format country and league
-                country = match.country if match.country else "N/A"
-                league = match.league if match.league else "N/A"
-                
-                summary = {
-                    "date": date_time,
-                    "country": country,
-                    "league": league,
-                    "home": match.home_team,
-                    "away": match.away_team,
-                    "line": match.odds.match_total if match.odds else 0,
-                    "avg": round(avg_h2h, 1),
-                    "ratio": ratio,
-                    "prediction": pred.recommendation.value,
-                    "winner": pred.team_winner.value,
-                    "confidence": pred.confidence.value,
-                    "avg_rate": f"{pred.average_rate:.2f}",
-                    "match_id": match.match_id,
-                    "winning_streak_data": pred.winning_streak_data.__dict__ if hasattr(pred, 'winning_streak_data') else {},
-                    "home_odds": match.odds.home_odds if match.odds and match.odds.home_odds is not None else 'N/A',
-                    "away_odds": match.odds.away_odds if match.odds and match.odds.away_odds is not None else 'N/A',
-                    "over_odds": match.odds.over_odds if match.odds and match.odds.over_odds is not None else 'N/A',
-                    "under_odds": match.odds.under_odds if match.odds and match.odds.under_odds is not None else 'N/A',
-                }
-                results.append(summary)
-                match_id_map[match.match_id] = (match, pred)
-
-        # Display initial results
-        if not results:
-            self.colored_display.show_warning_message("No valid predictions for the selected range.")
-            return
-        
-        # Sort results by time by default
-        results = self.sort_results_by_time(results)
-        
-        # Strictly separate actionable tables
-        actionable_over_under = []
-        actionable_home_away = []
-        for r in results:
-            # Table 1: OVER/UNDER
-            if r['prediction'] in ['OVER', 'UNDER']:
-                actionable_over_under.append(r)
-            # Table 2: Home/Away
-            if r['prediction'] == 'NO_BET':
-                actionable_home_away.append(r)
-        # Only show matches that qualify for at least one table
-        # Clear console and show prediction header
-        self._clear_and_header('prediction')
-        self.colored_display.show_dual_prediction_tables(actionable_over_under, actionable_home_away)
-        print()
-
-        # Ask if user wants to filter, sort, or proceed
-        filter_choice = self.prompts.ask_filter_choice()
-        if filter_choice == "Back":
-            # Return to prediction menu (will clear and show header in next loop)
-            return
-        elif filter_choice == "Filter Results":
-            # Apply filters
-            filtered_results = self.apply_prediction_filters(results, match_id_map)
-            if filtered_results:
-                # Re-separate filtered results
-                filtered_actionable = [r for r in filtered_results if r['prediction'] in ['OVER', 'UNDER']]
-                filtered_no_bet = [r for r in filtered_results if r['prediction'] == 'NO_BET']
-                
-                # Clear console and show prediction header
-                self._clear_and_header('prediction')
-                
-                # Re-display filtered results
-                self.colored_display.show_dual_prediction_tables(filtered_actionable, filtered_no_bet)
-                print()
-                results = filtered_results  # Update results for post-actions
-        elif filter_choice == "Sort Results":
-            # Sort results
-            sorted_results = self.sort_prediction_results(results)
-            if sorted_results:
-                # Re-separate sorted results
-                sorted_actionable = [r for r in sorted_results if r['prediction'] in ['OVER', 'UNDER']]
-                sorted_no_bet = [r for r in sorted_results if r['prediction'] == 'NO_BET']
-                
-                # Clear console and show prediction header
-                self._clear_and_header('prediction')
-                
-                # Re-display sorted results
-                self.colored_display.show_dual_prediction_tables(sorted_actionable, sorted_no_bet)
-                print()
-                results = sorted_results  # Update results for post-actions
-
-        # Post-summary actions
-        match_choices = [f"{r['date']} | {r['home']} vs {r['away']} | {r['match_id']}" for r in results]
-        while True:
-            action = self.prompts.ask_post_summary_action(match_choices)
-            if action == "back":
-                return
-            elif action == "details":
-                selected = self.prompts.ask_select_match(match_choices)
-                if selected == "Back":
-                    continue
-                # Extract match_id from choice
-                match_id = selected.split("|")[-1].strip()
-                match, pred = match_id_map[match_id]
-                self.display_prediction_details(match, pred)
-            elif action == "export":
-                fmt = self.prompts.ask_export_format()
-                if fmt == "Back":
-                    continue
-                file_date = get_scraping_date(day_for_file)
-                filename = f"output/predictions_{file_date}.{fmt.lower()}"
-                try:
-                    if fmt == "CSV":
-                        with open(filename, "w", newline='', encoding="utf-8") as f:
-                            writer = csv.DictWriter(f, fieldnames=["date", "home", "away", "line", "prediction", "confidence", "avg_rate", "match_id"])
-                            writer.writeheader()
-                            writer.writerows(results)
-                    elif fmt == "JSON":
-                        with open(filename, "w", encoding="utf-8") as f:
-                            pyjson.dump(results, f, ensure_ascii=False, indent=2)
-                    print(f"Exported predictions to {filename}")
-                except Exception as e:
-                    print(f"Error exporting predictions: {e}")
-
     def apply_filters(self, results, match_id_map):
         """Apply league and team filters to results."""
         # Get all unique leagues from results
@@ -1004,128 +800,6 @@ class CLIManager:
 
         return results
 
-    def apply_prediction_filters(self, results, match_id_map):
-        """Apply comprehensive prediction filters."""
-        filter_choice = self.prompts.ask_prediction_filter()
-        
-        if filter_choice == "Back":
-            return results
-            
-        filtered_results = []
-        
-        for r in results:
-            include = True
-            
-            if filter_choice == "OVER predictions only":
-                include = r['prediction'] == 'OVER'
-            elif filter_choice == "UNDER predictions only":
-                include = r['prediction'] == 'UNDER'
-            elif filter_choice == "NO_BET predictions only":
-                include = r['prediction'] == 'NO_BET'
-            elif filter_choice == "HIGH confidence only":
-                include = r['confidence'] == 'HIGH'
-            elif filter_choice == "MEDIUM confidence only":
-                include = r['confidence'] == 'MEDIUM'
-            elif filter_choice == "LOW confidence only":
-                include = r['confidence'] == 'LOW'
-            elif filter_choice == "HOME_TEAM winners only":
-                include = r['winner'] == 'HOME_TEAM'
-            elif filter_choice == "AWAY_TEAM winners only":
-                include = r['winner'] == 'AWAY_TEAM'
-            elif filter_choice == "NO_BET winners only":
-                include = r['winner'] == 'NO_BET'
-            elif filter_choice == "Custom filter":
-                custom_filter = self.prompts.ask_custom_filter()
-                include = self._apply_custom_filter(r, custom_filter, match_id_map)
-            
-            if include:
-                filtered_results.append(r)
-        
-        if not filtered_results:
-            self.colored_display.show_warning_message(f"No matches found for filter: {filter_choice}")
-            return []
-            
-        return filtered_results
-
-    def _apply_custom_filter(self, result, custom_filter, match_id_map):
-        """Apply custom filter to a single result."""
-        if custom_filter['type'] == 'league':
-            match = match_id_map[result['match_id']]
-            return custom_filter['value'].lower() in match.league.lower()
-        elif custom_filter['type'] == 'team':
-            return (custom_filter['value'].lower() in result['home'].lower() or 
-                   custom_filter['value'].lower() in result['away'].lower())
-        elif custom_filter['type'] == 'date_range':
-            # Parse date from result['date'] format "12.07.2025 (12:00)"
-            try:
-                date_str = result['date'].split(' (')[0]  # Extract "12.07.2025"
-                from datetime import datetime
-                result_date = datetime.strptime(date_str, '%d.%m.%Y')
-                start_date = datetime.strptime(custom_filter['start'], '%d.%m.%Y')
-                end_date = datetime.strptime(custom_filter['end'], '%d.%m.%Y')
-                return start_date <= result_date <= end_date
-            except:
-                return False
-        elif custom_filter['type'] == 'rate_range':
-            try:
-                avg_rate = float(result['avg_rate'])
-                min_rate = float(custom_filter['min'])
-                max_rate = float(custom_filter['max'])
-                return min_rate <= avg_rate <= max_rate
-            except:
-                return False
-        elif custom_filter['type'] == 'line_range':
-            try:
-                line = float(result['line'])
-                min_line = float(custom_filter['min'])
-                max_line = float(custom_filter['max'])
-                return min_line <= line <= max_line
-            except:
-                return False
-        return True
-
-    def sort_prediction_results(self, results):
-        """Sort prediction results based on user choice."""
-        sort_choice = self.prompts.ask_prediction_sort()
-        
-        if sort_choice == "No Sorting":
-            return results
-            
-        # Create a copy to avoid modifying original
-        sorted_results = results.copy()
-        
-        if sort_choice == "Time (Earliest First)":
-            sorted_results = self.sort_results_by_time(sorted_results)
-        elif sort_choice == "Time (Latest First)":
-            sorted_results = self.sort_results_by_time(sorted_results)
-            sorted_results.reverse()  # Reverse to get latest first
-        elif sort_choice == "Date (Newest First)":
-            sorted_results.sort(key=lambda x: x['date'], reverse=True)
-        elif sort_choice == "Date (Oldest First)":
-            sorted_results.sort(key=lambda x: x['date'])
-        elif sort_choice == "Confidence (High to Low)":
-            confidence_order = {'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
-            sorted_results.sort(key=lambda x: confidence_order.get(x['confidence'], 0), reverse=True)
-        elif sort_choice == "Confidence (Low to High)":
-            confidence_order = {'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
-            sorted_results.sort(key=lambda x: confidence_order.get(x['confidence'], 0))
-        elif sort_choice == "Prediction (OVER/UNDER/NO_BET)":
-            prediction_order = {'OVER': 3, 'UNDER': 2, 'NO_BET': 1}
-            sorted_results.sort(key=lambda x: prediction_order.get(x['prediction'], 0), reverse=True)
-        elif sort_choice == "Winner (HOME/AWAY/NO_BET)":
-            winner_order = {'HOME_TEAM': 3, 'AWAY_TEAM': 2, 'NO_BET': 1}
-            sorted_results.sort(key=lambda x: winner_order.get(x['winner'], 0), reverse=True)
-        elif sort_choice == "Average Rate (High to Low)":
-            sorted_results.sort(key=lambda x: float(x['avg_rate']), reverse=True)
-        elif sort_choice == "Average Rate (Low to High)":
-            sorted_results.sort(key=lambda x: float(x['avg_rate']))
-        elif sort_choice == "Line (High to Low)":
-            sorted_results.sort(key=lambda x: float(x['line']), reverse=True)
-        elif sort_choice == "Line (Low to High)":
-            sorted_results.sort(key=lambda x: float(x['line']))
-            
-        return sorted_results
-
     def sort_results_by_time(self, results):
         """Sort results by time (earliest first)."""
         def extract_time(result):
@@ -1144,51 +818,6 @@ class CLIManager:
         sorted_results = results.copy()
         sorted_results.sort(key=extract_time)
         return sorted_results
-
-    def display_prediction_details(self, match, pred):
-        """Display detailed prediction information with colors."""
-        self.colored_display.console.print(f"\n[bold {self.colored_display.colors.PRIMARY}]Prediction Details[/bold {self.colored_display.colors.PRIMARY}]")
-        
-        # Match info
-        self.colored_display.console.print(f"[bold]Match:[/bold] {match.home_team} vs {match.away_team}")
-        self.colored_display.console.print(f"[bold]Date:[/bold] {match.date}  [bold]Time:[/bold] {match.time}")
-        self.colored_display.console.print(f"[bold]League:[/bold] {match.league}  [bold]Country:[/bold] {match.country}")
-        self.colored_display.console.print(f"[bold]Bookmaker Line:[/bold] {match.odds.match_total}")
-        
-        # Prediction info with colors
-        pred_color = self.colored_display.colors.PREDICTION_NO_BET
-        if pred.recommendation.value == 'OVER':
-            pred_color = self.colored_display.colors.PREDICTION_OVER
-        elif pred.recommendation.value == 'UNDER':
-            pred_color = self.colored_display.colors.PREDICTION_UNDER
-            
-        conf_color = self.colored_display.colors.PREDICTION_LOW_CONFIDENCE
-        if pred.confidence.value == 'HIGH':
-            conf_color = self.colored_display.colors.PREDICTION_HIGH_CONFIDENCE
-        elif pred.confidence.value == 'MEDIUM':
-            conf_color = self.colored_display.colors.PREDICTION_MEDIUM_CONFIDENCE
-            
-        self.colored_display.console.print(f"[bold]Prediction:[/bold] [{pred_color}]{pred.recommendation.value}[/{pred_color}]  [bold]Confidence:[/bold] [{conf_color}]{pred.confidence.value}[/{conf_color}]")
-        self.colored_display.console.print(f"[bold]Average Rate:[/bold] {pred.average_rate:.2f}")
-        
-        # Statistics
-        self.colored_display.console.print(f"[bold]Matches Above Line:[/bold] {pred.matches_above_line}")
-        self.colored_display.console.print(f"[bold]Matches Below Line:[/bold] {pred.matches_below_line}")
-        self.colored_display.console.print(f"[bold]Decrement Test:[/bold] {pred.decrement_test}")
-        self.colored_display.console.print(f"[bold]Increment Test:[/bold] {pred.increment_test}")
-        self.colored_display.console.print(f"[bold]H2H Totals:[/bold] {pred.h2h_totals}")
-        self.colored_display.console.print(f"[bold]Rate Values:[/bold] {[f'{r:.2f}' for r in pred.rate_values]}")
-        
-        # H2H Matches
-        self.colored_display.console.print(f"\n[bold {self.colored_display.colors.SECONDARY}]H2H Matches:[/bold {self.colored_display.colors.SECONDARY}]")
-        for h2h in match.h2h_matches:
-            self.colored_display.console.print(f"  {h2h.date}: {h2h.home_team} {h2h.home_score} - {h2h.away_score} {h2h.away_team} ({h2h.competition})")
-        
-        # Calculation Details
-        self.colored_display.console.print(f"\n[bold {self.colored_display.colors.SECONDARY}]Calculation Details:[/bold {self.colored_display.colors.SECONDARY}]")
-        for k, v in pred.calculation_details.items():
-            self.colored_display.console.print(f"  [bold]{k}:[/bold] {v}")
-        print()
 
     def display_show_scraping_results(self, results, critical_messages):
         """Delegate to ConsoleDisplay to show scraping results summary."""
