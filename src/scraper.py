@@ -139,26 +139,10 @@ class FlashscoreScraper:
         if status_callback is None:
             status_callback = self.status_callback
 
-        # Pre-check: verify ChromeDriver is available before attempting to launch.
-        # This prevents infinite retry loops when the driver simply isn't installed.
-        try:
-            from src.driver_manager.chrome_driver import ChromeDriverManager
-            config_dict = dict(self.config) if not isinstance(self.config, dict) else self.config
-            chrome_mgr = ChromeDriverManager(config_dict)
-            _, chromedriver_path = chrome_mgr.find_latest_driver_paths()
-            if not chromedriver_path:
-                msg = ("ChromeDriver not found. Run 'fss --init chrome' to install drivers. "
-                       "Cannot proceed without a browser driver.")
-                logger.error(f"❌ {msg}")
-                if status_callback:
-                    status_callback(msg, level="error")
-                from src.core.exceptions import DriverError
-                raise DriverError(msg)
-        except ImportError:
-            pass  # If ChromeDriverManager can't be imported, let the normal flow handle it
-        except (TypeError, AttributeError) as e:
-            logger.warning(f"Pre-check skipped due to {type(e).__name__}: {e}. Proceeding with normal initialization.")
-            # Let the normal driver initialization flow handle it
+        # Note: ChromeDriver discovery now uses a multi-strategy approach in
+        # ChromeDriverManager.create_driver() that falls back to webdriver-manager
+        # and system PATH, so we no longer need a strict pre-check here. The driver
+        # initialization will attempt multiple strategies before failing.
 
         try:
             self.reporter.status("Launching browser and initializing driver...")

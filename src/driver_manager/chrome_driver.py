@@ -6,6 +6,7 @@ Handles Chrome driver initialization and configuration.
 
 import os
 import platform
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -101,18 +102,26 @@ class ChromeDriverManager:
         
         return str(chrome_path) if chrome_path else None, str(chromedriver_path) if chromedriver_path else None
     
-    def get_chrome_options(self) -> Options:
-        """Get Chrome options from config, always including critical stability/sandbox flags."""
+    def get_chrome_options(self, chrome_path: Optional[str] = None) -> Options:
+        """Get Chrome options from config, always including critical stability/sandbox flags.
+        
+        Args:
+            chrome_path: Optional explicit Chrome binary path. If not provided,
+                        will try to find it via find_latest_driver_paths() or system PATH.
+        """
         options = Options()
         
         # Get browser config
         browser_config = self.config.get('browser', {})
         chrome_options = self.config.get('chrome_options', {})
         
-        # Add binary location if specified
-        chrome_path, _ = self.find_latest_driver_paths()
+        # Add binary location: use explicit path if given, otherwise look in local drivers/
         if chrome_path:
             options.binary_location = chrome_path
+        else:
+            local_chrome_path, _ = self.find_latest_driver_paths()
+            if local_chrome_path:
+                options.binary_location = local_chrome_path
         
         # Handle headless mode from browser config
         if browser_config.get('headless', False):
@@ -220,25 +229,83 @@ class ChromeDriverManager:
         
         return options
     
-    def create_driver(self) -> webdriver.Chrome:
-        """Create and configure Chrome WebDriver."""
-        try:
-            # Get ChromeDriver path
-            _, chromedriver_path = self.find_latest_driver_paths()
-            if not chromedriver_path:
-                raise WebDriverException("ChromeDriver not found. Run 'fss --init chrome' to install drivers.")
+    def _find_chromedriver_system_path(self) -> Optional[str]:
+        """Try to find ChromeDriver on the system PATH."""
+        chromedriver_name = 'chromedriver.exe' if platform.system().lower() == 'windows' else 'chromedriver'
+        path = shutil.which(chromedriver_name)
+        if path:
+            logger.info(f"Found ChromeDriver on system PATH: {path}")
+        return path
 
-            # Create service with basic options
-            service = Service(executable_path=chromedriver_path)
-            
-            # Get Chrome options
+    def _find_chromedriver_via_webdriver_manager(self) -> Optional[str]:
+        """Try to find ChromeDriver using webdriver-manager package."""
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager as WDMChromeDriverManager
+            chromedriver_path = WDMChromeDriverManager().install()
+            if chromedriver_path and Path(chromedriver_path).exists():
+                logger.info(f"Found ChromeDriver via webdriver-manager: {chromedriver_path}")
+                return chromedriver_path
+        except ImportError:
+            logger.debug("webdriver-manager not available")
+        except Exception as e:
+            logger.debug(f"webdriver-manager lookup failed: {e}")
+        return None
+
+    def _find_chrome_binary_system_path(self) -> Optional[str]:
+        """Try to find Chrome binary on the system PATH."""
+        chrome_names = ['google-chrome', 'google-chrome-stable', 'chromium-browser', 'chromium',
+                        'chrome.exe', 'Google Chrome.app/Contents/MacOS/Google Chrome']
+        for name in chrome_names:
+            path = shutil.which(name)
+            if path:
+                logger.info(f"Found Chrome binary on system PATH: {path}")
+                return path
+        return None
+
+    def create_driver(self) -> webdriver.Chrome:
+        """Create and configure Chrome WebDriver.
+        
+        Uses a multi-strategy approach to find ChromeDriver:
+        1. Local drivers/ directory (find_latest_driver_paths)
+        2. webdriver-manager package (auto-downloads matching version)
+        3. System PATH (works with chromedriver_autoinstaller on CI)
+        """
+        try:
+            # Get Chrome options first (we need them regardless)
             options = self.get_chrome_options()
             
-            # Create driver
+            # Strategy 1: Find ChromeDriver in local drivers/ directory
+            chrome_path, chromedriver_path = self.find_latest_driver_paths()
+            
+            # Strategy 2: Try webdriver-manager if local lookup failed
+            if not chromedriver_path:
+                logger.info("ChromeDriver not found in local drivers/, trying webdriver-manager...")
+                chromedriver_path = self._find_chromedriver_via_webdriver_manager()
+            
+            # Strategy 3: Try system PATH as last resort (works with chromedriver_autoinstaller)
+            if not chromedriver_path:
+                logger.info("ChromeDriver not found via webdriver-manager, trying system PATH...")
+                chromedriver_path = self._find_chromedriver_system_path()
+            
+            # If Chrome binary not found locally, try system PATH
+            if not chrome_path:
+                chrome_path = self._find_chrome_binary_system_path()
+                if chrome_path:
+                    options.binary_location = chrome_path
+
+            # Create the driver
             logger.info("🔄 Creating Chrome WebDriver...")
-            driver = webdriver.Chrome(service=service, options=options)
-            logger.info(f"✅ Chrome WebDriver initialized successfully")
-            logger.info(f"📁 ChromeDriver path: {chromedriver_path}")
+            
+            if chromedriver_path:
+                service = Service(executable_path=chromedriver_path)
+                driver = webdriver.Chrome(service=service, options=options)
+                logger.info(f"✅ Chrome WebDriver initialized successfully")
+                logger.info(f"📁 ChromeDriver path: {chromedriver_path}")
+            else:
+                # Last resort: let Selenium find ChromeDriver on its own
+                logger.warning("No explicit ChromeDriver path found, relying on Selenium auto-discovery...")
+                driver = webdriver.Chrome(options=options)
+                logger.info(f"✅ Chrome WebDriver initialized via auto-discovery")
             
             return driver
 

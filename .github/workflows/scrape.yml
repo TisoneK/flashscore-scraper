@@ -26,6 +26,13 @@ jobs:
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
+        id: setup-chrome
+
+      - name: Verify Chrome installation
+        run: |
+          echo "Chrome path: ${{ steps.setup-chrome.outputs.chrome-path }}"
+          google-chrome --version || chromium-browser --version || echo "Chrome version check failed"
+          which google-chrome || which chromium-browser || echo "Chrome not found on PATH"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -38,6 +45,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install chromedriver-autoinstaller
+
+      - name: Install ChromeDriver via webdriver-manager
+        run: |
+          # Pre-cache ChromeDriver using webdriver-manager so it's available
+          python -c "
+          from webdriver_manager.chrome import ChromeDriverManager
+          path = ChromeDriverManager().install()
+          print(f'ChromeDriver installed at: {path}')
+          " || echo "webdriver-manager pre-install failed, will retry at runtime"
 
       - name: Apply CI configuration
         run: |
@@ -68,6 +84,14 @@ jobs:
           name: scraped-matches
           path: output/json/
           retention-days: 30
+
+      - name: Upload logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scraper-logs
+          path: output/logs/
+          retention-days: 7
 
       - name: Push JSON to data branch
         if: success()

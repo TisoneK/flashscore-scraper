@@ -76,12 +76,23 @@ def main():
     args = parser.parse_args()
 
     # ── Auto-install ChromeDriver on CI ─────────────────────────
+    # Try chromedriver_autoinstaller first (puts chromedriver on system PATH)
     try:
         import chromedriver_autoinstaller
-        chromedriver_autoinstaller.install()
-        logger.info("ChromeDriver auto-installed")
+        chromedriver_path = chromedriver_autoinstaller.install()
+        logger.info(f"ChromeDriver auto-installed at: {chromedriver_path}")
     except ImportError:
-        logger.debug("chromedriver-autoinstaller not available, using system ChromeDriver")
+        logger.debug("chromedriver-autoinstaller not available")
+    
+    # Also try webdriver-manager as a fallback (auto-downloads matching version)
+    try:
+        from webdriver_manager.chrome import ChromeDriverManager
+        chromedriver_path = ChromeDriverManager().install()
+        logger.info(f"ChromeDriver available via webdriver-manager at: {chromedriver_path}")
+    except ImportError:
+        logger.debug("webdriver-manager not available")
+    except Exception as e:
+        logger.debug(f"webdriver-manager install skipped: {e}")
 
     # ── Run the scraper ──────────────────────────────────────────
     logger.info(f"Starting scraper for {args.day} ...")
