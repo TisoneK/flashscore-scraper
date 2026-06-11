@@ -8,7 +8,7 @@ FROM python:3.12-slim
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# ── Install Chrome + dependencies ─────────────────────────────────
+# ── Install Chrome + build dependencies ──────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     gnupg2 \
@@ -33,6 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdg-utils \
     # Required for headless Chrome
     xvfb \
+    # Required for compiling C extensions (psutil, etc.)
+    gcc \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Add Google Chrome repo and install
