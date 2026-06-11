@@ -46,6 +46,20 @@ fss --init firefox
 fss    # or: fss -c
 ```
 
+### Railway Deployment
+
+This project is configured for deployment on [Railway](https://railway.app).
+
+1. **Push this repo to GitHub** (or any Git provider)
+2. **Create a new Railway project** from your repository
+3. **Railway auto-detects** the `railway.toml` — the scraper runs daily on schedule
+4. **Set environment variables** (optional):
+   - `SCOREWISE_WEBHOOK_URL` — endpoint to POST scraped data
+   - `SCOREWISE_API_KEY` — API key for the webhook
+5. **Deploy** — Railway builds the Docker image and runs the cron jobs
+
+The scraper runs twice daily (6:00 and 6:30 UTC) and outputs JSON to `output/json/`.
+
 ### Troubleshooting Installation Issues
 
 If you encounter corrupted package installations (e.g., `ModuleNotFoundError: No module named 'src'`), use the cleanup utility:

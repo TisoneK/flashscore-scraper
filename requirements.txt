@@ -13,9 +13,12 @@ tqdm>=4.66.3
 pytest>=7.0.0
 
 # Additional utilities
-typing-extensions>=4.9.0 
+typing-extensions>=4.9.0
 ping3
 requests>=2.31.0
+
+# ChromeDriver auto-install (fallback for Docker/Railway)
+chromedriver-autoinstaller>=0.6.4
 
 # Performance monitoring
 psutil==5.9.0

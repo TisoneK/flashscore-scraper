@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """
-Non-interactive scraper runner for CI/CD (Railway, GitHub Actions, etc.).
+Railway scraper runner — headless, non-interactive, designed for cron.
 
 Usage:
-    python run_scraper_ci.py [--day Today|Tomorrow] [--webhook-url URL] [--api-key KEY]
+    python run_scraper_railway.py [--day Today|Tomorrow] [--webhook-url URL] [--api-key KEY]
 
-- Runs the scraper headlessly, outputs JSON to output/json/
-- Optionally POSTs results to a ScoreWise ingestion endpoint
-- Exits with code 0 on success, 1 on failure
+Environment variables:
+    SCOREWISE_WEBHOOK_URL  - ScoreWise ingestion endpoint (overrides --webhook-url)
+    SCOREWISE_API_KEY      - API key for ingestion (overrides --api-key)
+    SCRAPER_LOG_LEVEL      - Log level (default: INFO)
+
+- Runs the scraper headlessly with config.ci.json
+- Outputs JSON to output/json/
+- Optionally POSTs results to ScoreWise
+- Exits 0 on success, 1 on failure
 """
 
 import sys
@@ -25,12 +31,26 @@ from src.scraper import FlashscoreScraper
 from src.storage.json_storage import JSONStorage
 from src.utils.config_loader import CONFIG
 
+log_level = os.environ.get("SCRAPER_LOG_LEVEL", "INFO").upper()
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, log_level, logging.INFO),
     format="%(asctime)s %(levelname)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("ci_runner")
+logger = logging.getLogger("railway_runner")
+
+
+def apply_railway_config():
+    """Apply Railway-optimized config on top of the default config."""
+    config_path = os.path.join(os.path.dirname(__file__), "config.ci.json")
+    if os.path.exists(config_path):
+        import shutil
+        target = os.path.join(os.path.dirname(__file__), "src", "config.json")
+        shutil.copy2(config_path, target)
+        logger.info("Applied Railway config (config.ci.json → src/config.json)")
+    else:
+        logger.warning("config.ci.json not found; using default config")
 
 
 def post_to_webhook(json_path: Path, webhook_url: str, api_key: str = None):
@@ -56,7 +76,7 @@ def post_to_webhook(json_path: Path, webhook_url: str, api_key: str = None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CI scraper runner")
+    parser = argparse.ArgumentParser(description="Railway scraper runner")
     parser.add_argument(
         "--day",
         default="Today",
@@ -75,26 +95,21 @@ def main():
     )
     args = parser.parse_args()
 
-    # ── Auto-install ChromeDriver on CI ─────────────────────────
-    # Try chromedriver_autoinstaller first (puts chromedriver on system PATH)
-    try:
-        import chromedriver_autoinstaller
-        chromedriver_path = chromedriver_autoinstaller.install()
-        logger.info(f"ChromeDriver auto-installed at: {chromedriver_path}")
-    except ImportError:
-        logger.debug("chromedriver-autoinstaller not available")
-    
-    # Also try webdriver-manager as a fallback (auto-downloads matching version)
-    try:
-        from webdriver_manager.chrome import ChromeDriverManager
-        chromedriver_path = ChromeDriverManager().install()
-        logger.info(f"ChromeDriver available via webdriver-manager at: {chromedriver_path}")
-    except ImportError:
-        logger.debug("webdriver-manager not available")
-    except Exception as e:
-        logger.debug(f"webdriver-manager install skipped: {e}")
+    # Environment variables override CLI args
+    webhook_url = os.environ.get("SCOREWISE_WEBHOOK_URL", args.webhook_url)
+    api_key = os.environ.get("SCOREWISE_API_KEY", args.api_key)
 
-    # ── Run the scraper ──────────────────────────────────────────
+    # ── Apply Railway config ────────────────────────────────────
+    apply_railway_config()
+
+    # Reload CONFIG after applying Railway config
+    # (config_loader caches, so we need to re-import)
+    import importlib
+    from src.utils import config_loader as cl
+    importlib.reload(cl)
+    from src.utils.config_loader import CONFIG as RAILWAY_CONFIG
+
+    # ── Run the scraper ─────────────────────────────────────────
     logger.info(f"Starting scraper for {args.day} ...")
     scraper = FlashscoreScraper()
     try:
@@ -129,27 +144,23 @@ def main():
     logger.info(f"Output: {json_path} ({json_path.stat().st_size} bytes)")
 
     # ── POST to webhook if configured ────────────────────────────
-    if args.webhook_url:
-        ok = post_to_webhook(json_path, args.webhook_url, args.api_key)
+    if webhook_url:
+        ok = post_to_webhook(json_path, webhook_url, api_key)
         if not ok:
             logger.warning("Webhook delivery failed; JSON is still saved locally.")
+    else:
+        logger.info("No webhook URL configured; JSON saved locally only.")
 
     # ── Summary ──────────────────────────────────────────────────
     summary = (
-        f"## Scraper Results\n"
-        f"- **Day**: {args.day}\n"
-        f"- **Total matches**: {total}\n"
-        f"- **Complete**: {complete}\n"
-        f"- **Incomplete**: {incomplete}\n"
-        f"- **Output**: `{json_path}`\n"
+        f"Scraper Results\n"
+        f"  Day: {args.day}\n"
+        f"  Total matches: {total}\n"
+        f"  Complete: {complete}\n"
+        f"  Incomplete: {incomplete}\n"
+        f"  Output: {json_path}\n"
     )
-    # Write to CI step summary if available (GitHub Actions, etc.)
-    step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if step_summary:
-        with open(step_summary, "a", encoding="utf-8") as f:
-            f.write(summary + "\n")
-    else:
-        print(summary)
+    print(summary)
 
     sys.exit(0)
 
