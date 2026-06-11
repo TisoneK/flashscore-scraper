@@ -48,7 +48,7 @@ fss    # or: fss -c
 
 ### Railway Deployment
 
-This project is configured for deployment on [Railway](https://railway.app).
+This project is deployed on [Railway](https://railway.app) at **[flashscore-scraper.up.railway.app](https://flashscore-scraper.up.railway.app/)**.
 
 1. **Push this repo to GitHub** (or any Git provider)
 2. **Create a new Railway project** from your repository
