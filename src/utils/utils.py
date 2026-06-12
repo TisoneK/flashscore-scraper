@@ -194,7 +194,13 @@ def format_matches_for_display(matches: List[MatchModel]) -> str:
 
 def format_date(date_str):
     """
-    Converts date strings like '19.06.2025' or '18.06.25' to '19/06/2025' or '18/06/2025'.
+    Converts date strings like '19.06.2025' or '18.06.25' to ISO 8601 format
+    '2025-06-19' or '2025-06-18'.
+
+    Previously this returned DD/MM/YYYY format, but the ScoreWise engine
+    requires ISO 8601 (YYYY-MM-DD) for correct lexicographic sorting in
+    winning-pattern analysis (s07). Using DD/MM/YYYY caused silently
+    incorrect predictions when H2H matches spanned multiple years.
     """
     if not date_str:
         return None
@@ -203,7 +209,7 @@ def format_date(date_str):
         day, month, year = match.groups()
         if len(year) == 2:
             year = "20" + year
-        return f"{day}/{month}/{year}"
+        return f"{year}-{month}-{day}"
     return date_str
 
 def split_date_time(date_time_str):

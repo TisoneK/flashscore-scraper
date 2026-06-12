@@ -21,7 +21,7 @@ import os
 import json
 import argparse
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Ensure project root is on sys.path
@@ -53,20 +53,119 @@ def apply_railway_config():
         logger.warning("config.ci.json not found; using default config")
 
 
+def _convert_h2h_date(date_str: str) -> str:
+    """Convert H2H date from DD/MM/YYYY to ISO 8601 (YYYY-MM-DD).
+
+    The scraper stores H2H dates as 'DD/MM/YYYY' (e.g. '19/06/2025'), but
+    the ScoreWise engine requires ISO 8601 format ('2025-06-19') for correct
+    lexicographic sorting in winning-pattern analysis (s07).
+
+    If the input does not match the expected format, it is returned unchanged
+    so that a validation error is raised server-side rather than silently
+    producing incorrect predictions.
+    """
+    if not date_str:
+        return date_str
+    import re
+    m = re.match(r"^(\d{2})/(\d{2})/(\d{4})$", str(date_str))
+    if m:
+        day, month, year = m.groups()
+        return f"{year}-{month}-{day}"
+    return date_str
+
+
+def _transform_payload(data: dict) -> dict:
+    """Transform raw scraper output into a valid IngestRequest for ScoreWise.
+
+    The engine's IngestRequest expects {source, scraped_at, matches} — the
+    scraper's raw file uses {metadata, matches} which causes a 422 error.
+    This function rebuilds the envelope, converts H2H dates to ISO 8601,
+    filters to complete matches only, and strips undeclared fields that
+    would break if the engine ever adds extra='forbid' to its schemas.
+    """
+    raw_matches = data.get("matches", [])
+
+    # Incomplete matches lack odds and H2H data — they always fail validation
+    complete_matches = [m for m in raw_matches if m.get("status") == "complete"]
+
+    transformed_matches = []
+    for match in complete_matches:
+        m = {
+            "match_id": match.get("match_id"),
+            "home_team": match.get("home_team"),
+            "away_team": match.get("away_team"),
+        }
+
+        # OddsSchema does not declare match_id — strip it to stay compatible
+        odds = match.get("odds")
+        if odds and isinstance(odds, dict):
+            m["odds"] = {
+                k: v for k, v in odds.items() if k != "match_id"
+            }
+        else:
+            m["odds"] = odds
+
+        # Convert dates to ISO 8601 and keep only fields the engine declares
+        h2h = match.get("h2h_matches")
+        if h2h and isinstance(h2h, list):
+            cleaned_h2h = []
+            for h in h2h:
+                if not isinstance(h, dict):
+                    continue
+                cleaned = {
+                    "home_team": h.get("home_team"),
+                    "away_team": h.get("away_team"),
+                    "home_score": h.get("home_score"),
+                    "away_score": h.get("away_score"),
+                    "date": _convert_h2h_date(h.get("date")),
+                }
+                cleaned_h2h.append(cleaned)
+            m["h2h_matches"] = cleaned_h2h
+        else:
+            m["h2h_matches"] = h2h or []
+
+        transformed_matches.append(m)
+
+    # Rebuild envelope to match IngestRequest: {source, scraped_at, matches}
+    payload = {
+        "source": "flashscore-scraper",
+        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "matches": transformed_matches,
+    }
+
+    logger.info(
+        f"Transformed payload: {len(raw_matches)} raw → "
+        f"{len(transformed_matches)} complete matches"
+    )
+    return payload
+
+
 def post_to_webhook(json_path: Path, webhook_url: str, api_key: str = None):
-    """POST the scraped JSON to a ScoreWise ingestion endpoint."""
+    """POST the scraped JSON to a ScoreWise ingestion endpoint.
+
+    The raw file is transformed into a valid IngestRequest before posting:
+      - Auth header uses X-API-Key (not Bearer) per engine's FastAPI dependency.
+      - Payload envelope is rebuilt as {source, scraped_at, matches}.
+      - H2H dates are converted from DD/MM/YYYY to ISO 8601 (YYYY-MM-DD).
+      - Only complete matches are sent.
+      - Extra fields (match_id, competition) are stripped from H2H/odds dicts.
+    """
     try:
         import requests
 
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
+        # Transform payload to match engine's IngestRequest schema
+        payload = _transform_payload(data)
+
         headers = {"Content-Type": "application/json"}
+        # The engine authenticates via X-API-Key (not Authorization: Bearer)
         if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+            headers["X-API-Key"] = api_key
 
         logger.info(f"POSTing {json_path.name} to {webhook_url} ...")
-        resp = requests.post(webhook_url, json=data, headers=headers, timeout=30)
+        resp = requests.post(webhook_url, json=payload, headers=headers, timeout=30)
         resp.raise_for_status()
         logger.info(f"Webhook accepted ({resp.status_code})")
         return True
