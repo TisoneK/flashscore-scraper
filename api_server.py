@@ -32,7 +32,7 @@ from typing import Optional, List, Dict, Any
 from threading import Lock
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, APIRouter
 from pydantic import BaseModel, Field
 
 # ── Ensure project root is on sys.path ──────────────────────────
@@ -51,6 +51,9 @@ app = FastAPI(
     description="Control server for the Flashscore basketball scraper. "
                 "Mirrors all CLI capabilities via REST.",
 )
+
+# Add /api prefix so the admin dashboard can reach /api/scrape, /api/status etc.
+router = APIRouter(prefix="/api")
 
 # ── Logging ─────────────────────────────────────────────────────
 logging.basicConfig(
@@ -282,7 +285,7 @@ async def health():
 #  Scrape — scheduled matches  (CLI: "Scheduled Matches")
 # ════════════════════════════════════════════════════════════════
 
-@app.post("/scrape", response_model=ScrapeResponse)
+@router.post("/scrape", response_model=ScrapeResponse)
 async def trigger_scrape(req: ScrapeRequest):
     """Scrape scheduled matches (Today / Tomorrow).
 
@@ -307,7 +310,7 @@ async def trigger_scrape(req: ScrapeRequest):
 #  Scrape — results           (CLI: "Results" → date picker)
 # ════════════════════════════════════════════════════════════════
 
-@app.post("/scrape/results", response_model=ScrapeResponse)
+@router.post("/scrape/results", response_model=ScrapeResponse)
 async def trigger_results_scrape(req: ResultsScrapeRequest):
     """Scrape final match results for a given date.
 
@@ -335,7 +338,7 @@ async def trigger_results_scrape(req: ResultsScrapeRequest):
 #  Stop scrape                (CLI: Ctrl+C / Stop button)
 # ════════════════════════════════════════════════════════════════
 
-@app.post("/scrape/stop")
+@router.post("/scrape/stop")
 async def stop_scrape():
     """Request the running scrape to stop after the current match.
 
@@ -355,7 +358,7 @@ async def stop_scrape():
 #  Live progress             (CLI: Rich progress bars)
 # ════════════════════════════════════════════════════════════════
 
-@app.get("/scrape/progress")
+@router.get("/scrape/progress")
 async def get_scrape_progress():
     """Return real-time progress of the currently running scrape.
 
@@ -386,7 +389,7 @@ async def get_scrape_progress():
 #  Status                    (CLI: "View Status")
 # ════════════════════════════════════════════════════════════════
 
-@app.get("/status")
+@router.get("/status")
 async def get_status():
     """Return scraper state and a summary of the last completed scrape.
 
@@ -429,7 +432,7 @@ async def get_status():
 #  History
 # ════════════════════════════════════════════════════════════════
 
-@app.get("/history")
+@router.get("/history")
 async def get_history(limit: int = Query(50, ge=1, le=200)):
     """Return recent scrape runs (in-memory, last *limit* entries)."""
     return {"runs": _scrape_history[-limit:], "total": len(_scrape_history)}
@@ -439,7 +442,7 @@ async def get_history(limit: int = Query(50, ge=1, le=200)):
 #  Outputs — list / download  (CLI: shows JSON file count)
 # ════════════════════════════════════════════════════════════════
 
-@app.get("/outputs")
+@router.get("/outputs")
 async def list_outputs():
     """List JSON output files, split into ``match_files`` and ``results_files``.
 
@@ -470,7 +473,7 @@ async def list_outputs():
     return {"match_files": match_files, "results_files": results_files}
 
 
-@app.get("/outputs/{filename:path}")
+@router.get("/outputs/{filename:path}")
 async def get_output(filename: str):
     """Download a specific JSON output file (e.g. ``matches_250614.json``)."""
     # Prevent directory traversal
@@ -485,7 +488,7 @@ async def get_output(filename: str):
         raise HTTPException(500, "File contains invalid JSON")
 
 
-@app.get("/outputs/{filename:path}/csv")
+@router.get("/outputs/{filename:path}/csv")
 async def get_output_csv(filename: str):
     """Download a specific JSON output file as CSV (flattened)."""
     sanitised = Path(filename).name
@@ -544,7 +547,7 @@ def _flatten_dict(d: Dict[str, Any], parent_key: str = "", sep: str = ".") -> Di
 _CONFIG_PATH: Path = PROJECT_ROOT / "src" / "config.json"
 
 
-@app.get("/config")
+@router.get("/config")
 async def get_config():
     """Return the full scraper configuration from ``src/config.json``."""
     if not _CONFIG_PATH.exists():
@@ -556,7 +559,7 @@ async def get_config():
         raise HTTPException(500, "Config file contains invalid JSON")
 
 
-@app.put("/config")
+@router.put("/config")
 async def update_config(req: ConfigUpdateRequest):
     """Update scraper configuration (deep-merge).
 
@@ -588,7 +591,7 @@ async def update_config(req: ConfigUpdateRequest):
     return {"status": "ok", "config": current}
 
 
-@app.get("/config/schema")
+@router.get("/config/schema")
 async def get_config_schema():
     """Return the config schema — a list of all top-level sections with descriptions."""
     return {
@@ -608,7 +611,7 @@ async def get_config_schema():
 #  Schedule — recurring scrape  (CLI: frequency picker)
 # ════════════════════════════════════════════════════════════════
 
-@app.get("/schedule")
+@router.get("/schedule")
 async def get_schedule():
     """Return the current recurring scrape schedule."""
     sched_path = PROJECT_ROOT / "src" / "cli" / "cli_settings.json"
@@ -623,7 +626,7 @@ async def get_schedule():
     return defaults
 
 
-@app.put("/schedule")
+@router.put("/schedule")
 async def set_schedule(req: ScheduleConfigRequest):
     """Configure recurring scraping (mirrors CLI frequency picker).
 
@@ -695,7 +698,7 @@ async def _run_schedule_loop(cfg: ScheduleConfigRequest) -> None:
 #  Driver management          (CLI: --install-drivers / --list-versions)
 # ════════════════════════════════════════════════════════════════
 
-@app.get("/drivers/versions")
+@router.get("/drivers/versions")
 async def list_driver_versions():
     """List available ChromeDriver versions.
 
@@ -711,7 +714,7 @@ async def list_driver_versions():
         raise HTTPException(500, f"Failed to fetch Chrome versions: {exc}")
 
 
-@app.post("/drivers/install")
+@router.post("/drivers/install")
 async def install_drivers(req: DriverInstallRequest):
     """Install browser drivers.
 
@@ -737,7 +740,7 @@ async def install_drivers(req: DriverInstallRequest):
 #  Project initialization     (CLI: --init)
 # ════════════════════════════════════════════════════════════════
 
-@app.post("/initialize")
+@router.post("/initialize")
 async def initialize_project(req: InitProjectRequest):
     """Initialize the project and install drivers.
 
@@ -778,7 +781,7 @@ class ResultsUpdateRequest(BaseModel):
     output: Optional[str] = Field(None, description="Optional output CSV path")
 
 
-@app.post("/results/update")
+@router.post("/results/update")
 async def update_results(req: ResultsUpdateRequest):
     """Update match results from a JSON file.
 
@@ -826,6 +829,9 @@ async def update_results(req: ResultsUpdateRequest):
 # ════════════════════════════════════════════════════════════════
 #  Main
 # ════════════════════════════════════════════════════════════════
+
+# ── Register API router (all routes under /api) ─────────────────
+app.include_router(router)
 
 def main() -> None:
     """Entry point — run the uvicorn server.
