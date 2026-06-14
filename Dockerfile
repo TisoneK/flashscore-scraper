@@ -65,6 +65,7 @@ RUN pip install --no-cache-dir -e .
 # Create output directories
 RUN mkdir -p /app/output/json /app/output/logs
 
-# ── Default: run the Railway scraper ──────────────────────────────
-# This is overridden by railway.toml cron commands
-CMD ["python", "run_scraper_railway.py"]
+# ── Default: run the API server ───────────────────────────────────
+# Railway routes traffic to this process on $PORT.
+# Scrapes can be triggered via POST /scrape.
+CMD ["python", "api_server.py"]

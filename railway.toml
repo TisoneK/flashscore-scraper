@@ -1,32 +1,20 @@
 # ── Railway configuration for Flashscore Scraper ──────────────────
-# Deploys as a cron worker that scrapes on a schedule.
-# ScoreWise (on Railway) reads the JSON output via shared volume
-# or the scraper POSTs directly via webhook.
+# Deploys as a web service so Railway assigns a PORT and exposes the
+# FastAPI control server.  Scrapes are triggered via POST /scrape.
+# A separate cron job (external) calls POST /scrape on schedule.
 
 [build]
 dockerfile = "Dockerfile"
 
 [deploy]
-# Railway cron worker — does not need a public port
-# Set restartPolicyType to ON_FAILURE so Railway retries if scraper crashes
+# Web service — Railway assigns a $PORT and routes traffic to it
+startCommand = "python api_server.py"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 
-# ── Cron schedules ───────────────────────────────────────────────
-# Scrape today's matches every day at 6 AM UTC
-# Scrape tomorrow's matches every day at 6:30 AM UTC
-
-[[cron]]
-# Main scrape: Today's matches
-schedule = "0 6 * * *"
-command = "python run_scraper_railway.py --day Today"
-
-[[cron]]
-# Pre-load tomorrow's matches
-schedule = "30 6 * * *"
-command = "python run_scraper_railway.py --day Tomorrow"
-
 # ── Environment variables (set in Railway dashboard) ─────────────
+# PORT                  - Assigned automatically by Railway
 # SCOREWISE_WEBHOOK_URL - ScoreWise ingestion endpoint
 # SCOREWISE_API_KEY    - API key for the ingestion endpoint
 # SCRAPER_LOG_LEVEL    - Log level (default: INFO)
+# SCRAPER_CRON_SCHEDULE - Optional: "0 6 * * *" to enable built-in cron
