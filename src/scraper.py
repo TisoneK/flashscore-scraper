@@ -545,6 +545,12 @@ class FlashscoreScraper:
         except Exception as e:
             logger.debug(f"Error during cleanup: {e}")
         finally:
+            # Clear the thread's _is_shutting_down flag so the worker thread
+            # can be reused by ThreadPoolExecutor for future scrape runs.
+            # Without this, the next task on the same thread would immediately
+            # hit "Operation cancelled by shutdown" in retry_manager.
+            import threading
+            threading.current_thread()._is_shutting_down = False
             logger.debug("✅ Scraper cleanup completed")
 
     def scrape(self, progress_callback=None, day="Today", status_callback=None, stop_callback=None):
