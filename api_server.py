@@ -147,6 +147,11 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
     """
     global _state
 
+    # Ensure stop flag is clear at the start of every run
+    # (defensive: in case a previous run's stop_requested leaked)
+    with _state_lock:
+        _state.stop_requested = False
+
     def status_cb(msg: str) -> None:
         with _state_lock:
             _state.status_message = msg
@@ -178,6 +183,7 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
             _state.busy = False
             _state.finished_at = datetime.now(timezone.utc).isoformat()
             _state.error = None
+            _state.stop_requested = False  # Clear after successful run
         logger.info("[%s] Finished — %d complete, %d incomplete",
                     scrape_id, _state.complete_matches, _state.incomplete_matches)
     except Exception as exc:
@@ -187,6 +193,7 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
             _state.busy = False
             _state.finished_at = datetime.now(timezone.utc).isoformat()
             _state.error = str(exc)
+            _state.stop_requested = False  # Clear after failed run too
 
     _scrape_history.append({
         "scrape_id": scrape_id,
@@ -202,6 +209,10 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
 def _run_results_scrape(date_str: str, scrape_id: str) -> None:
     """Run FlashscoreScraper.scrape_results() on a background thread."""
     global _state
+
+    # Ensure stop flag is clear at the start of every run
+    with _state_lock:
+        _state.stop_requested = False
 
     def status_cb(msg: str) -> None:
         with _state_lock:
@@ -223,6 +234,7 @@ def _run_results_scrape(date_str: str, scrape_id: str) -> None:
             _state.finished_at = datetime.now(timezone.utc).isoformat()
             _state.error = None
             _state.result = {"date": date_str, "success": True}
+            _state.stop_requested = False  # Clear after successful run
         logger.info("[%s] Results scrape for %s finished", scrape_id, date_str)
     except Exception as exc:
         logger.error("[%s] Results scrape failed: %s", scrape_id, exc)
@@ -230,6 +242,7 @@ def _run_results_scrape(date_str: str, scrape_id: str) -> None:
             _state.busy = False
             _state.finished_at = datetime.now(timezone.utc).isoformat()
             _state.error = str(exc)
+            _state.stop_requested = False  # Clear after failed run too
 
     _scrape_history.append({
         "scrape_id": scrape_id,

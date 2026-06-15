@@ -185,12 +185,17 @@ class NetworkRetryManager(RetryManager):
         last_exception = None
         for attempt in range(self.max_attempts):
             # Cooperative cancellation check
-            try:
-                if _is_shutting_down() or (callable(stop_checker) and stop_checker()):
-                    raise RuntimeError("Operation cancelled by shutdown")
-            except Exception:
-                # If stop_checker raised, treat as shutdown
+            if _is_shutting_down():
                 raise RuntimeError("Operation cancelled by shutdown")
+            if callable(stop_checker):
+                try:
+                    if stop_checker():
+                        raise RuntimeError("Operation cancelled by shutdown")
+                except RuntimeError:
+                    raise  # Re-raise our own shutdown errors
+                except Exception as e:
+                    self.logger.warning(f"stop_checker raised unexpected error: {e}")
+                    raise RuntimeError("Operation cancelled by shutdown") from e
             if not monitor.is_connected():
                 if not _is_shutting_down():
                     self.logger.warning("Network down, waiting for reconnection before retrying...")
