@@ -1,4 +1,5 @@
 import typing
+import inspect
 
 
 class Reporter:
@@ -10,9 +11,39 @@ class Reporter:
     def progress(self, current: int, total: int, message: typing.Optional[str] = None) -> None:
         raise NotImplementedError
 
-    def match_finalized(self, match_id: str) -> None:
-        """Called when a match's data has been saved/finalized."""
+    def match_finalized(self, match_id: str, match: typing.Optional[dict] = None) -> None:
+        """Called when a match's data has been saved/finalized.
+
+        Args:
+            match_id: The unique identifier of the finalized match.
+            match: Optional dict representation of the finalized match data.
+                When provided, enables streaming use cases (e.g. pushing
+                the match to the prediction engine immediately). May be
+                None for backward compatibility or when only the id is
+                relevant (e.g. timing instrumentation).
+        """
         raise NotImplementedError
+
+
+def _callback_accepts_match(cb: typing.Callable) -> bool:
+    """Detect whether a match_finalized callback accepts a second 'match' arg.
+
+    Allows backward compatibility: callbacks written as ``def cb(match_id)``
+    keep working, while new callbacks can opt into receiving the match dict
+    via ``def cb(match_id, match=None)`` or ``def cb(match_id, match)``.
+    """
+    try:
+        sig = inspect.signature(cb)
+        params = list(sig.parameters.values())
+        # Callbacks with 2+ parameters accept the match arg
+        if len(params) >= 2:
+            return True
+        # Callbacks with *args or **kwargs accept it too
+        if any(p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD) for p in params):
+            return True
+        return False
+    except (ValueError, TypeError):
+        return False
 
 
 class CallbackReporter(Reporter):
@@ -22,11 +53,17 @@ class CallbackReporter(Reporter):
         self,
         status_callback: typing.Optional[typing.Callable[[str], None]] = None,
         progress_callback: typing.Optional[typing.Callable[[int, int, typing.Optional[str]], None]] = None,
-        match_finalized_callback: typing.Optional[typing.Callable[[str], None]] = None,
+        match_finalized_callback: typing.Optional[typing.Callable] = None,
     ) -> None:
         self._status_cb = status_callback
         self._progress_cb = progress_callback
         self._match_finalized_cb = match_finalized_callback
+        # Detect arity once to avoid repeated introspection
+        self._match_cb_accepts_match = (
+            _callback_accepts_match(match_finalized_callback)
+            if match_finalized_callback is not None
+            else False
+        )
 
     def status(self, message: str) -> None:
         cb = self._status_cb
@@ -70,11 +107,15 @@ class CallbackReporter(Reporter):
             except Exception:
                 pass
 
-    def match_finalized(self, match_id: str) -> None:
+    def match_finalized(self, match_id: str, match: typing.Optional[dict] = None) -> None:
         cb = self._match_finalized_cb
         if cb is not None:
             try:
-                cb(match_id)
+                # Forward the match dict only if the callback declares it
+                if self._match_cb_accepts_match:
+                    cb(match_id, match)
+                else:
+                    cb(match_id)
             except Exception:
                 pass
         # No CLI print fallback; this is a structured event

@@ -45,7 +45,7 @@ from src.driver_manager.driver_installer import DriverInstaller
 from src.reporting import CallbackReporter
 
 # ── Import shared webhook utilities (engine forwarding) ─────────
-from webhook_utils import post_to_webhook
+from webhook_utils import post_to_webhook, forward_matches_to_engine
 
 # ── FastAPI app ─────────────────────────────────────────────────
 app = FastAPI(
@@ -69,6 +69,9 @@ logger = logging.getLogger("api_server")
 # ── Thread-safe shared state ────────────────────────────────────
 _state_lock: Lock = Lock()
 _executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1)
+# Dedicated pool for streaming individual matches to the engine as they
+# complete — keeps the scraper thread moving without waiting on HTTP.
+_stream_executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=3)
 _scrape_history: List[Dict[str, Any]] = []
 _schedule_task: Optional[asyncio.Task] = None
 
@@ -101,6 +104,10 @@ class _ScraperState:
         self.error: Optional[str] = None
         self.stop_requested: bool = False
         self.engine_forwarded: bool = False
+
+        # Per-match streaming stats (matches sent to engine individually as they complete)
+        self.streamed_count: int = 0
+        self.stream_failed_count: int = 0
 
 
 _state: _ScraperState = _ScraperState()
@@ -143,6 +150,44 @@ class InitProjectRequest(BaseModel):
 #  Background scraper runners (threaded, with live callbacks)
 # ════════════════════════════════════════════════════════════════
 
+def _stream_match_to_engine(match_id: str, match: Optional[dict], scrape_id: str) -> None:
+    """Stream a single finalized match to the engine in real time.
+
+    Runs on the streaming executor so the scraper thread can continue
+    processing the next match without waiting for the engine HTTP round-trip.
+    Failures are logged but never crash the scrape; the batch POST at the
+    end of the scrape acts as a safety net for any matches that failed
+    to stream individually.
+    """
+    if match is None:
+        # Incomplete matches carry no engine-useful payload; skip silently
+        return
+
+    webhook_url = os.environ.get("SCOREWISE_WEBHOOK_URL")
+    api_key = os.environ.get("SCOREWISE_API_KEY")
+    if not webhook_url:
+        # No engine configured — nothing to stream
+        return
+
+    try:
+        logger.info("[%s] Streaming match %s to engine ...", scrape_id, match_id)
+        ok = forward_matches_to_engine([match], webhook_url, api_key, timeout=15)
+        with _state_lock:
+            if ok:
+                _state.streamed_count += 1
+                logger.info("[%s] Streamed match %s to engine (total streamed: %d)",
+                            scrape_id, match_id, _state.streamed_count)
+            else:
+                _state.stream_failed_count += 1
+                logger.warning("[%s] Failed to stream match %s to engine "
+                               "(will be covered by batch POST at end of scrape)",
+                               scrape_id, match_id)
+    except Exception as e:
+        with _state_lock:
+            _state.stream_failed_count += 1
+        logger.error("[%s] Error streaming match %s: %s", scrape_id, match_id, e)
+
+
 def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
     """Run FlashscoreScraper.scrape() on a background thread.
 
@@ -167,10 +212,27 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
         with _state_lock:
             return _state.stop_requested
 
+    def match_finalized_cb(match_id: str, match: Optional[dict] = None) -> None:
+        """Per-match callback: stream the finalized match to the engine immediately.
+
+        Submitted to the streaming executor so the scraper thread is not blocked
+        by the HTTP round-trip. The batch POST at the end of the scrape serves as
+        a fallback for any matches that failed to stream individually.
+        """
+        try:
+            _stream_executor.submit(_stream_match_to_engine, match_id, match, scrape_id)
+        except Exception as e:
+            logger.error("[%s] Could not submit streaming task for match %s: %s",
+                         scrape_id, match_id, e)
+
     scraper = FlashscoreScraper(
         status_callback=status_cb,
         progress_callback=progress_cb,
-        reporter=CallbackReporter(status_callback=status_cb, progress_callback=progress_cb),
+        reporter=CallbackReporter(
+            status_callback=status_cb,
+            progress_callback=progress_cb,
+            match_finalized_callback=match_finalized_cb,
+        ),
     )
     try:
         result = scraper.scrape(day=day, progress_callback=progress_cb,
@@ -227,6 +289,8 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
         "complete_matches": _state.complete_matches,
         "incomplete_matches": _state.incomplete_matches,
         "engine_forwarded": engine_forwarded if _state.error is None else False,
+        "streamed_count": _state.streamed_count,
+        "stream_failed_count": _state.stream_failed_count,
     })
 
 
@@ -414,6 +478,8 @@ async def get_scrape_progress():
             "stop_requested": _state.stop_requested,
             "error": _state.error,
             "engine_forwarded": _state.engine_forwarded,
+            "streamed_count": _state.streamed_count,
+            "stream_failed_count": _state.stream_failed_count,
         }
 
 
@@ -456,6 +522,8 @@ async def get_status():
             "started_at": _state.started_at,
             "finished_at": _state.finished_at,
             "engine_forwarded": _state.engine_forwarded,
+            "streamed_count": _state.streamed_count,
+            "stream_failed_count": _state.stream_failed_count,
         } if not busy else None,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

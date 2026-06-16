@@ -545,12 +545,6 @@ class FlashscoreScraper:
         except Exception as e:
             logger.debug(f"Error during cleanup: {e}")
         finally:
-            # Clear the thread's _is_shutting_down flag so the worker thread
-            # can be reused by ThreadPoolExecutor for future scrape runs.
-            # Without this, the next task on the same thread would immediately
-            # hit "Operation cancelled by shutdown" in retry_manager.
-            import threading
-            threading.current_thread()._is_shutting_down = False
             logger.debug("✅ Scraper cleanup completed")
 
     def scrape(self, progress_callback=None, day="Today", status_callback=None, stop_callback=None):
@@ -733,7 +727,12 @@ class FlashscoreScraper:
                         self.save_match_data(match, day=day)
                         # Emit match finalized event after data is saved
                         try:
-                            self.reporter.match_finalized(match_id)
+                            # Pass the match dict so streaming consumers can forward
+                            # it to the prediction engine without re-reading the file.
+                            # Only forward complete matches (incomplete ones lack
+                            # the odds/H2H data the engine needs).
+                            match_payload = match.to_dict() if match.status == "complete" else None
+                            self.reporter.match_finalized(match_id, match=match_payload)
                         except Exception:
                             pass
                         # Log this match's full info immediately after processing
