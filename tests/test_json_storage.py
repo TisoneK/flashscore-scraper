@@ -344,12 +344,21 @@ class TestDailyFilepath(unittest.TestCase):
     """Test the daily filepath generation."""
 
     def test_daily_filepath_format(self):
-        """Test that the daily filepath uses today's date."""
+        """Test that the daily filepath uses today's date (YYYYMMDD format)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = JSONStorage(base_dir=tmpdir)
             filepath = storage._get_daily_filepath()
-            today = datetime.now().strftime("%d%m%y")
+            today = datetime.now().strftime("%Y%m%d")
             expected = Path(tmpdir) / f"matches_{today}.json"
+            self.assertEqual(filepath, expected)
+
+    def test_daily_filepath_tomorrow(self):
+        """Test that the daily filepath uses tomorrow's date when day='Tomorrow'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            storage = JSONStorage(base_dir=tmpdir)
+            filepath = storage._get_daily_filepath(day="Tomorrow")
+            tomorrow = (datetime.now() + __import__('datetime').timedelta(days=1)).strftime("%Y%m%d")
+            expected = Path(tmpdir) / f"matches_{tomorrow}.json"
             self.assertEqual(filepath, expected)
 
 

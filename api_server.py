@@ -40,9 +40,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # ── Import scraper components directly (for live callbacks) ─────
-from src.scraper import FlashscoreScraper
+from src.scraper import FlashscoreScraper, get_ddmmyy_date
 from src.driver_manager.driver_installer import DriverInstaller
 from src.reporting import CallbackReporter
+
+# ── Import shared webhook utilities (engine forwarding) ─────────
+from webhook_utils import post_to_webhook
 
 # ── FastAPI app ─────────────────────────────────────────────────
 app = FastAPI(
@@ -97,6 +100,7 @@ class _ScraperState:
         self.result: Optional[Dict[str, Any]] = None
         self.error: Optional[str] = None
         self.stop_requested: bool = False
+        self.engine_forwarded: bool = False
 
 
 _state: _ScraperState = _ScraperState()
@@ -146,17 +150,6 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
     ``GET /scrape/progress`` and ``GET /status`` reflect live state.
     """
     global _state
-    import threading
-
-    # Ensure stop flag is clear at the start of every run
-    # (defensive: in case a previous run's stop_requested leaked)
-    with _state_lock:
-        _state.stop_requested = False
-
-    # Clear the thread's _is_shutting_down flag — the previous scrape's
-    # close() method sets this, and since ThreadPoolExecutor reuses the
-    # same worker thread, it would poison the next run.
-    threading.current_thread()._is_shutting_down = False
 
     def status_cb(msg: str) -> None:
         with _state_lock:
@@ -189,9 +182,34 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
             _state.busy = False
             _state.finished_at = datetime.now(timezone.utc).isoformat()
             _state.error = None
-            _state.stop_requested = False  # Clear after successful run
         logger.info("[%s] Finished — %d complete, %d incomplete",
                     scrape_id, _state.complete_matches, _state.incomplete_matches)
+
+        # ── Forward results to ScoreWise engine ──────────────────
+        engine_forwarded = False
+        webhook_url = os.environ.get("SCOREWISE_WEBHOOK_URL")
+        api_key = os.environ.get("SCOREWISE_API_KEY")
+        if webhook_url:
+            try:
+                # Locate the output JSON file for this day
+                file_date = get_ddmmyy_date(day)
+                json_path = Path("output/json") / f"matches_{file_date}.json"
+                if json_path.exists():
+                    logger.info("[%s] Forwarding results to engine: %s", scrape_id, webhook_url)
+                    ok = post_to_webhook(json_path, webhook_url, api_key)
+                    engine_forwarded = ok
+                    with _state_lock:
+                        _state.engine_forwarded = ok
+                    if ok:
+                        logger.info("[%s] Successfully forwarded scrape results to engine", scrape_id)
+                    else:
+                        logger.warning("[%s] Engine forwarding failed; results saved locally", scrape_id)
+                else:
+                    logger.warning("[%s] Output file not found for engine forwarding: %s", scrape_id, json_path)
+            except Exception as e:
+                logger.error("[%s] Error forwarding to engine: %s", scrape_id, e)
+        else:
+            logger.info("[%s] No SCOREWISE_WEBHOOK_URL configured; results saved locally only", scrape_id)
     except Exception as exc:
         logger.error("[%s] Failed: %s", scrape_id, exc)
         with _state_lock:
@@ -199,7 +217,6 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
             _state.busy = False
             _state.finished_at = datetime.now(timezone.utc).isoformat()
             _state.error = str(exc)
-            _state.stop_requested = False  # Clear after failed run too
 
     _scrape_history.append({
         "scrape_id": scrape_id,
@@ -209,22 +226,13 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
         "success": _state.error is None,
         "complete_matches": _state.complete_matches,
         "incomplete_matches": _state.incomplete_matches,
+        "engine_forwarded": engine_forwarded if _state.error is None else False,
     })
 
 
 def _run_results_scrape(date_str: str, scrape_id: str) -> None:
     """Run FlashscoreScraper.scrape_results() on a background thread."""
     global _state
-    import threading
-
-    # Ensure stop flag is clear at the start of every run
-    with _state_lock:
-        _state.stop_requested = False
-
-    # Clear the thread's _is_shutting_down flag — the previous scrape's
-    # close() method sets this, and since ThreadPoolExecutor reuses the
-    # same worker thread, it would poison the next run.
-    threading.current_thread()._is_shutting_down = False
 
     def status_cb(msg: str) -> None:
         with _state_lock:
@@ -246,7 +254,6 @@ def _run_results_scrape(date_str: str, scrape_id: str) -> None:
             _state.finished_at = datetime.now(timezone.utc).isoformat()
             _state.error = None
             _state.result = {"date": date_str, "success": True}
-            _state.stop_requested = False  # Clear after successful run
         logger.info("[%s] Results scrape for %s finished", scrape_id, date_str)
     except Exception as exc:
         logger.error("[%s] Results scrape failed: %s", scrape_id, exc)
@@ -254,7 +261,6 @@ def _run_results_scrape(date_str: str, scrape_id: str) -> None:
             _state.busy = False
             _state.finished_at = datetime.now(timezone.utc).isoformat()
             _state.error = str(exc)
-            _state.stop_requested = False  # Clear after failed run too
 
     _scrape_history.append({
         "scrape_id": scrape_id,
@@ -407,6 +413,7 @@ async def get_scrape_progress():
             "status_message": _state.status_message,
             "stop_requested": _state.stop_requested,
             "error": _state.error,
+            "engine_forwarded": _state.engine_forwarded,
         }
 
 
@@ -448,6 +455,7 @@ async def get_status():
             "incomplete_matches": _state.incomplete_matches,
             "started_at": _state.started_at,
             "finished_at": _state.finished_at,
+            "engine_forwarded": _state.engine_forwarded,
         } if not busy else None,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

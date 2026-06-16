@@ -1,7 +1,7 @@
 """JSON storage operations for the Flashscore scraper."""
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set
 from pathlib import Path
 
@@ -22,14 +22,20 @@ class JSONStorage:
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
         
-    def _get_daily_filepath(self) -> Path:
-        """Get the filepath for today's JSON file.
+    def _get_daily_filepath(self, day: str = "Today") -> Path:
+        """Get the filepath for a given day's JSON file.
+        
+        Args:
+            day: "Today" or "Tomorrow" — determines the date used in the filename.
         
         Returns:
-            Path: Path to today's JSON file
+            Path: Path to the JSON file for the specified day
         """
-        today = datetime.now().strftime("%d%m%y")
-        return self.base_dir / f"matches_{today}.json"
+        if day == "Tomorrow":
+            date_str = (datetime.now() + timedelta(days=1)).strftime("%Y%m%d")
+        else:
+            date_str = datetime.now().strftime("%Y%m%d")
+        return self.base_dir / f"matches_{date_str}.json"
         
     def _load_existing_matches(self, filepath: Path) -> Dict[str, dict]:
         """Load existing matches from a JSON file.
