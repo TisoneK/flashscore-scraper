@@ -20,6 +20,7 @@ in real time.  This matches the CLI's interactive progress experience.
 
 import sys
 import os
+import re
 import json
 import logging
 import asyncio
@@ -163,8 +164,8 @@ def _stream_match_to_engine(match_id: str, match: Optional[dict], scrape_id: str
         # Incomplete matches carry no engine-useful payload; skip silently
         return
 
-    webhook_url = os.environ.get("SCOREWISE_WEBHOOK_URL")
-    api_key = os.environ.get("SCOREWISE_API_KEY")
+    webhook_url = _get_env_config("SCOREWISE_WEBHOOK_URL")
+    api_key = _get_env_config("SCOREWISE_API_KEY")
     if not webhook_url:
         # No engine configured — nothing to stream
         return
@@ -249,8 +250,8 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
 
         # ── Forward results to ScoreWise engine ──────────────────
         engine_forwarded = False
-        webhook_url = os.environ.get("SCOREWISE_WEBHOOK_URL")
-        api_key = os.environ.get("SCOREWISE_API_KEY")
+        webhook_url = _get_env_config("SCOREWISE_WEBHOOK_URL")
+        api_key = _get_env_config("SCOREWISE_API_KEY")
         if webhook_url:
             try:
                 # Locate the output JSON file for this day
@@ -793,6 +794,192 @@ async def _run_schedule_loop(cfg: ScheduleConfigRequest) -> None:
             logger.error("Scheduler: error triggering scrape: %s", exc)
 
         await asyncio.sleep(interval)
+
+
+# ════════════════════════════════════════════════════════════════
+#  Environment config         (admin dashboard → scraper push channel)
+# ════════════════════════════════════════════════════════════════
+#
+# These endpoints let the website's admin Configuration tab push
+# engine-integration env vars (SCOREWISE_WEBHOOK_URL, SCOREWISE_API_KEY,
+# SCRAPER_LOG_LEVEL, etc.) directly to the scraper — no Railway dashboard
+# visit needed for ongoing changes.
+#
+# Overrides are persisted to output/env_config.json and merged on top of
+# os.environ at read time. Existing env vars still work unchanged.
+
+_ENV_CONFIG_PATH = Path(__file__).resolve().parent / "output" / "env_config.json"
+_env_config_lock = Lock()
+_env_overrides: Dict[str, str] = {}
+
+# Known keys + their env-var mappings + secret flag.
+_KNOWN_ENV_KEYS: Dict[str, Dict[str, Any]] = {
+    "SCOREWISE_WEBHOOK_URL": {
+        "env": "SCOREWISE_WEBHOOK_URL",
+        "default": "",
+        "secret": False,
+        "description": "Engine ingestion endpoint URL (e.g. https://scorewise-engine.up.railway.app/api/ingest). When set, scraper forwards completed matches to the engine.",
+    },
+    "SCOREWISE_API_KEY": {
+        "env": "SCOREWISE_API_KEY",
+        "default": "",
+        "secret": True,
+        "description": "API key sent to the engine as X-API-Key when forwarding matches. MUST match the engine's API_KEY.",
+    },
+    "SCRAPER_LOG_LEVEL": {
+        "env": "SCRAPER_LOG_LEVEL",
+        "default": "INFO",
+        "secret": False,
+        "description": "Python logging level (DEBUG / INFO / WARNING / ERROR).",
+    },
+    "SCRAPER_CRON_SCHEDULE": {
+        "env": "SCRAPER_CRON_SCHEDULE",
+        "default": "",
+        "secret": False,
+        "description": "Optional cron expression (e.g. '0 6 * * *') enabling built-in daily scrape. Empty = no built-in cron.",
+    },
+}
+
+
+def _load_env_overrides() -> None:
+    """Load persisted env overrides from disk into the in-memory cache."""
+    global _env_overrides
+    try:
+        if _ENV_CONFIG_PATH.exists():
+            with _ENV_CONFIG_PATH.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    _env_overrides = {str(k): str(v) for k, v in data.items()}
+                    logger.info("Loaded %d env-config overrides from %s", len(_env_overrides), _ENV_CONFIG_PATH)
+    except Exception as exc:
+        logger.warning("Failed to load env-config overrides from %s: %s", _ENV_CONFIG_PATH, exc)
+        _env_overrides = {}
+
+
+def _save_env_overrides() -> None:
+    """Atomically persist the current env overrides to disk."""
+    try:
+        _ENV_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp_file = _ENV_CONFIG_PATH.with_suffix(".tmp")
+        with tmp_file.open("w", encoding="utf-8") as f:
+            json.dump(_env_overrides, f, indent=2, sort_keys=True)
+        tmp_file.replace(_ENV_CONFIG_PATH)
+    except Exception as exc:
+        logger.warning("Failed to save env-config overrides to %s: %s", _ENV_CONFIG_PATH, exc)
+
+
+# Load on import
+_load_env_overrides()
+
+
+def _get_env_config(key: str) -> str:
+    """Read an env-config value: override → env var → default."""
+    if key in _env_overrides:
+        return _env_overrides[key]
+    spec = _KNOWN_ENV_KEYS.get(key)
+    if spec:
+        return os.environ.get(spec["env"], spec["default"])
+    return os.environ.get(key, "")
+
+
+def _is_env_secret(key: str) -> bool:
+    spec = _KNOWN_ENV_KEYS.get(key)
+    if spec:
+        return bool(spec["secret"])
+    return bool(re.search(r"(SECRET|KEY|TOKEN|PASSWORD|API_KEY)", key, re.IGNORECASE))
+
+
+def _mask_env_value(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "••••••••"
+    return value[:4] + "••••" + value[-4:]
+
+
+class EnvConfigEntry(BaseModel):
+    key: str
+    value: str  # masked if secret
+    has_override: bool
+    is_secret: bool
+    description: Optional[str] = None
+    env_var: Optional[str] = None
+
+
+class EnvConfigListResponse(BaseModel):
+    configs: List[EnvConfigEntry]
+    total: int
+
+
+class EnvConfigUpdateRequest(BaseModel):
+    updates: Dict[str, str] = Field(..., description="Key → value. Empty value removes override.")
+
+
+class EnvConfigUpdateResponse(BaseModel):
+    updated: List[str] = []
+    removed: List[str] = []
+    failed: Dict[str, str] = {}
+
+
+@router.get("/env-config", response_model=EnvConfigListResponse)
+async def list_env_config():
+    """List all known env-config keys with their current values (secrets masked)."""
+    keys = sorted(set(list(_KNOWN_ENV_KEYS.keys()) + list(_env_overrides.keys())))
+    entries = []
+    for k in keys:
+        spec = _KNOWN_ENV_KEYS.get(k, {})
+        entries.append(EnvConfigEntry(
+            key=k,
+            value=_mask_env_value(_get_env_config(k)) if _is_env_secret(k) else _get_env_config(k),
+            has_override=k in _env_overrides,
+            is_secret=_is_env_secret(k),
+            description=spec.get("description"),
+            env_var=spec.get("env"),
+        ))
+    return EnvConfigListResponse(configs=entries, total=len(entries))
+
+
+@router.post("/env-config", response_model=EnvConfigUpdateResponse)
+async def update_env_config(req: EnvConfigUpdateRequest):
+    """Update one or more env-config keys. Empty value removes override."""
+    updated: List[str] = []
+    removed: List[str] = []
+    failed: Dict[str, str] = {}
+    with _env_config_lock:
+        for key, value in req.updates.items():
+            if not key or not key.strip():
+                failed[key or "(empty)"] = "Key must be non-empty"
+                continue
+            try:
+                if value == "":
+                    if key in _env_overrides:
+                        _env_overrides.pop(key)
+                    removed.append(key)
+                else:
+                    _env_overrides[key] = value
+                    updated.append(key)
+            except Exception as exc:
+                failed[key] = str(exc)
+        if updated or removed:
+            _save_env_overrides()
+    if updated:
+        logger.info("Env-config updated via API: %s", ", ".join(updated))
+    if removed:
+        logger.info("Env-config overrides removed via API: %s", ", ".join(removed))
+    return EnvConfigUpdateResponse(updated=updated, removed=removed, failed=failed)
+
+
+@router.delete("/env-config/{key}")
+async def delete_env_override(key: str):
+    """Remove an override for a single env-config key (falls back to env var/default)."""
+    if not key:
+        raise HTTPException(400, "Key is required")
+    with _env_config_lock:
+        if key in _env_overrides:
+            _env_overrides.pop(key)
+            _save_env_overrides()
+            return {"removed": key, "message": f"Override for {key} removed. Scraper now uses env var or default."}
+        return {"removed": None, "message": f"No override found for {key}. Nothing to remove."}
 
 
 # ════════════════════════════════════════════════════════════════
