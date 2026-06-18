@@ -99,7 +99,7 @@ _log_capture_handler = _LogCaptureHandler()
 
 
 def _attach_log_capture_handler() -> None:
-    """Attach the log capture handler to the root logger.
+    """Attach the log capture handler to the root logger AND the api_server logger.
 
     Uvicorn installs its own logging config on startup (via logging.config.dictConfig),
     which by default sets `disable_existing_loggers=True` and REPLACES the root logger's
@@ -108,6 +108,10 @@ def _attach_log_capture_handler() -> None:
 
     To survive this, we call this function both at import time AND inside the FastAPI
     startup event (which fires AFTER uvicorn has applied its logging config).
+
+    We attach to BOTH root and api_server logger for defense in depth:
+    - Root catches logs from every module (src.scraper, src.driver_manager, etc.)
+    - api_server catches our own logs even if root's handler list gets stripped
     """
     root = logging.getLogger()
     # Avoid duplicate attachment on repeat calls
@@ -116,6 +120,15 @@ def _attach_log_capture_handler() -> None:
     # Ensure the root logger's level allows INFO through (uvicorn may set it to WARNING)
     if root.level > logging.INFO or root.level == logging.NOTSET:
         root.setLevel(logging.INFO)
+
+    # Also attach directly to the api_server logger — defense in depth.
+    # This catches our own logger.info() calls even if something strips root.
+    api_server_log = logging.getLogger("api_server")
+    if _log_capture_handler not in api_server_log.handlers:
+        api_server_log.addHandler(_log_capture_handler)
+    api_server_log.propagate = True  # ensure propagation to root still happens
+    if api_server_log.level == logging.NOTSET or api_server_log.level > logging.INFO:
+        api_server_log.setLevel(logging.INFO)
 
 
 # Attach at import time (works for direct `python api_server.py` runs and tests)
@@ -1186,6 +1199,36 @@ async def clear_logs():
         _log_buffer.clear()
     logger.info("Log buffer cleared via API (%d entries removed)", n)
     return {"cleared": True, "removed": n}
+
+
+@router.get("/logs/debug")
+async def debug_logs():
+    """Diagnostic endpoint — returns the current state of the logging system.
+
+    Used to verify that the _LogCaptureHandler is actually attached to the
+    root logger at request time (not just at startup). If 'capture_handler_attached'
+    is false, the /api/logs endpoint will return an empty buffer even when
+    the service is actively logging.
+    """
+    import logging
+    root = logging.getLogger()
+    api_server_logger = logging.getLogger("api_server")
+    return {
+        "capture_handler_attached": _log_capture_handler in root.handlers,
+        "root_logger_level": logging.getLevelName(root.level),
+        "root_logger_handlers": [
+            {"class": type(h).__name__, "name": getattr(h, "name", None) or h.__class__.__module__ + "." + type(h).__name__}
+            for h in root.handlers
+        ],
+        "api_server_logger_level": logging.getLevelName(api_server_logger.level),
+        "api_server_logger_propagate": api_server_logger.propagate,
+        "api_server_logger_handlers": [
+            {"class": type(h).__name__}
+            for h in api_server_logger.handlers
+        ],
+        "buffer_size": len(_log_buffer),
+        "buffer_capacity": _LOG_BUFFER_CAPACITY,
+    }
 
 
 # ════════════════════════════════════════════════════════════════
