@@ -481,7 +481,19 @@ class FlashscoreScraper:
         logger.debug("🛑 Starting scraper cleanup...")
         
         try:
-            # Mark current thread as shutting down to suppress retry warnings
+            # Mark current thread as shutting down to suppress retry warnings.
+            #
+            # WARNING: this flag is read by retry_manager.retry_network_operation()
+            # via `threading.current_thread()._is_shutting_down`. Because api_server
+            # uses a ThreadPoolExecutor(max_workers=1), the SAME worker thread is
+            # reused for the next scrape — so this flag MUST be cleared back to
+            # False at the start of the next run, otherwise the next scrape dies
+            # immediately with "Operation cancelled by shutdown".
+            #
+            # That clear lives in api_server.py:_run_scheduled_scrape and
+            # api_server.py:_run_results_scrape. If you remove or move this
+            # `= True` line, also update those clears. If you remove the clears,
+            # every scrape after the first will fail. See commit 5a7a594 / 16d39a7.
             import threading
             threading.current_thread()._is_shutting_down = True
             

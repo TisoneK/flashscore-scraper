@@ -172,7 +172,16 @@ class NetworkRetryManager(RetryManager):
         from src.core.network_monitor import NetworkMonitor
         import threading
         
-        # Helper to check shutdown state dynamically on each iteration
+        # Helper to check shutdown state dynamically on each iteration.
+        #
+        # This reads `threading.current_thread()._is_shutting_down`, which is
+        # set to True by FlashscoreScraper.close() (src/scraper.py) during
+        # cleanup. It's cleared back to False at the start of each scrape by
+        # api_server.py:_run_scheduled_scrape / _run_results_scrape.
+        #
+        # If you're seeing "Operation cancelled by shutdown" on every scrape
+        # (zero matches scraped, ~3s duration), the clear in api_server.py
+        # has probably been removed — see commits 5a7a594 and 16d39a7.
         def _is_shutting_down():
             try:
                 return getattr(threading.current_thread(), '_is_shutting_down', False)

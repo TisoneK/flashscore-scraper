@@ -230,15 +230,33 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
     global _state
     import threading
 
-    # Ensure stop flag is clear at the start of every run
-    # (defensive: in case a previous run's stop_requested leaked)
+    # ────────────────────────────────────────────────────────────────
+    # CRITICAL: thread-state reset. DO NOT REMOVE THESE LINES.
+    #
+    # FlashscoreScraper.close() (in src/scraper.py) sets
+    #   threading.current_thread()._is_shutting_down = True
+    # as part of its cleanup, so retry_manager can abort in-flight
+    # network operations during a real shutdown.
+    #
+    # But api_server uses a ThreadPoolExecutor(max_workers=1), so the
+    # SAME worker thread is reused for every scrape. Without clearing
+    # the flag at the start of the next run, the worker is still
+    # marked as "shutting down" from the previous run's cleanup, and
+    # retry_manager.retry_network_operation() immediately raises
+    #   RuntimeError("Operation cancelled by shutdown")
+    # the moment the new scrape tries its first network call.
+    #
+    # Symptom of the bug: every scrape dies ~3s in with
+    # "Operation cancelled by shutdown", 0 matches scraped.
+    #
+    # History: this fix was added in commit 5a7a594 (Jun 15),
+    # accidentally removed in commit bf1bf6f (Jun 15) during a
+    # refactor, then restored in commit 16d39a7 after the regression
+    # was discovered. If you're refactoring this function, keep the
+    # clear below — it is load-bearing.
+    # ────────────────────────────────────────────────────────────────
     with _state_lock:
         _state.stop_requested = False
-
-    # Clear the thread's _is_shutting_down flag — the previous scrape's
-    # close() method sets this, and since ThreadPoolExecutor reuses the
-    # same worker thread, it would poison the next run.
-    # (Restored after being accidentally removed in commit bf1bf6f.)
     threading.current_thread()._is_shutting_down = False
 
     def status_cb(msg: str) -> None:
@@ -344,15 +362,14 @@ def _run_results_scrape(date_str: str, scrape_id: str) -> None:
     global _state
     import threading
 
-    # Ensure stop flag is clear at the start of every run
+    # CRITICAL: thread-state reset. DO NOT REMOVE.
+    # Same rationale as _run_scheduled_scrape above — without this clear,
+    # the worker thread is poisoned by the previous run's close() and the
+    # next scrape dies immediately with "Operation cancelled by shutdown"
+    # in retry_manager. See the full comment in _run_scheduled_scrape.
+    # (Restored in commit 16d39a7 after being accidentally removed in bf1bf6f.)
     with _state_lock:
         _state.stop_requested = False
-
-    # Clear the thread's _is_shutting_down flag — same rationale as
-    # _run_scheduled_scrape. Without this, the worker thread is poisoned
-    # by the previous run's close() and the next scrape dies immediately
-    # with "Operation cancelled by shutdown" in retry_manager.
-    # (Restored after being accidentally removed in commit bf1bf6f.)
     threading.current_thread()._is_shutting_down = False
 
     def status_cb(msg: str) -> None:
