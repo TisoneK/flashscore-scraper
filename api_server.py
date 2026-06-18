@@ -228,6 +228,18 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
     ``GET /scrape/progress`` and ``GET /status`` reflect live state.
     """
     global _state
+    import threading
+
+    # Ensure stop flag is clear at the start of every run
+    # (defensive: in case a previous run's stop_requested leaked)
+    with _state_lock:
+        _state.stop_requested = False
+
+    # Clear the thread's _is_shutting_down flag — the previous scrape's
+    # close() method sets this, and since ThreadPoolExecutor reuses the
+    # same worker thread, it would poison the next run.
+    # (Restored after being accidentally removed in commit bf1bf6f.)
+    threading.current_thread()._is_shutting_down = False
 
     def status_cb(msg: str) -> None:
         with _state_lock:
@@ -330,6 +342,18 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
 def _run_results_scrape(date_str: str, scrape_id: str) -> None:
     """Run FlashscoreScraper.scrape_results() on a background thread."""
     global _state
+    import threading
+
+    # Ensure stop flag is clear at the start of every run
+    with _state_lock:
+        _state.stop_requested = False
+
+    # Clear the thread's _is_shutting_down flag — same rationale as
+    # _run_scheduled_scrape. Without this, the worker thread is poisoned
+    # by the previous run's close() and the next scrape dies immediately
+    # with "Operation cancelled by shutdown" in retry_manager.
+    # (Restored after being accidentally removed in commit bf1bf6f.)
+    threading.current_thread()._is_shutting_down = False
 
     def status_cb(msg: str) -> None:
         with _state_lock:
