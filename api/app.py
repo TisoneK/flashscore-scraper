@@ -38,17 +38,18 @@ app = FastAPI(
     ),
 )
 
-# All routers share the /api prefix (set on the outer APIRouter in each module)
-# Actually each router defines its own routes with /api/ prefix in the path,
-# so we just include them directly.
-app.include_router(scrape.router)
-app.include_router(status.router)
-app.include_router(config.router)
-app.include_router(env_config.router)
-app.include_router(schedule.router)
-app.include_router(logs.router)
-app.include_router(drivers.router)
-app.include_router(init.router)
+# All routes are mounted under /api/ prefix — matches the original
+# api_server.py's `APIRouter(prefix="/api")` behavior. Each router defines
+# its routes as /scrape, /status, etc.; the prefix is added here so we
+# don't repeat /api/ in every router file.
+app.include_router(scrape.router, prefix="/api")
+app.include_router(status.router, prefix="/api")
+app.include_router(config.router, prefix="/api")
+app.include_router(env_config.router, prefix="/api")
+app.include_router(schedule.router, prefix="/api")
+app.include_router(logs.router, prefix="/api")
+app.include_router(drivers.router, prefix="/api")
+app.include_router(init.router, prefix="/api")
 
 
 @app.on_event("startup")
