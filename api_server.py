@@ -26,6 +26,7 @@ import logging
 import asyncio
 import csv
 import io
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -66,6 +67,37 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("api_server")
+
+# ── In-memory log ring buffer (for /api/logs dashboard endpoint) ─
+# Captures every log record from every module (api_server, src.scraper,
+# src.driver_manager, uvicorn access logs, etc.) so the admin dashboard
+# can stream recent activity without SSH or Railway dashboard access.
+_LOG_BUFFER_CAPACITY = 1000
+_log_buffer: deque = deque(maxlen=_LOG_BUFFER_CAPACITY)
+_log_buffer_lock = Lock()
+
+
+class _LogCaptureHandler(logging.Handler):
+    """Captures log records into an in-memory ring buffer for /api/logs."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            entry = {
+                "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+                "level": record.levelname or "INFO",
+                "logger": record.name or "root",
+                "message": record.getMessage(),
+            }
+            with _log_buffer_lock:
+                _log_buffer.append(entry)
+        except Exception:
+            # Logging must never crash the application
+            pass
+
+
+_log_capture_handler = _LogCaptureHandler()
+# Attach to the root logger so we capture logs from all modules, not just api_server.
+logging.getLogger().addHandler(_log_capture_handler)
 
 # ── Thread-safe shared state ────────────────────────────────────
 _state_lock: Lock = Lock()
@@ -980,6 +1012,109 @@ async def delete_env_override(key: str):
             _save_env_overrides()
             return {"removed": key, "message": f"Override for {key} removed. Scraper now uses env var or default."}
         return {"removed": None, "message": f"No override found for {key}. Nothing to remove."}
+
+
+# ════════════════════════════════════════════════════════════════
+#  Live log streaming         (admin dashboard: Service Logs tab)
+# ════════════════════════════════════════════════════════════════
+
+class LogEntry(BaseModel):
+    timestamp: str  # ISO 8601 UTC
+    level: str      # DEBUG / INFO / WARNING / ERROR / CRITICAL
+    logger: str     # logger name (e.g. "api_server", "src.scraper", "uvicorn.access")
+    message: str
+
+
+class LogsResponse(BaseModel):
+    logs: List[LogEntry]
+    total: int
+    oldest: Optional[str] = None  # ISO 8601 timestamp of oldest entry in response
+    newest: Optional[str] = None  # ISO 8601 timestamp of newest entry in response
+
+
+_LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+
+def _snapshot_logs(
+    since: Optional[str] = None,
+    limit: int = 100,
+    level: Optional[str] = None,
+    q: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Return a filtered, limited slice of the in-memory log buffer."""
+    with _log_buffer_lock:
+        items = list(_log_buffer)
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            items = [
+                e for e in items
+                if datetime.fromisoformat(e["timestamp"]) >= since_dt
+            ]
+        except Exception:
+            # Ignore invalid `since` rather than failing the whole request
+            pass
+    if level:
+        level_upper = level.upper()
+        if level_upper in _LOG_LEVELS:
+            allowed = set(_LOG_LEVELS[_LOG_LEVELS.index(level_upper):])
+            items = [e for e in items if e["level"] in allowed]
+    if q:
+        ql = q.lower()
+        items = [
+            e for e in items
+            if ql in e["message"].lower() or ql in e["logger"].lower()
+        ]
+    # Keep the most recent `limit` entries; return oldest-first for natural top-down reading
+    items = items[-limit:]
+    return items
+
+
+@router.get("/logs", response_model=LogsResponse)
+async def list_logs(
+    since: Optional[str] = Query(
+        None,
+        description="ISO 8601 timestamp; only return logs at or after this time (for incremental polling)",
+    ),
+    limit: int = Query(100, ge=1, le=500, description="Max entries to return (1-500)"),
+    level: Optional[str] = Query(
+        None,
+        description="Minimum log level: DEBUG / INFO / WARNING / ERROR (includes this level and above)",
+    ),
+    q: Optional[str] = Query(
+        None,
+        description="Case-insensitive substring filter on logger name or message",
+    ),
+):
+    """Return recent log entries from the in-memory ring buffer.
+
+    Entries are returned oldest-first (so the dashboard can append new entries
+    to the bottom as they arrive). Use `since` with the previous response's
+    `newest` timestamp to poll for incremental updates without re-fetching
+    the whole buffer.
+    """
+    items = _snapshot_logs(since=since, limit=limit, level=level, q=q)
+    return LogsResponse(
+        logs=[LogEntry(**e) for e in items],
+        total=len(items),
+        oldest=items[0]["timestamp"] if items else None,
+        newest=items[-1]["timestamp"] if items else None,
+    )
+
+
+@router.delete("/logs")
+async def clear_logs():
+    """Clear the in-memory log buffer.
+
+    Useful for resetting the dashboard view when the buffer gets noisy.
+    Does NOT affect on-disk log files (output/logs/*.log) — only the
+    in-memory ring buffer used by /api/logs.
+    """
+    with _log_buffer_lock:
+        n = len(_log_buffer)
+        _log_buffer.clear()
+    logger.info("Log buffer cleared via API (%d entries removed)", n)
+    return {"cleared": True, "removed": n}
 
 
 # ════════════════════════════════════════════════════════════════
