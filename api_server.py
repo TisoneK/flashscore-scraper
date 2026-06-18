@@ -96,8 +96,38 @@ class _LogCaptureHandler(logging.Handler):
 
 
 _log_capture_handler = _LogCaptureHandler()
-# Attach to the root logger so we capture logs from all modules, not just api_server.
-logging.getLogger().addHandler(_log_capture_handler)
+
+
+def _attach_log_capture_handler() -> None:
+    """Attach the log capture handler to the root logger.
+
+    Uvicorn installs its own logging config on startup (via logging.config.dictConfig),
+    which by default sets `disable_existing_loggers=True` and REPLACES the root logger's
+    handler list. So any handler we attach at module-import time gets stripped the moment
+    uvicorn.run() executes.
+
+    To survive this, we call this function both at import time AND inside the FastAPI
+    startup event (which fires AFTER uvicorn has applied its logging config).
+    """
+    root = logging.getLogger()
+    # Avoid duplicate attachment on repeat calls
+    if _log_capture_handler not in root.handlers:
+        root.addHandler(_log_capture_handler)
+    # Ensure the root logger's level allows INFO through (uvicorn may set it to WARNING)
+    if root.level > logging.INFO or root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
+
+
+# Attach at import time (works for direct `python api_server.py` runs and tests)
+_attach_log_capture_handler()
+
+
+# Re-attach on FastAPI startup — this is the load-bearing call, because it
+# runs AFTER uvicorn has applied its own dictConfig and stripped our handler.
+@app.on_event("startup")
+async def _reattach_log_handler_on_startup() -> None:
+    _attach_log_capture_handler()
+    logger.info("Log capture handler attached — /api/logs is live")
 
 # ── Thread-safe shared state ────────────────────────────────────
 _state_lock: Lock = Lock()
