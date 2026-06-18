@@ -99,7 +99,7 @@ _log_capture_handler = _LogCaptureHandler()
 
 
 def _attach_log_capture_handler() -> None:
-    """Attach the log capture handler to the root logger AND the api_server logger.
+    """Attach the log capture handler to the root logger.
 
     Uvicorn installs its own logging config on startup (via logging.config.dictConfig),
     which by default sets `disable_existing_loggers=True` and REPLACES the root logger's
@@ -109,9 +109,12 @@ def _attach_log_capture_handler() -> None:
     To survive this, we call this function both at import time AND inside the FastAPI
     startup event (which fires AFTER uvicorn has applied its logging config).
 
-    We attach to BOTH root and api_server logger for defense in depth:
-    - Root catches logs from every module (src.scraper, src.driver_manager, etc.)
-    - api_server catches our own logs even if root's handler list gets stripped
+    IMPORTANT: attach to root ONLY, not to api_server. If you attach the same handler
+    instance to both root and a child logger, the record fires the handler TWICE
+    (once on the child, once on root via propagation) and you get duplicate entries
+    in the buffer. Root catches everything via propagation from child loggers
+    (api_server, src.scraper, src.driver_manager, etc.) — that's the single correct
+    attachment point.
     """
     root = logging.getLogger()
     # Avoid duplicate attachment on repeat calls
@@ -120,15 +123,6 @@ def _attach_log_capture_handler() -> None:
     # Ensure the root logger's level allows INFO through (uvicorn may set it to WARNING)
     if root.level > logging.INFO or root.level == logging.NOTSET:
         root.setLevel(logging.INFO)
-
-    # Also attach directly to the api_server logger — defense in depth.
-    # This catches our own logger.info() calls even if something strips root.
-    api_server_log = logging.getLogger("api_server")
-    if _log_capture_handler not in api_server_log.handlers:
-        api_server_log.addHandler(_log_capture_handler)
-    api_server_log.propagate = True  # ensure propagation to root still happens
-    if api_server_log.level == logging.NOTSET or api_server_log.level > logging.INFO:
-        api_server_log.setLevel(logging.INFO)
 
 
 # Attach at import time (works for direct `python api_server.py` runs and tests)
