@@ -106,8 +106,14 @@ def _attach_log_capture_handler() -> None:
     handler list. So any handler we attach at module-import time gets stripped the moment
     uvicorn.run() executes.
 
-    To survive this, we call this function both at import time AND inside the FastAPI
-    startup event (which fires AFTER uvicorn has applied its logging config).
+    To survive this, we call this function from the FastAPI startup event ONLY
+    (which fires AFTER uvicorn has applied its logging config).
+
+    CRITICAL: do NOT also call this at module-import time. When `python api_server.py`
+    runs, the file is imported as module `__main__`, creating handler instance #1.
+    Then uvicorn.run("api_server:app") RE-IMPORTS the same file as module `api_server`,
+    creating handler instance #2 (a DIFFERENT object). Both instances attach to root,
+    and both fire for every log record → duplicate entries in the buffer.
 
     IMPORTANT: attach to root ONLY, not to api_server. If you attach the same handler
     instance to both root and a child logger, the record fires the handler TWICE
@@ -125,8 +131,8 @@ def _attach_log_capture_handler() -> None:
         root.setLevel(logging.INFO)
 
 
-# Attach at import time (works for direct `python api_server.py` runs and tests)
-_attach_log_capture_handler()
+# DO NOT attach at import time. See docstring above for why.
+# The @app.on_event("startup") hook below is the only place we attach.
 
 
 # Re-attach on FastAPI startup — this is the load-bearing call, because it
