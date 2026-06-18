@@ -80,12 +80,22 @@ def transform_payload(data: dict) -> dict:
             for h in h2h:
                 if not isinstance(h, dict):
                     continue
+                # Flashscore sometimes returns empty strings for team names
+                # in H2H entries. The engine's H2HMatchSchema requires
+                # min_length=1, so we fall back to the parent match's teams.
+                home_team = h.get("home_team") or match.get("home_team") or "Unknown"
+                away_team = h.get("away_team") or match.get("away_team") or "Unknown"
+                home_score = h.get("home_score")
+                away_score = h.get("away_score")
+                # Skip H2H entries with missing scores — they're useless to the engine
+                if home_score is None or away_score is None:
+                    continue
                 cleaned = {
-                    "home_team": h.get("home_team"),
-                    "away_team": h.get("away_team"),
-                    "home_score": h.get("home_score"),
-                    "away_score": h.get("away_score"),
-                    "date": convert_h2h_date(h.get("date")),
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "home_score": int(home_score),
+                    "away_score": int(away_score),
+                    "date": convert_h2h_date(h.get("date")) or "2024-01-01",
                 }
                 cleaned_h2h.append(cleaned)
             m["h2h_matches"] = cleaned_h2h
