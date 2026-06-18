@@ -56,9 +56,20 @@ def setup_logging(log_file_path: Optional[str] = None, force: bool = False) -> s
         return str(final_log_path)
     
     # Clear existing handlers if force=True or if we don't have the right handler
+    # BUT preserve any _LogCaptureHandler instances (used by the /api/logs endpoint
+    # for live log streaming to the admin dashboard). Without this, setup_logging()
+    # wipes the capture handler and /api/logs returns an empty buffer mid-scrape.
     if force or not existing_file_handler:
+        # Save capture handlers before clearing
+        capture_handlers = [
+            h for h in root_logger.handlers
+            if h.__class__.__name__ == "_LogCaptureHandler"
+        ]
         root_logger.handlers.clear()
-        logger.debug("Cleared existing log handlers")
+        logger.debug("Cleared existing log handlers (preserved %d capture handler(s))", len(capture_handlers))
+        # Re-attach capture handlers
+        for ch in capture_handlers:
+            root_logger.addHandler(ch)
     
     # Set log level
     log_level = getattr(logging, logging_config.get('log_level', 'INFO').upper(), logging.INFO)
