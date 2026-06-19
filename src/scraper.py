@@ -607,6 +607,31 @@ class FlashscoreScraper:
 
                 processed_match_ids, processed_reasons = self.check_and_get_processed_matches(day)
 
+                # Check the website DB for matches that already have predictions.
+                # This skips matches that have already been scraped + predicted,
+                # avoiding redundant work.
+                existing_db_ids = set()
+                try:
+                    import requests
+                    website_url = os.environ.get("SCOREWISE_WEBHOOK_URL", "")
+                    # Derive the website base URL from the engine webhook URL
+                    # (the webhook URL points to the engine, not the website)
+                    # We use a dedicated env var or the service config.
+                    # For now, try the website URL from env or config.
+                    from api.env_config_store import get_env_config
+                    # The website's predictions endpoint is public (no auth for the exists check)
+                    # We need the website URL — try WEBSITE_URL env or derive from known pattern
+                    website_base = os.environ.get("WEBSITE_URL", "https://scorewise-ke.vercel.app")
+                    resp = requests.get(f"{website_base}/api/predictions/exists", timeout=10)
+                    if resp.ok:
+                        data = resp.json()
+                        existing_db_ids = set(data.get("match_ids", []))
+                        if existing_db_ids:
+                            logger.info(f"Found {len(existing_db_ids)} existing predictions in DB — will skip those matches")
+                except Exception as e:
+                    logger.debug(f"Could not check existing predictions in DB: {e}")
+                    # Non-fatal — proceed with all matches if DB check fails
+
                 # Collect immutable URLs upfront (no fallbacks)
                 url_snapshots = self.match_loader.collect_match_urls()
                 # Align to ids discovered earlier: filter/keep ordering based on match_ids
@@ -632,6 +657,14 @@ class FlashscoreScraper:
                     logger.info(f'Processing {match_display} ({i+1}/{MAX_MATCHES})')
                     if match_id in processed_match_ids:
                         msg = f"Skipping already processed match: {match_display} (reason: {processed_reasons.get(match_id, 'already processed')})"
+                        logger.info(msg)
+                        if status_callback:
+                            status_callback(msg)
+                        continue
+
+                    # Skip matches that already have predictions in the website DB
+                    if match_id in existing_db_ids:
+                        msg = f"Skipping match with existing prediction in DB: {match_display}"
                         logger.info(msg)
                         if status_callback:
                             status_callback(msg)
