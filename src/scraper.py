@@ -836,18 +836,49 @@ class FlashscoreScraper:
         perf_monitor = PerformanceMonitor()
         try:
             def main_results_scrape():
-                # Load match IDs from the JSON file for the given date
+                # Load match IDs — try the local JSON file first, then fall back to
+                # the website's /api/predictions/exists endpoint (which returns all
+                # matchIds that have predictions in the DB). The website fallback is
+                # essential on Railway where the filesystem is wiped on every redeploy,
+                # so the local matches_YYYYMMDD.json file may not exist.
+                match_ids = []
+
+                # Strategy 1: Try local JSON file (has match_ids + metadata for the date)
                 file_date = date.replace('.', '')
                 filename = f"matches_{file_date}.json"
                 try:
                     matches = self.json_storage.load_matches(filename)
+                    match_ids = [m.match_id for m in matches]
+                    if match_ids:
+                        logger.info(f"Loaded {len(match_ids)} match IDs from {filename}")
                 except Exception as e:
-                    msg = f"Could not load matches for {date} from {filename}: {e}"
-                    logger.error(msg)
-                    if status_callback:
-                        status_callback(msg)
-                    return
-                match_ids = [m.match_id for m in matches]
+                    logger.warning(f"Could not load matches from {filename}: {e}")
+
+                # Strategy 2: Fall back to website DB if local file is missing/empty
+                if not match_ids:
+                    website_url = os.environ.get("SCOREWISE_WEBSITE_URL", "")
+                    if website_url:
+                        try:
+                            import requests
+                            resp = requests.get(
+                                f"{website_url.rstrip('/')}/api/predictions/exists",
+                                timeout=15,
+                            )
+                            if resp.ok:
+                                data = resp.json()
+                                match_ids = data.get("match_ids", [])
+                                logger.info(
+                                    f"Fetched {len(match_ids)} match IDs from website DB "
+                                    f"(/api/predictions/exists)"
+                                )
+                        except Exception as fetch_err:
+                            logger.error(f"Failed to fetch match IDs from website: {fetch_err}")
+                    else:
+                        logger.warning(
+                            "SCOREWISE_WEBSITE_URL not set — cannot fall back to website DB "
+                            "for match IDs. Results scrape will be empty."
+                        )
+
                 if not match_ids:
                     msg = f"No matches found for results scraping on {date}."
                     logger.info(msg)
