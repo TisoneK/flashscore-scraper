@@ -238,13 +238,71 @@ class ChromeDriverManager:
         return path
 
     def _find_chromedriver_via_webdriver_manager(self) -> Optional[str]:
-        """Try to find ChromeDriver using webdriver-manager package."""
+        """Try to find ChromeDriver using webdriver-manager package.
+
+        Works around a known webdriver-manager bug where install() sometimes
+        returns the path to THIRD_PARTY_NOTICES.chromedriver (a text file)
+        instead of the actual chromedriver binary. Both files match the glob
+        pattern *chromedriver* in the extracted archive.
+
+        Fix: after install(), validate that the returned path is actually
+        executable. If not, look for the real 'chromedriver' binary in the
+        same directory.
+        """
         try:
             from webdriver_manager.chrome import ChromeDriverManager as WDMChromeDriverManager
             chromedriver_path = WDMChromeDriverManager().install()
-            if chromedriver_path and Path(chromedriver_path).exists():
+            if not chromedriver_path or not Path(chromedriver_path).exists():
+                return None
+
+            # Check if the returned path is actually the binary (not a text file
+            # like THIRD_PARTY_NOTICES.chromedriver). The real binary is named
+            # exactly 'chromedriver' (on Linux/Mac) or 'chromedriver.exe' (Windows).
+            # THIRD_PARTY_NOTICES.chromedriver is a text file that matches the
+            # *chromedriver* glob but is NOT executable.
+            import os
+            import stat
+
+            def is_executable(path: str) -> bool:
+                try:
+                    st = os.stat(path)
+                    return bool(st.st_mode & stat.S_IXUSR) and not stat.S_ISDIR(st.st_mode)
+                except OSError:
+                    return False
+
+            if is_executable(chromedriver_path):
                 logger.info(f"Found ChromeDriver via webdriver-manager: {chromedriver_path}")
                 return chromedriver_path
+
+            # The returned path is not executable — likely THIRD_PARTY_NOTICES.chromedriver.
+            # Look for the real chromedriver binary in the same directory.
+            parent = Path(chromedriver_path).parent
+            logger.warning(
+                f"webdriver-manager returned non-executable path: {chromedriver_path}. "
+                f"Searching {parent} for the real chromedriver binary..."
+            )
+
+            # Look for 'chromedriver' (Linux/Mac) or 'chromedriver.exe' (Windows)
+            # in the same directory. Prefer the one with no extra prefix/suffix.
+            candidates = sorted(parent.iterdir(), key=lambda p: len(p.name))
+            for candidate in candidates:
+                name = candidate.name.lower()
+                if (name == "chromedriver" or name == "chromedriver.exe") and is_executable(str(candidate)):
+                    logger.info(f"Found real ChromeDriver binary: {candidate}")
+                    return str(candidate)
+
+            # Fallback: any file containing 'chromedriver' that's executable
+            # (but NOT containing 'notices' or 'license')
+            for candidate in candidates:
+                name = candidate.name.lower()
+                if "chromedriver" in name and "notices" not in name and "license" not in name:
+                    if is_executable(str(candidate)):
+                        logger.info(f"Found ChromeDriver binary (fallback): {candidate}")
+                        return str(candidate)
+
+            logger.error(f"Could not find executable chromedriver in {parent}")
+            logger.error(f"Directory contents: {[p.name for p in candidates]}")
+            return None
         except ImportError:
             logger.debug("webdriver-manager not available")
         except Exception as e:
