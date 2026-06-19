@@ -67,6 +67,26 @@ _KNOWN_ENV_KEYS: Dict[str, Dict[str, Any]] = {
             "daily scrape. Empty = no built-in cron."
         ),
     },
+    "SCOREWISE_WEBSITE_URL": {
+        "env": "SCOREWISE_WEBSITE_URL",
+        "default": "",
+        "secret": False,
+        "description": (
+            "Base URL of the website (e.g. https://scorewise-ke.vercel.app). "
+            "When set + SCOREWISE_WEBHOOK_SECRET, scraper pushes final scores "
+            "to /api/webhook/result after running scrape_results()."
+        ),
+    },
+    "SCOREWISE_WEBHOOK_SECRET": {
+        "env": "SCOREWISE_WEBHOOK_SECRET",
+        "default": "",
+        "secret": True,
+        "description": (
+            "HMAC-SHA256 secret used to sign result-push payloads to the website. "
+            "MUST match WEBHOOK_SECRET on the website (stored in ServiceConfig "
+            "table or env var)."
+        ),
+    },
 }
 
 
