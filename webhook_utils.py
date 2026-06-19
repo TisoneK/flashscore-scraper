@@ -62,6 +62,10 @@ def transform_payload(data: dict) -> dict:
             "match_id": match.get("match_id"),
             "home_team": match.get("home_team"),
             "away_team": match.get("away_team"),
+            "country": match.get("country", ""),
+            "league": match.get("league", ""),
+            "date": match.get("date", ""),
+            "time": match.get("time", ""),
         }
 
         # OddsSchema does not declare match_id — strip it to stay compatible
