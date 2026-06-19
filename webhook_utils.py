@@ -246,3 +246,110 @@ def forward_matches_to_engine(
     except Exception as e:
         logger.error(f"Forward to engine failed: {e}")
         return False
+
+
+def forward_results_to_website(
+    results: list,
+    website_url: str,
+    webhook_secret: str,
+    date_str: Optional[str] = None,
+    source: str = "flashscore-scraper",
+    timeout: int = 30,
+) -> bool:
+    """Push final scores to the website's /api/webhook/result endpoint.
+
+    Called by FlashscoreScraper.scrape_results() after it collects final
+    scores for a date. The website updates its Prediction table with
+    home_score, away_score, result_status = FINAL, result_source = "scraper".
+
+    The payload is HMAC-SHA256 signed with webhook_secret so the website
+    can verify authenticity without needing a session cookie.
+
+    Args:
+        results: List of result dicts. Each must have:
+            - match_id (str)
+            - home_score (int)
+            - away_score (int)
+            - status (str, e.g. "finished" — only "finished" entries are processed)
+        website_url: Base URL of the website (e.g. https://scorewise-ke.vercel.app).
+        webhook_secret: Shared HMAC secret. MUST match WEBHOOK_SECRET on the website.
+        date_str: Optional date string (DD.MM.YYYY) for logging/context.
+        source: Source identifier (default "flashscore-scraper").
+        timeout: HTTP request timeout in seconds.
+
+    Returns:
+        True if the webhook accepted the payload, False on any failure.
+    """
+    if not results:
+        logger.info("No results to push to website — skipping webhook POST.")
+        return True
+
+    if not website_url:
+        logger.warning("forward_results_to_website: website_url is empty — skipping.")
+        return False
+
+    if not webhook_secret:
+        logger.warning("forward_results_to_website: webhook_secret is empty — cannot sign payload. Skipping.")
+        return False
+
+    try:
+        import hashlib
+        import hmac
+        import json
+        from datetime import datetime, timezone
+        import requests
+
+        envelope = {
+            "event": "results_push",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "data": {
+                "date": date_str,
+                "source": source,
+                "results": results,
+            },
+        }
+        body = json.dumps(envelope, default=str).encode("utf-8")
+        signature = hmac.new(
+            webhook_secret.encode("utf-8"),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+
+        url = f"{website_url.rstrip('/')}/api/webhook/result"
+        headers = {
+            "Content-Type": "application/json",
+            "X-ScoreWise-Event": "results_push",
+            "X-ScoreWise-Signature": signature,
+        }
+
+        logger.info(
+            f"Pushing {len(results)} result(s) to {url} "
+            f"(date={date_str or 'n/a'}) ..."
+        )
+        resp = requests.post(url, data=body, headers=headers, timeout=timeout)
+
+        if resp.ok:
+            try:
+                resp_data = resp.json()
+                stored = resp_data.get("stored", "?")
+                skipped = resp_data.get("skipped", "?")
+                errors = resp_data.get("errors", "?")
+                logger.info(
+                    f"Website accepted results ({resp.status_code}) — "
+                    f"stored: {stored}, skipped: {skipped}, errors: {errors}"
+                )
+            except Exception:
+                logger.info(f"Website accepted results ({resp.status_code})")
+            return True
+        else:
+            logger.warning(
+                f"Website rejected results (HTTP {resp.status_code}): "
+                f"{resp.text[:200]}"
+            )
+            return False
+    except ImportError:
+        logger.error("The 'requests' library is not installed. Cannot POST results to website.")
+        return False
+    except Exception as e:
+        logger.error(f"Forward results to website failed: {e}")
+        return False

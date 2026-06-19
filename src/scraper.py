@@ -907,6 +907,42 @@ class FlashscoreScraper:
                 logger.info(summary_msg)
                 if status_callback:
                     status_callback(summary_msg)
+
+                # Push results to the website so it can update its Prediction table
+                # with final scores + result_status = FINAL + result_source = "scraper".
+                # The website verifies the HMAC signature in /api/webhook/result.
+                try:
+                    import os
+                    # Lazy import to avoid circular dependency issues at module load time
+                    from webhook_utils import forward_results_to_website
+                    website_url = os.environ.get("SCOREWISE_WEBSITE_URL", "")
+                    webhook_secret = os.environ.get("SCOREWISE_WEBHOOK_SECRET", "")
+                    if website_url and webhook_secret and results:
+                        push_msg = f"Pushing {len(results)} result(s) to website..."
+                        logger.info(push_msg)
+                        if status_callback:
+                            status_callback(push_msg)
+                        success = forward_results_to_website(
+                            results=results,
+                            website_url=website_url,
+                            webhook_secret=webhook_secret,
+                            date_str=date,
+                            source="flashscore-scraper",
+                        )
+                        outcome_msg = (
+                            f"Results push to website: {'SUCCESS' if success else 'FAILED'}"
+                        )
+                        logger.info(outcome_msg)
+                        if status_callback:
+                            status_callback(outcome_msg)
+                    elif not website_url:
+                        logger.info("SCOREWISE_WEBSITE_URL not set — skipping results push to website.")
+                    elif not webhook_secret:
+                        logger.info("SCOREWISE_WEBHOOK_SECRET not set — skipping results push to website.")
+                except Exception as push_err:
+                    logger.error(f"Failed to push results to website: {push_err}")
+                    if status_callback:
+                        status_callback(f"Failed to push results to website: {push_err}")
             # Run with retry logic
             self.retry_manager.retry_network_operation(main_results_scrape)
         finally:
