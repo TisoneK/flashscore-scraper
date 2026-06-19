@@ -87,28 +87,7 @@ class H2HDataExtractor:
                         home_score = self._extract_home_score(row)
                         away_score = self._extract_away_score(row)
                         competition = self._extract_competition(row)
-
-                        # Try to get FT-only (Q1-Q4, no OT) scores from the
-                        # match detail page. This prevents OT-inflated totals
-                        # from creating false rate values in the engine.
-                        # Falls back to the H2H table's final score (which
-                        # includes OT) if the detail page is unavailable.
-                        ft_home = None
-                        ft_away = None
-                        href = row.get('href')
-                        if href and hasattr(self._loader, 'fetch_ft_scores'):
-                            if status_callback:
-                                status_callback("Fetching FT scores (regular time only)...")
-                            ft_home, ft_away = self._loader.fetch_ft_scores(href)
-
-                        if ft_home is not None and ft_away is not None:
-                            # Use FT-only scores (excludes OT)
-                            home_score = str(ft_home)
-                            away_score = str(ft_away)
-                            logger.info("H2H FT scores (excl OT): %s - %s (was %s - %s with OT)",
-                                        home_score, away_score,
-                                        self._extract_home_score(row), self._extract_away_score(row))
-
+                        
                         # Verify compulsory fields (all except competition)
                         for field_name, value in [
                             ('date', date),
