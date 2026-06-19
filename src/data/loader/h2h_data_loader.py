@@ -70,6 +70,14 @@ class H2HDataLoader:
                     home_score_el = self._safe_find_element('css', SELECTORS['h2h']['result']['home'], parent=result_container)
                     away_score_el = self._safe_find_element('css', SELECTORS['h2h']['result']['away'], parent=result_container)
 
+                # Extract the href (link to the H2H match's detail page) so we
+                # can visit it later to get quarter-by-quarter (FT-only) scores.
+                href = None
+                try:
+                    href = row.get_attribute('href')
+                except Exception:
+                    pass
+
                 row_dict = {
                     'date': self._safe_find_element('css', SELECTORS['h2h']['date'], parent=row),
                     'home_team': self._safe_find_element('css', SELECTORS['h2h']['home_participant']['container'], parent=row),
@@ -77,6 +85,7 @@ class H2HDataLoader:
                     'home_score': home_score_el,
                     'away_score': away_score_el,
                     'competition': self._safe_find_element('css', SELECTORS['h2h']['event']['container'], parent=row),
+                    'href': href,
                 }
                 h2h_rows.append(row_dict)
             except Exception:
@@ -85,6 +94,60 @@ class H2HDataLoader:
 
     def get_h2h_row_count(self, h2h_rows):
         return len(h2h_rows)
+
+    def fetch_ft_scores(self, href: str) -> tuple:
+        """Visit an H2H match's detail page and extract FT-only (Q1-Q4) scores.
+
+        Flashscore's match summary page shows quarter-by-quarter scores:
+          .smh__part--1 through --4 = Q1-Q4
+          .smh__part--5 = OT period (may be empty)
+
+        We sum Q1-Q4 only, excluding any OT periods. If the page doesn't
+        have quarter data (older matches, missing data), returns (None, None)
+        and the caller falls back to the H2H table's final score.
+
+        Args:
+            href: The match detail page URL (from the H2H row's href attribute).
+
+        Returns:
+            (ft_home_score, ft_away_score) as ints, or (None, None) if unavailable.
+        """
+        if not href or not self.driver:
+            return (None, None)
+
+        try:
+            # Navigate to the match summary page
+            self.driver.get(href)
+            if self.selenium_utils:
+                timeout_config = CONFIG.get('timeout', {})
+                dynamic_timeout = timeout_config.get('dynamic_content_timeout', 15)
+                self.selenium_utils.wait_for_dynamic_content(dynamic_timeout)
+
+            # Extract Q1-Q4 scores for both teams
+            ft_home = 0
+            ft_away = 0
+            found_quarters = False
+
+            for quarter in range(1, 5):  # Q1-Q4 only (skip OT = part--5+)
+                home_el = self._safe_find_element('css', f'.smh__part--{quarter}.smh__home')
+                away_el = self._safe_find_element('css', f'.smh__part--{quarter}.smh__away')
+                if home_el and home_el.text.strip():
+                    ft_home += int(home_el.text.strip())
+                    found_quarters = True
+                if away_el and away_el.text.strip():
+                    ft_away += int(away_el.text.strip())
+                    found_quarters = True
+
+            if found_quarters:
+                logger.debug(f"FT scores from {href}: home={ft_home}, away={ft_away}")
+                return (ft_home, ft_away)
+            else:
+                logger.debug(f"No quarter scores found on {href}")
+                return (None, None)
+
+        except Exception as e:
+            logger.debug(f"Failed to fetch FT scores from {href}: {e}")
+            return (None, None)
 
     def load_h2h(
         self, 
