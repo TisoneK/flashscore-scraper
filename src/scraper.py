@@ -856,7 +856,15 @@ class FlashscoreScraper:
 
                 # Strategy 2: Fall back to website DB if local file is missing/empty
                 if not match_ids:
-                    website_url = os.environ.get("SCOREWISE_WEBSITE_URL", "")
+                    # Use the env-config store (admin-managed via /api/env-config) so
+                    # overrides set via the website's Config tab work without a Railway
+                    # dashboard visit. Falls back to os.environ if the store isn't
+                    # available (e.g. running outside the API server context).
+                    try:
+                        from api.env_config_store import get_env_config
+                        website_url = get_env_config("SCOREWISE_WEBSITE_URL")
+                    except ImportError:
+                        website_url = os.environ.get("SCOREWISE_WEBSITE_URL", "")
                     if website_url:
                         try:
                             import requests
@@ -949,8 +957,16 @@ class FlashscoreScraper:
                     # os.environ.get() calls in the website-DB fallback path.
                     # Lazy import to avoid circular dependency issues at module load time
                     from webhook_utils import forward_results_to_website
-                    website_url = os.environ.get("SCOREWISE_WEBSITE_URL", "")
-                    webhook_secret = os.environ.get("SCOREWISE_WEBHOOK_SECRET", "")
+                    # Use the env-config store (admin-managed via /api/env-config) so
+                    # overrides set via the website's Config tab work without a Railway
+                    # dashboard visit.
+                    try:
+                        from api.env_config_store import get_env_config
+                        website_url = get_env_config("SCOREWISE_WEBSITE_URL")
+                        webhook_secret = get_env_config("SCOREWISE_WEBHOOK_SECRET")
+                    except ImportError:
+                        website_url = os.environ.get("SCOREWISE_WEBSITE_URL", "")
+                        webhook_secret = os.environ.get("SCOREWISE_WEBHOOK_SECRET", "")
                     if website_url and webhook_secret and results:
                         push_msg = f"Pushing {len(results)} result(s) to website..."
                         logger.info(push_msg)
