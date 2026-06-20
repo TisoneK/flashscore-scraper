@@ -86,6 +86,93 @@ async def trigger_results_scrape(req: ResultsScrapeRequest):
     )
 
 
+@router.post("/scrape/results/single")
+async def trigger_single_result_scrape(req: dict):
+    """Scrape the result for a SINGLE match by match_id.
+
+    Opens one Flashscore match page, extracts the score + status, and
+    pushes the result to the website immediately. Much faster than a
+    full results scrape (which processes all matches).
+
+    Body: { "match_id": "GzcUBljD" }
+
+    Runs synchronously (not background) — the caller gets the result
+    back in the response. Takes ~5-10 seconds (one page load + extract).
+    """
+    match_id = req.get("match_id")
+    if not match_id or not isinstance(match_id, str):
+        raise HTTPException(422, "match_id is required (string)")
+
+    logger.info(f"[single-result] Scraping result for match {match_id}")
+
+    try:
+        from src.scraper import FlashscoreScraper
+        from src.data.loader.results_data_loader import ResultsDataLoader
+        from src.data.extractor.results_data_extractor import ResultsDataExtractor
+
+        scraper = FlashscoreScraper(status_callback=None, progress_callback=None)
+        try:
+            scraper.initialize(status_callback=lambda msg: logger.debug(f"[single-result] {msg}"))
+            results_loader = ResultsDataLoader(
+                scraper.driver,
+                selenium_utils=scraper.selenium_utils,
+            )
+            extractor = ResultsDataExtractor(results_loader)
+
+            # Load the match summary page by match_id
+            loaded = results_loader.load_match_summary_by_id(match_id, status_callback=None)
+            if not loaded:
+                return {"status": "error", "match_id": match_id, "message": "Failed to load match page"}
+
+            elements = results_loader.get_elements()
+            match_status = extractor.extract_match_status(elements, status_callback=None)
+            home_score, away_score = extractor.extract_final_scores(elements, status_callback=None)
+
+            result = {
+                "match_id": match_id,
+                "home_score": home_score,
+                "away_score": away_score,
+                "status": match_status or "UNKNOWN",
+            }
+
+            logger.info(
+                f"[single-result] {match_id}: status='{match_status}', "
+                f"scores={home_score}-{away_score}"
+            )
+
+            # Push to website immediately
+            try:
+                from webhook_utils import forward_results_to_website
+                from api.env_config_store import get_env_config
+                website_url = get_env_config("SCOREWISE_WEBSITE_URL")
+                webhook_secret = get_env_config("SCOREWISE_WEBHOOK_SECRET")
+                if website_url and webhook_secret:
+                    forward_results_to_website(
+                        results=[result],
+                        website_url=website_url,
+                        webhook_secret=webhook_secret,
+                        date_str=None,
+                        source="flashscore-scraper",
+                    )
+                    logger.info(f"[single-result] Pushed result for {match_id} to website")
+                else:
+                    logger.warning("[single-result] Website URL/secret not set — result not pushed")
+            except Exception as push_err:
+                logger.error(f"[single-result] Failed to push to website: {push_err}")
+
+            return {
+                "status": "ok",
+                "match_id": match_id,
+                "result": result,
+                "message": f"Scraped: {match_status or 'unknown'}, {home_score}-{away_score}",
+            }
+        finally:
+            scraper.close()
+    except Exception as exc:
+        logger.error(f"[single-result] Failed for {match_id}: {exc}")
+        return {"status": "error", "match_id": match_id, "message": str(exc)}
+
+
 @router.post("/scrape/stop")
 async def stop_scrape():
     """Request the running scrape(s) to stop after the current match.
