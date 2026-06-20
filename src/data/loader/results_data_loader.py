@@ -78,7 +78,7 @@ class ResultsDataLoader:
             # and will redirect. The verifier expects /summary/ in the path, which we
             # don't have yet (Flashscore adds it on redirect).
             success = self.retry_manager.retry_network_operation(
-                lambda: self._load_url_and_wait(url, match_id),
+                lambda **kw: self._load_url_and_wait(url, match_id),
                 operation_name=f"load_match_summary_by_id({match_id})",
                 status_callback=status_callback,
             )
