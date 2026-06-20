@@ -943,7 +943,10 @@ class FlashscoreScraper:
                 # with final scores + result_status = FINAL + result_source = "scraper".
                 # The website verifies the HMAC signature in /api/webhook/result.
                 try:
-                    import os
+                    # NOTE: os is already imported at module level (line 2).
+                    # Don't re-import here — Python's scoping rule would make it a
+                    # local variable for the ENTIRE function, breaking the earlier
+                    # os.environ.get() calls in the website-DB fallback path.
                     # Lazy import to avoid circular dependency issues at module load time
                     from webhook_utils import forward_results_to_website
                     website_url = os.environ.get("SCOREWISE_WEBSITE_URL", "")
