@@ -93,6 +93,35 @@ class ResultsDataLoader:
             logger.info(f"[ResultsDataLoader] Successfully loaded match summary for {match_id}")
             if status_callback:
                 status_callback(f"Successfully loaded match summary for {match_id}")
+
+            # Extract elements - lenient mode (don't require all elements).
+            # match_status should always be present (shows 'Finished', 'Postponed',
+            # quarter info for live, or scheduled time). Scores only on finished matches.
+            self.elements.match_status = self._retry_element_extraction(
+                lambda: self.get_match_status(),
+                f"match status for {match_id}"
+            )
+            self.elements.home_score = self._retry_element_extraction(
+                lambda: self.get_home_score(),
+                f"home score for {match_id}"
+            )
+            self.elements.away_score = self._retry_element_extraction(
+                lambda: self.get_away_score(),
+                f"away score for {match_id}"
+            )
+
+            has_status = self.elements.match_status is not None
+            has_scores = self.elements.home_score is not None and self.elements.away_score is not None
+            logger.info(
+                f"[ResultsDataLoader] Elements for {match_id}: "
+                f"status={'found' if has_status else 'missing'}, "
+                f"scores={'found' if has_scores else 'missing'}"
+            )
+
+            if not has_status:
+                logger.warning(f"Match status element not found for {match_id}")
+                return False
+
             return True
 
         except Exception as e:
@@ -114,25 +143,22 @@ class ResultsDataLoader:
             # Wait for the page to settle — Flashscore redirects from ?mid= to the
             # canonical /match/basketball/.../summary/?mid= URL, which takes a moment.
             import time
-            time.sleep(2)  # Allow redirect to complete
+            time.sleep(3)  # Allow redirect + JS rendering to complete
 
-            # Wait for key summary-page elements to appear (scores or match status)
+            # Wait for the match status element (always present on match pages)
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
 
-            # Try waiting for the score elements (present on finished matches)
-            # or the match header (present on all match pages)
             selectors = CONFIG.get('selectors', {}).get('results', {})
-            score_selector = selectors.get('home_score', '')
-            header_selector = CONFIG.get('selectors', {}).get('match', {}).get('header', '')
+            status_selector = selectors.get('match_status', '')
 
-            wait = WebDriverWait(self.driver, 10)
+            wait = WebDriverWait(self.driver, 15)
             try:
-                if score_selector:
-                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, score_selector)))
+                if status_selector:
+                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, status_selector)))
+                    logger.debug(f"Match status element found for {match_id}")
                 else:
-                    # Fallback: wait for any match-related content
                     wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
             except Exception:
                 # Score element not found — match may not be finished yet. That's OK,
