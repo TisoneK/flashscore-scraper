@@ -161,25 +161,72 @@ class ResultsDataExtractor:
                         title = self._loader.driver.title if self._loader and hasattr(self._loader, 'driver') else ""
                         if title:
                             title_upper = title.upper()
-                            # If title contains a score pattern like "78-81" or "BEN 78-81 MEL",
-                            # and doesn't contain live indicators (Q1, Q2, etc.), it's finished.
                             import re
                             has_score = bool(re.search(r'\d+\s*[-:]\s*\d+', title))
-                            has_live = any(kw in title_upper for kw in ['Q1', 'Q2', 'Q3', 'Q4', 'HT', 'LIVE', 'IN PROGRESS', 'QUARTER'])
+
+                            # Live indicators — if ANY of these are present, the match
+                            # is still in progress (not finished). Includes OT indicators
+                            # because a match in overtime is NOT finished yet.
+                            has_live = any(kw in title_upper for kw in [
+                                'Q1', 'Q2', 'Q3', 'Q4',
+                                'HT', 'HALF TIME', 'HALFTIME',
+                                'LIVE', 'IN PROGRESS',
+                                'QUARTER', 'PERIOD',
+                                # Overtime — live OT means the match is NOT finished
+                                'OT ', ' OT', '(OT)', 'OVERTIME',
+                                '1ST OT', '2ND OT', '3RD OT',
+                                'AFTER OT', 'AFTER OVERTIME',
+                            ])
+
+                            # Also check the status element text itself for OT indicators
+                            # (the element was found but text was empty — but let's double-check
+                            # by also checking the full page body for live OT indicators)
+                            if not has_live and elements.match_status:
+                                try:
+                                    status_text = elements.match_status.text or ""
+                                    status_upper = status_text.upper()
+                                    if any(kw in status_upper for kw in ['OT', 'OVERTIME', 'QUARTER', 'PERIOD']):
+                                        has_live = True
+                                except Exception:
+                                    pass
+
                             if has_score and not has_live:
                                 match_status = "FINISHED"
                                 logger.info(f"[ResultsDataExtractor] Inferred FINISHED from page title (scores: {home_score}-{away_score})")
                             elif has_score and has_live:
                                 match_status = "IN_PROGRESS"
-                                logger.info(f"[ResultsDataExtractor] Inferred IN_PROGRESS from page title (scores: {home_score}-{away_score})")
+                                logger.info(f"[ResultsDataExtractor] Inferred IN_PROGRESS from page title (live indicators found, scores: {home_score}-{away_score})")
                     except Exception:
                         pass
 
-                    # If we still don't have a status but have scores, default to FINISHED
-                    # — a match with a final score on the summary page is almost certainly done.
+                    # If we still don't have a status but have scores:
+                    # DON'T default to FINISHED — the match might be in live OT
+                    # with an empty status element. Check if the match start time
+                    # was more than 4 hours ago (basketball + OT rarely exceeds 4h).
+                    # If > 4h ago → FINISHED (must be done by now).
+                    # If < 4h ago → IN_PROGRESS (might still be playing OT).
                     if not match_status:
-                        match_status = "FINISHED"
-                        logger.info(f"[ResultsDataExtractor] Defaulting to FINISHED (scores present: {home_score}-{away_score})")
+                        try:
+                            from datetime import datetime, timezone
+                            # Can't easily get match start time here, so use a simpler heuristic:
+                            # Check if the page has any "live" CSS classes or indicators
+                            # that we might have missed. If not, default to FINISHED only
+                            # if the page URL contains "/summary/" (summary page = finished).
+                            # For live matches, Flashscore shows the "match" page, not "summary".
+                            current_url = self._loader.driver.current_url if self._loader and hasattr(self._loader, 'driver') else ""
+                            if '/summary/' in current_url:
+                                match_status = "FINISHED"
+                                logger.info(f"[ResultsDataExtractor] Defaulting to FINISHED (on summary page, scores: {home_score}-{away_score})")
+                            else:
+                                # Not on summary page — could be live. Mark as IN_PROGRESS
+                                # to be safe. The next scrape will catch it as FINISHED
+                                # once Flashscore moves it to the summary page.
+                                match_status = "IN_PROGRESS"
+                                logger.info(f"[ResultsDataExtractor] Defaulting to IN_PROGRESS (not on summary page, scores: {home_score}-{away_score})")
+                        except Exception:
+                            # Can't determine — default to FINISHED (most common case)
+                            match_status = "FINISHED"
+                            logger.info(f"[ResultsDataExtractor] Defaulting to FINISHED (scores present: {home_score}-{away_score})")
 
             if status_callback:
                 status_callback("Match status extraction completed.")
