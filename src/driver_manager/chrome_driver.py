@@ -8,6 +8,7 @@ import os
 import platform
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any
 from selenium import webdriver
@@ -18,6 +19,13 @@ from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Module-level cache for the chromedriver path — avoids race conditions when
+# multiple threads call webdriver-manager simultaneously (which corrupts the
+# download cache directory). After the first successful find, all subsequent
+# calls return the cached path without touching webdriver-manager.
+_chromedriver_cache: Optional[str] = None
+_chromedriver_cache_lock = threading.Lock()
 
 class ChromeDriverManager:
     """Manages Chrome WebDriver initialization and configuration."""
@@ -238,105 +246,81 @@ class ChromeDriverManager:
         return path
 
     def _find_chromedriver_via_webdriver_manager(self) -> Optional[str]:
-        """Try to find ChromeDriver using webdriver-manager package.
+        """Find ChromeDriver using webdriver-manager, with thread-safe caching.
 
-        Works around a known webdriver-manager bug where install() sometimes
-        returns the path to THIRD_PARTY_NOTICES.chromedriver (a text file)
-        instead of the actual chromedriver binary. Both files match the glob
-        pattern *chromedriver* in the extracted archive, AND webdriver-manager
-        sets the executable bit on ALL extracted files — so checking the
-        executable bit alone isn't enough.
-
-        Fix: after install(), validate that the returned path is actually a
-        binary by checking its magic bytes (ELF/Mach-O/PE). If it's not a
-        binary, search the same directory for the real chromedriver binary.
+        Caches the result after the first successful find so concurrent
+        threads don't race on webdriver-manager's download cache.
         """
-        try:
-            from webdriver_manager.chrome import ChromeDriverManager as WDMChromeDriverManager
-            chromedriver_path = WDMChromeDriverManager().install()
-            if not chromedriver_path or not Path(chromedriver_path).exists():
-                return None
+        global _chromedriver_cache
 
-            def is_real_binary(path: str) -> bool:
-                """Check if a file is an actual executable binary by reading its magic bytes.
+        # Fast path — return cached path if valid
+        if _chromedriver_cache is not None and Path(_chromedriver_cache).exists():
+            return _chromedriver_cache
 
-                Checks for:
-                  - ELF (Linux): 0x7F 0x45 0x4C 0x46
-                  - PE (Windows): 0x4D 0x5A ("MZ")
-                  - Mach-O (macOS): several variants
-                  - Shell script: 0x23 0x21 ("#!")
+        with _chromedriver_cache_lock:
+            # Double-check after acquiring lock
+            if _chromedriver_cache is not None and Path(_chromedriver_cache).exists():
+                return _chromedriver_cache
 
-                THIRD_PARTY_NOTICES.chromedriver is a UTF-8 text file — none of these
-                magic byte patterns match.
-                """
-                try:
-                    with open(path, "rb") as f:
-                        magic = f.read(4)
-                    return (
-                        magic == b"\x7fELF" or  # Linux ELF
-                        magic[:2] == b"MZ" or   # Windows PE
-                        magic in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
-                                  b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce") or  # Mach-O
-                        magic[:2] == b"#!"       # Shell script
-                    )
-                except Exception:
-                    return False
+            try:
+                from webdriver_manager.chrome import ChromeDriverManager as WDMChromeDriverManager
+                chromedriver_path = WDMChromeDriverManager().install()
+                if not chromedriver_path or not Path(chromedriver_path).exists():
+                    return None
 
-            if is_real_binary(chromedriver_path):
-                logger.info(f"Found ChromeDriver via webdriver-manager: {chromedriver_path}")
-                return chromedriver_path
-
-            # The returned path is not a real binary — likely THIRD_PARTY_NOTICES.chromedriver.
-            # Look for the real chromedriver binary in the same directory.
-            parent = Path(chromedriver_path).parent
-            logger.warning(
-                f"webdriver-manager returned non-binary path: {chromedriver_path}. "
-                f"Searching {parent} for the real chromedriver binary..."
-            )
-
-            # Look for 'chromedriver' (Linux/Mac) or 'chromedriver.exe' (Windows)
-            # in the same directory. Prefer the one with no extra prefix/suffix.
-            candidates = sorted(parent.iterdir(), key=lambda p: len(p.name))
-            for candidate in candidates:
-                name = candidate.name.lower()
-                if (name == "chromedriver" or name == "chromedriver.exe") and is_real_binary(str(candidate)):
-                    # Ensure the binary is executable — webdriver-manager's extraction
-                    # sometimes loses the executable bit on the real binary (while
-                    # setting it on THIRD_PARTY_NOTICES.chromedriver, ironically).
+                def _is_binary(path):
                     try:
-                        import os as _os
-                        import stat as _stat
-                        st = _os.stat(str(candidate))
-                        _os.chmod(str(candidate), st.st_mode | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH)
-                        logger.info(f"Found real ChromeDriver binary (chmod +x): {candidate}")
-                    except Exception as chmod_err:
-                        logger.warning(f"Found ChromeDriver binary but chmod failed: {candidate} ({chmod_err})")
-                    return str(candidate)
+                        with open(path, "rb") as f:
+                            magic = f.read(4)
+                        return (
+                            magic == b"\x7fELF" or
+                            magic[:2] == b"MZ" or
+                            magic in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
+                                      b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce") or
+                            magic[:2] == b"#!"
+                        )
+                    except Exception:
+                        return False
 
-            # Fallback: any file containing 'chromedriver' that's a real binary
-            # (but NOT containing 'notices' or 'license')
-            for candidate in candidates:
-                name = candidate.name.lower()
-                if "chromedriver" in name and "notices" not in name and "license" not in name:
-                    if is_real_binary(str(candidate)):
+                # If webdriver-manager returned the real binary, use it
+                if _is_binary(chromedriver_path):
+                    logger.info(f"Found ChromeDriver via webdriver-manager: {chromedriver_path}")
+                    _chromedriver_cache = chromedriver_path
+                    return chromedriver_path
+
+                # webdriver-manager returned THIRD_PARTY_NOTICES.chromedriver (text file)
+                # Search the same directory for the real binary
+                parent = Path(chromedriver_path).parent
+                logger.warning(f"webdriver-manager returned non-binary: {chromedriver_path}. Searching {parent}...")
+
+                for candidate in sorted(parent.iterdir(), key=lambda p: len(p.name)):
+                    name = candidate.name.lower()
+                    if name in ("chromedriver", "chromedriver.exe") and _is_binary(str(candidate)):
                         try:
-                            import os as _os
-                            import stat as _stat
-                            st = _os.stat(str(candidate))
-                            _os.chmod(str(candidate), st.st_mode | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH)
+                            st = os.stat(str(candidate))
+                            os.chmod(str(candidate), st.st_mode | 0o111)
                         except Exception:
                             pass
-                        logger.info(f"Found ChromeDriver binary (fallback, chmod +x): {candidate}")
+                        logger.info(f"Found real ChromeDriver binary: {candidate}")
+                        _chromedriver_cache = str(candidate)
                         return str(candidate)
 
-            logger.error(f"Could not find real chromedriver binary in {parent}")
-            logger.error(f"Directory contents: {[p.name for p in candidates]}")
-            return None
-        except ImportError:
-            logger.debug("webdriver-manager not available")
-        except Exception as e:
-            logger.debug(f"webdriver-manager lookup failed: {e}")
-        return None
+                for candidate in parent.iterdir():
+                    name = candidate.name.lower()
+                    if "chromedriver" in name and "notices" not in name and "license" not in name:
+                        if _is_binary(str(candidate)):
+                            logger.info(f"Found ChromeDriver (fallback): {candidate}")
+                            _chromedriver_cache = str(candidate)
+                            return str(candidate)
+
+                logger.error(f"Could not find real chromedriver in {parent}")
+                return None
+            except ImportError:
+                logger.debug("webdriver-manager not available")
+                return None
+            except Exception as e:
+                logger.debug(f"webdriver-manager lookup failed: {e}")
+                return None
 
     def _find_chrome_binary_system_path(self) -> Optional[str]:
         """Try to find Chrome binary on the system PATH."""
