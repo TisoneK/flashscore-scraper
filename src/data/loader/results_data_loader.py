@@ -120,6 +120,13 @@ class ResultsDataLoader:
 
             if not has_status:
                 logger.warning(f"Match status element not found for {match_id}")
+                # Debug: log page body to help identify if CSS selectors are outdated
+                try:
+                    from selenium.webdriver.common.by import By as _By
+                    body_text = self.driver.find_element(_By.TAG_NAME, "body").text[:500]
+                    logger.info(f"[ResultsDataLoader] Page body for {match_id}: {body_text[:400]}")
+                except Exception:
+                    pass
                 return False
 
             return True
@@ -144,6 +151,11 @@ class ResultsDataLoader:
             # canonical /match/basketball/.../summary/?mid= URL, which takes a moment.
             import time
             time.sleep(3)  # Allow redirect + JS rendering to complete
+
+            # Log the current URL + title for debugging
+            current_url = self.driver.current_url
+            page_title = self.driver.title
+            logger.info(f"[ResultsDataLoader] After redirect for {match_id}: URL={current_url}, title={page_title}")
 
             # Wait for the match status element (always present on match pages)
             from selenium.webdriver.common.by import By
