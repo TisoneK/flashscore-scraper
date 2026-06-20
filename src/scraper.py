@@ -54,6 +54,40 @@ class DriverManagerLike(Protocol):
     def close(self, force: bool = False) -> None: ...
 
 
+
+def _get_results_config():
+    """Read results-scraper config from the env-config store (admin-managed).
+    
+    Returns a dict with:
+      - max_workers: int (1-3, default 3)
+      - incremental_push: bool (default True)
+      - match_duration_minutes: int (default 170 = 2h50m)
+      - priority_mode: str ('status' | 'time' | 'off', default 'status')
+    """
+    defaults = {
+        "max_workers": 3,
+        "incremental_push": True,
+        "match_duration_minutes": 170,
+        "priority_mode": "status",
+    }
+    try:
+        from api.env_config_store import get_env_config
+        mw = get_env_config("RESULTS_MAX_WORKERS")
+        if mw:
+            defaults["max_workers"] = max(1, min(3, int(mw)))
+        ip = get_env_config("RESULTS_INCREMENTAL_PUSH")
+        if ip:
+            defaults["incremental_push"] = ip.lower() in ("true", "1", "yes", "on")
+        md = get_env_config("RESULTS_MATCH_DURATION_MINUTES")
+        if md:
+            defaults["match_duration_minutes"] = max(30, min(600, int(md)))
+        pm = get_env_config("RESULTS_PRIORITY_MODE")
+        if pm:
+            defaults["priority_mode"] = pm.lower()
+    except Exception:
+        pass
+    return defaults
+
 class FlashscoreScraper:
     def __init__(
         self,
@@ -829,7 +863,8 @@ class FlashscoreScraper:
         Uses ResultsDataLoader and ResultsDataExtractor, and PerformanceMonitor.
         Loads match IDs from the JSON file for the given date.
         """
-        logger.info(f"=== Starting results scraping for {date} ===")
+        results_config = _get_results_config()
+        logger.info(f"=== Starting results scraping for {date} (incremental={results_config['incremental_push']}, mode={results_config['priority_mode']}) ===")
         if status_callback:
             status_callback(f"=== Starting results scraping for {date} ===")
         self.initialize(status_callback=status_callback)
@@ -1004,9 +1039,11 @@ class FlashscoreScraper:
                     logger.info(status_msg)
 
                     # ── Incremental push — send this result to the website NOW ──
-                    # Users see the update within seconds instead of waiting for
-                    # all 101 matches to finish processing.
-                    push_result_incremental(result)
+                    # (only if RESULTS_INCREMENTAL_PUSH is enabled, which it is by default)
+                    if results_config.get("incremental_push", True):
+                        # Users see the update within seconds instead of waiting for
+                        # all 101 matches to finish processing.
+                        push_result_incremental(result)
 
                 # Save all results to local JSON
                 results_filename = f"results_{file_date}.json"
@@ -1087,7 +1124,8 @@ class FlashscoreScraper:
         import threading
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        logger.info(f"=== Starting CONCURRENT results scraping for {date} ===")
+        results_config = _get_results_config()
+        logger.info(f"=== Starting CONCURRENT results scraping for {date} (max_workers={results_config['max_workers']}, incremental={results_config['incremental_push']}, mode={results_config['priority_mode']}) ===")
         if status_callback:
             status_callback(f"=== Starting concurrent results scraping for {date} ===")
 
@@ -1249,7 +1287,8 @@ class FlashscoreScraper:
         ]
         # Only spawn workers for non-empty buckets
         active_workers = [(name, ids, num) for name, ids, num in buckets if ids]
-        max_workers = min(len(active_workers), 3)  # Cap at 3 concurrent browsers
+        config_max = results_config.get("max_workers", 3)
+        max_workers = min(len(active_workers), config_max)  # Cap at configured max
 
         logger.info(f"Spawning {max_workers} concurrent worker(s) for {len(active_workers)} bucket(s)")
         if status_callback:

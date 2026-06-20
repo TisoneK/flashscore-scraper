@@ -87,6 +87,48 @@ _KNOWN_ENV_KEYS: Dict[str, Dict[str, Any]] = {
             "table or env var)."
         ),
     },
+    "RESULTS_MAX_WORKERS": {
+        "env": "RESULTS_MAX_WORKERS",
+        "default": "3",
+        "secret": False,
+        "description": (
+            "Max concurrent browser instances for results scraping (1-3). "
+            "1 = single-browser (slower, less memory). "
+            "3 = three browsers, one per priority bucket (faster, ~900MB RAM). "
+            "Set to 1 if Railway OOMs with 3 concurrent Chrome instances."
+        ),
+    },
+    "RESULTS_INCREMENTAL_PUSH": {
+        "env": "RESULTS_INCREMENTAL_PUSH",
+        "default": "true",
+        "secret": False,
+        "description": (
+            "If true, push each result to the website immediately after extraction "
+            "(users see updates in real-time). If false, batch-push all results at "
+            "the end (less webhook calls but slower user updates)."
+        ),
+    },
+    "RESULTS_MATCH_DURATION_MINUTES": {
+        "env": "RESULTS_MATCH_DURATION_MINUTES",
+        "default": "170",
+        "secret": False,
+        "description": (
+            "Minutes after match start time to consider the match 'likely finished'. "
+            "Default 170 (2h50m) — basketball matches take 2h-2h50m. "
+            "Increase if matches seem to finish later, decrease for faster detection."
+        ),
+    },
+    "RESULTS_PRIORITY_MODE": {
+        "env": "RESULTS_PRIORITY_MODE",
+        "default": "status",
+        "secret": False,
+        "description": (
+            "How to sort matches for results scraping: "
+            "'status' = sort by effective status (FINISHED→LIVE→SCHEDULED, default) "
+            "'time' = sort by start time (earliest first) "
+            "'off' = process in original order (no sorting)"
+        ),
+    },
 }
 
 
