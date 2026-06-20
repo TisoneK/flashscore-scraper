@@ -335,7 +335,9 @@ def _run_results_scrape(date_str: str, scrape_id: str) -> None:
         status_callback=status_cb, progress_callback=progress_cb
     )
     try:
-        scraper.scrape_results(
+        # Use concurrent multi-instance scraping (3 browsers, one per priority bucket)
+        # Falls back to single-instance if priority info isn't available or only 1 bucket
+        scraper.scrape_results_concurrent(
             date=date_str,
             status_callback=status_cb,
             progress_callback=progress_cb,

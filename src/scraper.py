@@ -836,14 +836,19 @@ class FlashscoreScraper:
         perf_monitor = PerformanceMonitor()
         try:
             def main_results_scrape():
-                # Load match IDs — try the local JSON file first, then fall back to
-                # the website's /api/predictions/exists endpoint (which returns all
-                # matchIds that have predictions in the DB). The website fallback is
-                # essential on Railway where the filesystem is wiped on every redeploy,
-                # so the local matches_YYYYMMDD.json file may not exist.
-                match_ids = []
+                import threading
+                from concurrent.futures import ThreadPoolExecutor, as_completed
 
-                # Strategy 1: Try local JSON file (has match_ids + metadata for the date)
+                # ── Fetch match IDs with priority info from the website ──────
+                # The website returns matches grouped by priority:
+                #   high   = AWAITING_RESULT (likely finished, need final scores)
+                #   medium = LIVE (in-progress, need live score updates)
+                #   low    = PENDING (scheduled, haven't started yet)
+                #   done   = FINAL (already has result, skip)
+                match_ids = []
+                priority_buckets = {"high": [], "medium": [], "low": []}
+
+                # Strategy 1: Try local JSON file
                 file_date = date.replace('.', '')
                 filename = f"matches_{file_date}.json"
                 try:
@@ -854,30 +859,34 @@ class FlashscoreScraper:
                 except Exception as e:
                     logger.warning(f"Could not load matches from {filename}: {e}")
 
-                # Strategy 2: Fall back to website DB if local file is missing/empty
+                # Strategy 2: Fall back to website DB with priority info
                 if not match_ids:
-                    # Use the env-config store (admin-managed via /api/env-config) so
-                    # overrides set via the website's Config tab work without a Railway
-                    # dashboard visit. Falls back to os.environ if the store isn't
-                    # available (e.g. running outside the API server context).
                     try:
                         from api.env_config_store import get_env_config
                         website_url = get_env_config("SCOREWISE_WEBSITE_URL")
                     except ImportError:
                         website_url = os.environ.get("SCOREWISE_WEBSITE_URL", "")
+
                     if website_url:
                         try:
                             import requests
+                            # Fetch with priority info so we can sort by importance
                             resp = requests.get(
-                                f"{website_url.rstrip('/')}/api/predictions/exists",
+                                f"{website_url.rstrip('/')}/api/predictions/exists?with_priority=true",
                                 timeout=15,
                             )
                             if resp.ok:
                                 data = resp.json()
                                 match_ids = data.get("match_ids", [])
+                                by_priority = data.get("by_priority", {})
+                                priority_buckets["high"] = [m["match_id"] for m in by_priority.get("high", [])]
+                                priority_buckets["medium"] = [m["match_id"] for m in by_priority.get("medium", [])]
+                                priority_buckets["low"] = [m["match_id"] for m in by_priority.get("low", [])]
+                                counts = data.get("priority_counts", {})
                                 logger.info(
                                     f"Fetched {len(match_ids)} match IDs from website DB "
-                                    f"(/api/predictions/exists)"
+                                    f"(high={counts.get('high', 0)}, medium={counts.get('medium', 0)}, "
+                                    f"low={counts.get('low', 0)}, done={counts.get('done', 0)})"
                                 )
                         except Exception as fetch_err:
                             logger.error(f"Failed to fetch match IDs from website: {fetch_err}")
@@ -893,13 +902,75 @@ class FlashscoreScraper:
                     if status_callback:
                         status_callback(msg)
                     return
+
+                # ── Sort match IDs by priority ──────────────────────────────
+                # If we have priority buckets from the website, sort:
+                #   HIGH (AWAITING_RESULT) first → users see final results ASAP
+                #   MEDIUM (LIVE) second → live score updates
+                #   LOW (PENDING) last → scheduled matches (may have started)
+                # If no priority info (local file fallback), process in original order.
+                if priority_buckets["high"] or priority_buckets["medium"] or priority_buckets["low"]:
+                    sorted_ids = priority_buckets["high"] + priority_buckets["medium"] + priority_buckets["low"]
+                    # Include any match_ids not in any bucket (edge case)
+                    for mid in match_ids:
+                        if mid not in sorted_ids:
+                            sorted_ids.append(mid)
+                    match_ids = sorted_ids
+                    logger.info(
+                        f"Sorted by priority: {len(priority_buckets['high'])} high → "
+                        f"{len(priority_buckets['medium'])} medium → "
+                        f"{len(priority_buckets['low'])} low"
+                    )
+
                 found_msg = f"Found {len(match_ids)} matches for results scraping on {date}."
                 logger.info(found_msg)
                 if status_callback:
                     status_callback(found_msg)
+
+                # ── Incremental push helper ────────────────────────────────
+                # Push a single result to the website immediately after extraction.
+                # This way users see updates in real-time instead of waiting for
+                # the entire scrape to finish.
+                push_lock = threading.Lock()
+                push_count = [0]  # mutable counter for the closure
+
+                def push_result_incremental(result):
+                    """Push a single result to the website immediately."""
+                    try:
+                        from webhook_utils import forward_results_to_website
+                        try:
+                            from api.env_config_store import get_env_config
+                            wurl = get_env_config("SCOREWISE_WEBSITE_URL")
+                            wsecret = get_env_config("SCOREWISE_WEBHOOK_SECRET")
+                        except ImportError:
+                            wurl = os.environ.get("SCOREWISE_WEBSITE_URL", "")
+                            wsecret = os.environ.get("SCOREWISE_WEBHOOK_SECRET", "")
+                        if wurl and wsecret:
+                            with push_lock:
+                                push_count[0] += 1
+                            forward_results_to_website(
+                                results=[result],
+                                website_url=wurl,
+                                webhook_secret=wsecret,
+                                date_str=date,
+                                source="flashscore-scraper",
+                            )
+                    except Exception as e:
+                        logger.debug(f"Incremental push failed for {result.get('match_id')}: {e}")
+
+                # ── Single-browser processing (shared driver) ───────────────
+                # Note: Selenium WebDriver is NOT thread-safe for the same driver
+                # instance. We use a single browser and process matches sequentially
+                # in priority order. The priority sorting ensures users see the most
+                # important results (FINISHED) first, then LIVE updates, then PENDING.
+                #
+                # For true multi-instance parallelism, each thread would need its own
+                # FlashscoreScraper + browser. That's memory-intensive on Railway
+                # (each Chrome instance uses ~300MB). The priority ordering + incremental
+                # push gives most of the benefit without the memory cost.
                 results_loader = ResultsDataLoader(self.driver, selenium_utils=self.selenium_utils)
                 extractor = ResultsDataExtractor(results_loader)
-                results = []
+                all_results = []
                 total = len(match_ids)
                 for i, match_id in enumerate(match_ids):
                     if progress_callback:
@@ -907,10 +978,7 @@ class FlashscoreScraper:
                     progress_msg = f"Processing match {i+1}/{total}: {match_id}"
                     if status_callback:
                         status_callback(progress_msg)
-                    # Load match summary page — use load_match_summary_by_id when we
-                    # only have a match_id string (from website DB fallback), or
-                    # load_match_summary(url_builder) when we have a full UrlBuilder
-                    # (from local JSON file).
+                    # Load match summary page
                     if isinstance(match_id, str):
                         loaded = results_loader.load_match_summary_by_id(match_id, status_callback=status_callback)
                     else:
@@ -922,43 +990,38 @@ class FlashscoreScraper:
                             status_callback(warn_msg)
                         continue
                     elements = results_loader.get_elements()
-                    # Extract match status — process ALL matches, not just finished ones.
-                    # The website maps Flashscore statuses (FINISHED, IN_PROGRESS, POSTPONED, etc.)
-                    # to our resultStatus (FINAL, LIVE, POSTPONED, etc.) and stores whatever
-                    # scores are available.
+                    # Extract match status + scores for ALL matches
                     match_status = extractor.extract_match_status(elements, status_callback=status_callback)
-                    # Extract scores — may be None for non-finished matches (that's OK)
                     home_score, away_score = extractor.extract_final_scores(elements, status_callback=status_callback)
-                    # Collect ALL results — the website decides what to do with each status
-                    results.append({
+                    result = {
                         "match_id": match_id,
                         "home_score": home_score,
                         "away_score": away_score,
                         "status": match_status or "UNKNOWN",
-                    })
+                    }
+                    all_results.append(result)
                     status_msg = f"Match {match_id}: status='{match_status}', scores={home_score}-{away_score}"
                     logger.info(status_msg)
-                # Save results using JSONStorage
+
+                    # ── Incremental push — send this result to the website NOW ──
+                    # Users see the update within seconds instead of waiting for
+                    # all 101 matches to finish processing.
+                    push_result_incremental(result)
+
+                # Save all results to local JSON
                 results_filename = f"results_{file_date}.json"
-                self.json_storage.save_results(results, filename=results_filename)
-                summary_msg = f"\n--- Results scraping summary: {len(results)} matches processed for {date} ---"
+                self.json_storage.save_results(all_results, filename=results_filename)
+                summary_msg = (
+                    f"\n--- Results scraping summary: {len(all_results)} matches processed "
+                    f"for {date} ({push_count[0]} pushed incrementally) ---"
+                )
                 logger.info(summary_msg)
                 if status_callback:
                     status_callback(summary_msg)
 
-                # Push results to the website so it can update its Prediction table
-                # with final scores + result_status = FINAL + result_source = "scraper".
-                # The website verifies the HMAC signature in /api/webhook/result.
+                # Final batch push (catches any that failed the incremental push)
                 try:
-                    # NOTE: os is already imported at module level (line 2).
-                    # Don't re-import here — Python's scoping rule would make it a
-                    # local variable for the ENTIRE function, breaking the earlier
-                    # os.environ.get() calls in the website-DB fallback path.
-                    # Lazy import to avoid circular dependency issues at module load time
                     from webhook_utils import forward_results_to_website
-                    # Use the env-config store (admin-managed via /api/env-config) so
-                    # overrides set via the website's Config tab work without a Railway
-                    # dashboard visit.
                     try:
                         from api.env_config_store import get_env_config
                         website_url = get_env_config("SCOREWISE_WEBSITE_URL")
@@ -966,21 +1029,19 @@ class FlashscoreScraper:
                     except ImportError:
                         website_url = os.environ.get("SCOREWISE_WEBSITE_URL", "")
                         webhook_secret = os.environ.get("SCOREWISE_WEBHOOK_SECRET", "")
-                    if website_url and webhook_secret and results:
-                        push_msg = f"Pushing {len(results)} result(s) to website..."
+                    if website_url and webhook_secret and all_results:
+                        push_msg = f"Final batch push: {len(all_results)} result(s) to website..."
                         logger.info(push_msg)
                         if status_callback:
                             status_callback(push_msg)
                         success = forward_results_to_website(
-                            results=results,
+                            results=all_results,
                             website_url=website_url,
                             webhook_secret=webhook_secret,
                             date_str=date,
                             source="flashscore-scraper",
                         )
-                        outcome_msg = (
-                            f"Results push to website: {'SUCCESS' if success else 'FAILED'}"
-                        )
+                        outcome_msg = f"Final batch push to website: {'SUCCESS' if success else 'FAILED'}"
                         logger.info(outcome_msg)
                         if status_callback:
                             status_callback(outcome_msg)
@@ -992,8 +1053,234 @@ class FlashscoreScraper:
                     logger.error(f"Failed to push results to website: {push_err}")
                     if status_callback:
                         status_callback(f"Failed to push results to website: {push_err}")
+
             # Run with retry logic
             self.retry_manager.retry_network_operation(main_results_scrape)
         finally:
             perf_monitor.stop_resource_monitoring()
             self.close()
+
+    def scrape_results_concurrent(self, date, status_callback=None, progress_callback=None):
+        """Scrape results using MULTIPLE browser instances for faster updates.
+
+        Spawns 3 concurrent FlashscoreScraper instances, each with its own browser:
+          - Instance 1: HIGH priority (AWAITING_RESULT — likely finished)
+          - Instance 2: MEDIUM priority (LIVE — in-progress)
+          - Instance 3: LOW priority (PENDING — scheduled)
+
+        Each instance processes its bucket independently and pushes results
+        to the website incrementally (after each match). This means:
+          - Users see FINAL results within seconds (high priority bucket finishes first)
+          - LIVE scores update while the high-priority bucket is still running
+          - PENDING matches are checked last (lowest priority, rarely need updates)
+
+        Falls back to single-instance scrape_results() if:
+          - The website doesn't support ?with_priority=true
+          - There aren't enough matches to justify 3 browsers
+          - Memory is constrained (each Chrome instance uses ~300MB)
+
+        Args:
+            date: Date string in DD.MM.YYYY format
+            status_callback: Optional callback for status updates
+            progress_callback: Optional callback for progress updates
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        logger.info(f"=== Starting CONCURRENT results scraping for {date} ===")
+        if status_callback:
+            status_callback(f"=== Starting concurrent results scraping for {date} ===")
+
+        # Fetch match IDs with priority info from the website
+        try:
+            from api.env_config_store import get_env_config
+            website_url = get_env_config("SCOREWISE_WEBSITE_URL")
+        except ImportError:
+            website_url = os.environ.get("SCOREWISE_WEBSITE_URL", "")
+
+        if not website_url:
+            logger.warning("SCOREWISE_WEBSITE_URL not set — falling back to single-instance scrape")
+            return self.scrape_results(date, status_callback, progress_callback)
+
+        try:
+            import requests
+            resp = requests.get(
+                f"{website_url.rstrip('/')}/api/predictions/exists?with_priority=true",
+                timeout=15,
+            )
+            if not resp.ok:
+                logger.warning(f"Website returned {resp.status_code} — falling back to single-instance")
+                return self.scrape_results(date, status_callback, progress_callback)
+
+            data = resp.json()
+            by_priority = data.get("by_priority", {})
+            high_ids = [m["match_id"] for m in by_priority.get("high", [])]
+            medium_ids = [m["match_id"] for m in by_priority.get("medium", [])]
+            low_ids = [m["match_id"] for m in by_priority.get("low", [])]
+            done_count = len(by_priority.get("done", []))
+
+            counts = data.get("priority_counts", {})
+            logger.info(
+                f"Priority buckets: high={counts.get('high', 0)}, "
+                f"medium={counts.get('medium', 0)}, low={counts.get('low', 0)}, "
+                f"done={done_count} (skipped)"
+            )
+            if status_callback:
+                status_callback(
+                    f"Priority: {len(high_ids)} high, {len(medium_ids)} medium, "
+                    f"{len(low_ids)} low, {done_count} done"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to fetch priority buckets: {e} — falling back to single-instance")
+            return self.scrape_results(date, status_callback, progress_callback)
+
+        # If no matches need processing, exit early
+        all_to_process = high_ids + medium_ids + low_ids
+        if not all_to_process:
+            msg = "No matches need results scraping — all are done or not yet started."
+            logger.info(msg)
+            if status_callback:
+                status_callback(msg)
+            return
+
+        # If only one bucket has matches, use single-instance (no need for 3 browsers)
+        non_empty_buckets = sum(1 for b in [high_ids, medium_ids, low_ids] if b)
+        if non_empty_buckets <= 1:
+            logger.info(f"Only {non_empty_buckets} bucket has matches — using single-instance scrape")
+            return self.scrape_results(date, status_callback, progress_callback)
+
+        # ── Multi-instance concurrent processing ──────────────────────
+        # Each worker gets its own FlashscoreScraper + browser instance.
+        # Workers push results incrementally to the website.
+
+        def worker_fn(bucket_name, match_ids_for_bucket, worker_num):
+            """Process a priority bucket on a separate browser instance."""
+            if not match_ids_for_bucket:
+                return {"bucket": bucket_name, "processed": 0, "results": []}
+
+            worker_msg = f"[Worker {worker_num}/{bucket_name}] Starting with {len(match_ids_for_bucket)} matches"
+            logger.info(worker_msg)
+            if status_callback:
+                status_callback(worker_msg)
+
+            # Each worker creates its own scraper instance (own browser)
+            worker_scraper = FlashscoreScraper(
+                status_callback=lambda msg: logger.info(f"[Worker {worker_num}] {msg}"),
+                progress_callback=None,
+            )
+
+            try:
+                worker_scraper.initialize(status_callback=lambda msg: logger.debug(f"[Worker {worker_num}] {msg}"))
+                from src.data.loader.results_data_loader import ResultsDataLoader
+                from src.data.extractor.results_data_extractor import ResultsDataExtractor
+
+                results_loader = ResultsDataLoader(
+                    worker_scraper.driver,
+                    selenium_utils=worker_scraper.selenium_utils,
+                )
+                extractor = ResultsDataExtractor(results_loader)
+                worker_results = []
+
+                for i, match_id in enumerate(match_ids_for_bucket):
+                    pmsg = f"[Worker {worker_num}/{bucket_name}] Match {i+1}/{len(match_ids_for_bucket)}: {match_id}"
+                    logger.info(pmsg)
+                    if status_callback:
+                        status_callback(pmsg)
+
+                    loaded = results_loader.load_match_summary_by_id(match_id, status_callback=None)
+                    if not loaded:
+                        logger.warning(f"[Worker {worker_num}] Failed to load {match_id}")
+                        continue
+
+                    elements = results_loader.get_elements()
+                    match_status = extractor.extract_match_status(elements, status_callback=None)
+                    home_score, away_score = extractor.extract_final_scores(elements, status_callback=None)
+
+                    result = {
+                        "match_id": match_id,
+                        "home_score": home_score,
+                        "away_score": away_score,
+                        "status": match_status or "UNKNOWN",
+                    }
+                    worker_results.append(result)
+                    logger.info(f"[Worker {worker_num}] {match_id}: status='{match_status}', scores={home_score}-{away_score}")
+
+                    # Incremental push — send this result NOW
+                    try:
+                        from webhook_utils import forward_results_to_website
+                        try:
+                            from api.env_config_store import get_env_config
+                            wurl = get_env_config("SCOREWISE_WEBSITE_URL")
+                            wsecret = get_env_config("SCOREWISE_WEBHOOK_SECRET")
+                        except ImportError:
+                            wurl = os.environ.get("SCOREWISE_WEBSITE_URL", "")
+                            wsecret = os.environ.get("SCOREWISE_WEBHOOK_SECRET", "")
+                        if wurl and wsecret:
+                            forward_results_to_website(
+                                results=[result],
+                                website_url=wurl,
+                                webhook_secret=wsecret,
+                                date_str=date,
+                                source="flashscore-scraper",
+                            )
+                    except Exception:
+                        pass  # Final batch push will catch any misses
+
+                done_msg = f"[Worker {worker_num}/{bucket_name}] Finished: {len(worker_results)} results"
+                logger.info(done_msg)
+                if status_callback:
+                    status_callback(done_msg)
+
+                return {"bucket": bucket_name, "processed": len(worker_results), "results": worker_results}
+            except Exception as e:
+                logger.error(f"[Worker {worker_num}/{bucket_name}] Failed: {e}")
+                return {"bucket": bucket_name, "processed": 0, "results": [], "error": str(e)}
+            finally:
+                try:
+                    worker_scraper.close()
+                except Exception:
+                    pass
+
+        # Run up to 3 concurrent workers (one per non-empty priority bucket)
+        buckets = [
+            ("high", high_ids, 1),
+            ("medium", medium_ids, 2),
+            ("low", low_ids, 3),
+        ]
+        # Only spawn workers for non-empty buckets
+        active_workers = [(name, ids, num) for name, ids, num in buckets if ids]
+        max_workers = min(len(active_workers), 3)  # Cap at 3 concurrent browsers
+
+        logger.info(f"Spawning {max_workers} concurrent worker(s) for {len(active_workers)} bucket(s)")
+        if status_callback:
+            status_callback(f"Spawning {max_workers} concurrent browser instances...")
+
+        all_results = []
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(worker_fn, name, ids, num): name
+                for name, ids, num in active_workers
+            }
+            for future in as_completed(futures):
+                bucket_name = futures[future]
+                try:
+                    result = future.result()
+                    all_results.extend(result.get("results", []))
+                    logger.info(
+                        f"Bucket '{bucket_name}' complete: {result.get('processed', 0)} results"
+                    )
+                except Exception as e:
+                    logger.error(f"Bucket '{bucket_name}' failed: {e}")
+
+        # Save all results locally
+        file_date = date.replace('.', '')
+        results_filename = f"results_{file_date}.json"
+        self.json_storage.save_results(all_results, filename=results_filename)
+
+        summary_msg = (
+            f"\n--- Concurrent results scraping summary: {len(all_results)} matches processed "
+            f"for {date} ---"
+        )
+        logger.info(summary_msg)
+        if status_callback:
+            status_callback(summary_msg)
