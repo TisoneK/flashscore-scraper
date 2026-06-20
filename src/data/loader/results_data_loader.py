@@ -52,6 +52,98 @@ class ResultsDataLoader:
         """Extract the final score wrapper element (if needed)."""
         return self._safe_find_element('css', CONFIG.get('selectors', {}).get('results', {}).get('final_score_wrapper', ''))
 
+    def load_match_summary_by_id(self, match_id: str, status_callback=None) -> bool:
+        """Load the match summary page using just the match_id (no UrlBuilder needed).
+
+        Navigates to https://www.flashscore.co.ke/match/?mid=<match_id> — Flashscore
+        redirects to the canonical match URL automatically. This is used by the
+        results scraper when match IDs come from the website DB (which doesn't have
+        the team slugs/IDs needed to build a full canonical URL).
+
+        Args:
+            match_id: The Flashscore match ID (e.g. "GzcUBljD")
+            status_callback: Optional callback for status updates
+
+        Returns:
+            bool: True if the page was loaded successfully, False otherwise
+        """
+        try:
+            # Build the minimal URL — Flashscore will redirect to the canonical URL
+            url = f"https://www.flashscore.co.ke/match/?mid={match_id}"
+            logger.info(f"[ResultsDataLoader] Loading match summary by ID for match {match_id}")
+            if status_callback:
+                status_callback(f"Loading match summary for {match_id}...")
+
+            # Navigate directly — skip URL verification since the ?mid= URL is minimal
+            # and will redirect. The verifier expects /summary/ in the path, which we
+            # don't have yet (Flashscore adds it on redirect).
+            success = self.retry_manager.retry_network_operation(
+                lambda: self._load_url_and_wait(url, match_id),
+                operation_name=f"load_match_summary_by_id({match_id})",
+                status_callback=status_callback,
+            )
+
+            if not success:
+                error_msg = f"Failed to load match summary page for match {match_id}"
+                logger.warning(f"[ResultsDataLoader] {error_msg}")
+                if status_callback:
+                    status_callback(error_msg)
+                return False
+
+            logger.info(f"[ResultsDataLoader] Successfully loaded match summary for {match_id}")
+            if status_callback:
+                status_callback(f"Successfully loaded match summary for {match_id}")
+            return True
+
+        except Exception as e:
+            error_msg = f"Error in load_match_summary_by_id for match {match_id}: {str(e)}"
+            logger.error(error_msg)
+            if status_callback:
+                status_callback(error_msg)
+            return False
+
+    def _load_url_and_wait(self, url: str, match_id: str) -> bool:
+        """Navigate to a URL and wait for the page to load. Used by load_match_summary_by_id.
+
+        Waits for either the score elements or the match status element to appear,
+        which indicates the match summary page has fully rendered (after Flashscore's
+        redirect from the minimal ?mid= URL to the canonical URL).
+        """
+        try:
+            self.driver.get(url)
+            # Wait for the page to settle — Flashscore redirects from ?mid= to the
+            # canonical /match/basketball/.../summary/?mid= URL, which takes a moment.
+            import time
+            time.sleep(2)  # Allow redirect to complete
+
+            # Wait for key summary-page elements to appear (scores or match status)
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+
+            # Try waiting for the score elements (present on finished matches)
+            # or the match header (present on all match pages)
+            selectors = CONFIG.get('selectors', {}).get('results', {})
+            score_selector = selectors.get('home_score', '')
+            header_selector = CONFIG.get('selectors', {}).get('match', {}).get('header', '')
+
+            wait = WebDriverWait(self.driver, 10)
+            try:
+                if score_selector:
+                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, score_selector)))
+                else:
+                    # Fallback: wait for any match-related content
+                    wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+            except Exception:
+                # Score element not found — match may not be finished yet. That's OK,
+                # the extractor will check the match status and skip if not 'finished'.
+                logger.debug(f"Score element not found for {match_id} — match may not be finished yet")
+
+            return True
+        except Exception as e:
+            logger.error(f"Error loading URL {url} for match {match_id}: {str(e)}")
+            return False
+
     def load_match_summary(self, url_builder: UrlBuilder, status_callback=None) -> bool:
         """
         Load the match summary page for a specific match using a UrlBuilder instance.

@@ -907,8 +907,14 @@ class FlashscoreScraper:
                     progress_msg = f"Processing match {i+1}/{total}: {match_id}"
                     if status_callback:
                         status_callback(progress_msg)
-                    # Load match summary page
-                    loaded = results_loader.load_match_summary(match_id, status_callback=status_callback)
+                    # Load match summary page — use load_match_summary_by_id when we
+                    # only have a match_id string (from website DB fallback), or
+                    # load_match_summary(url_builder) when we have a full UrlBuilder
+                    # (from local JSON file).
+                    if isinstance(match_id, str):
+                        loaded = results_loader.load_match_summary_by_id(match_id, status_callback=status_callback)
+                    else:
+                        loaded = results_loader.load_match_summary(match_id, status_callback=status_callback)
                     if not loaded:
                         warn_msg = f"Failed to load match summary for {match_id}"
                         logger.warning(warn_msg)
