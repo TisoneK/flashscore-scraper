@@ -71,22 +71,27 @@ class ResultsDataVerifier:
             return False, f"Error validating scores: {str(e)}"
 
     def verify_match_status(self, status: str) -> Tuple[bool, str]:
-        """
-        Verify that match status is valid.
+        """Verify that match status is valid.
+
+        Accepts any non-empty status string — Flashscore returns many different
+        status texts that we need to handle:
+          - "Finished", "After Overtime", "After Penalties"
+          - "1st Quarter", "2nd Quarter", "3rd Quarter", "4th Quarter"
+          - "Halftime", "Break", "In Progress"
+          - "Scheduled", "Postponed", "Cancelled"
+          - "3rd Quarter 7'" (live with elapsed time)
+          - Date/time strings for scheduled matches
+
+        The website's webhook receiver maps all of these to our internal
+        statuses (FINAL, LIVE, POSTPONED, CANCELLED) — so we accept
+        anything non-empty here and let the mapper handle it.
+
         Returns (is_valid, error_message)
         """
         try:
             if not status:
                 return False, "Match status cannot be empty"
-            
-            valid_statuses = ["scheduled", "live", "finished", "cancelled", "postponed"]
-            status_lower = status.lower().strip()
-            
-            if status_lower not in valid_statuses:
-                return False, f"Invalid match status: {status}. Valid statuses are: {valid_statuses}"
-            
             return True, ""
-            
         except Exception as e:
             return False, f"Error validating match status: {str(e)}"
 
