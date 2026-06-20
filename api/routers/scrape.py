@@ -90,37 +90,70 @@ async def trigger_results_scrape(req: ResultsScrapeRequest):
 async def trigger_single_result_scrape(req: dict):
     """Scrape the result for a SINGLE match by match_id.
 
-    Opens one Flashscore match page, extracts the score + status, and
-    pushes the result to the website immediately. Much faster than a
-    full results scrape (which processes all matches).
+    Enqueues a job in the single-scrape queue. If the queue isn't full
+    (under max_workers), the job starts immediately. Otherwise it waits
+    in the queue until a worker is free.
+
+    If the same match is already queued or running, returns that job's
+    status instead of creating a duplicate.
 
     Body: { "match_id": "GzcUBljD" }
-
-    Runs on a dedicated thread pool so multiple single-match scrapes can
-    run CONCURRENTLY — admins can click Scrape on multiple matches and
-    they'll all process in parallel (up to RESULTS_MAX_WORKERS concurrent
-    browsers). Each browser uses ~300MB RAM.
-
-    Takes ~5-10 seconds per match. Returns the result synchronously.
+    Returns: { job_id, match_id, status, position, paused }
     """
-    import asyncio
-    import functools
-
     match_id = req.get("match_id")
     if not match_id or not isinstance(match_id, str):
         raise HTTPException(422, "match_id is required (string)")
 
-    logger.info(f"[single-result] Scraping result for match {match_id}")
-
-    # Run the blocking Selenium work on a thread pool so the event loop
-    # isn't blocked — other requests (including other single-match scrapes)
-    # can be processed concurrently.
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        None,  # Use the default ThreadPoolExecutor (uvicorn manages it)
-        functools.partial(_do_single_result_scrape, match_id),
-    )
+    from api.scrape_queue import _scrape_queue
+    result = _scrape_queue.enqueue(match_id, _do_single_result_scrape)
     return result
+
+
+@router.get("/scrape/results/single/status")
+async def get_single_scrape_status():
+    """Return the current state of the single-match scrape queue.
+
+    Shows running jobs, queued jobs, recent completions, errors, and
+    whether the queue is paused.
+    """
+    from api.scrape_queue import _scrape_queue
+    return _scrape_queue.get_status()
+
+
+@router.get("/scrape/results/single/{job_id}")
+async def get_single_scrape_job(job_id: str):
+    """Get the status of a specific scrape job."""
+    from api.scrape_queue import _scrape_queue
+    job = _scrape_queue.get_job(job_id)
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    return job
+
+
+@router.post("/scrape/results/single/pause")
+async def pause_single_scrape():
+    """Pause the scrape queue — running jobs finish, queued jobs wait."""
+    from api.scrape_queue import _scrape_queue
+    _scrape_queue.pause()
+    return {"status": "paused", "message": "Queue paused — running jobs will finish, new jobs will wait"}
+
+
+@router.post("/scrape/results/single/resume")
+async def resume_single_scrape():
+    """Resume the scrape queue — queued jobs start running."""
+    from api.scrape_queue import _scrape_queue
+    _scrape_queue.resume()
+    return {"status": "resumed", "message": "Queue resumed — queued jobs are starting"}
+
+
+@router.post("/scrape/results/single/cancel/{job_id}")
+async def cancel_single_scrape(job_id: str):
+    """Cancel a queued scrape job (can't cancel running jobs)."""
+    from api.scrape_queue import _scrape_queue
+    cancelled = _scrape_queue.cancel_job(job_id)
+    if not cancelled:
+        raise HTTPException(409, f"Job {job_id} is not queued (may be running or already done)")
+    return {"status": "cancelled", "job_id": job_id}
 
 
 def _do_single_result_scrape(match_id: str) -> dict:
