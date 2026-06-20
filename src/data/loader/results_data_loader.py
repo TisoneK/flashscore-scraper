@@ -69,7 +69,7 @@ class ResultsDataLoader:
         """
         try:
             # Build the minimal URL — Flashscore will redirect to the canonical URL
-            url = f"https://www.flashscore.co.ke/match/?mid={match_id}"
+            url = f"https://www.flashscore.co.ke/match/{match_id}/"
             logger.info(f"[ResultsDataLoader] Loading match summary by ID for match {match_id}")
             if status_callback:
                 status_callback(f"Loading match summary for {match_id}...")
