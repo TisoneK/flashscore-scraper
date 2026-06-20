@@ -300,7 +300,17 @@ class ChromeDriverManager:
             for candidate in candidates:
                 name = candidate.name.lower()
                 if (name == "chromedriver" or name == "chromedriver.exe") and is_real_binary(str(candidate)):
-                    logger.info(f"Found real ChromeDriver binary: {candidate}")
+                    # Ensure the binary is executable — webdriver-manager's extraction
+                    # sometimes loses the executable bit on the real binary (while
+                    # setting it on THIRD_PARTY_NOTICES.chromedriver, ironically).
+                    try:
+                        import os as _os
+                        import stat as _stat
+                        st = _os.stat(str(candidate))
+                        _os.chmod(str(candidate), st.st_mode | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH)
+                        logger.info(f"Found real ChromeDriver binary (chmod +x): {candidate}")
+                    except Exception as chmod_err:
+                        logger.warning(f"Found ChromeDriver binary but chmod failed: {candidate} ({chmod_err})")
                     return str(candidate)
 
             # Fallback: any file containing 'chromedriver' that's a real binary
@@ -309,7 +319,14 @@ class ChromeDriverManager:
                 name = candidate.name.lower()
                 if "chromedriver" in name and "notices" not in name and "license" not in name:
                     if is_real_binary(str(candidate)):
-                        logger.info(f"Found ChromeDriver binary (fallback): {candidate}")
+                        try:
+                            import os as _os
+                            import stat as _stat
+                            st = _os.stat(str(candidate))
+                            _os.chmod(str(candidate), st.st_mode | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH)
+                        except Exception:
+                            pass
+                        logger.info(f"Found ChromeDriver binary (fallback, chmod +x): {candidate}")
                         return str(candidate)
 
             logger.error(f"Could not find real chromedriver binary in {parent}")
