@@ -96,15 +96,39 @@ async def trigger_single_result_scrape(req: dict):
 
     Body: { "match_id": "GzcUBljD" }
 
-    Runs synchronously (not background) — the caller gets the result
-    back in the response. Takes ~5-10 seconds (one page load + extract).
+    Runs on a dedicated thread pool so multiple single-match scrapes can
+    run CONCURRENTLY — admins can click Scrape on multiple matches and
+    they'll all process in parallel (up to RESULTS_MAX_WORKERS concurrent
+    browsers). Each browser uses ~300MB RAM.
+
+    Takes ~5-10 seconds per match. Returns the result synchronously.
     """
+    import asyncio
+    import functools
+
     match_id = req.get("match_id")
     if not match_id or not isinstance(match_id, str):
         raise HTTPException(422, "match_id is required (string)")
 
     logger.info(f"[single-result] Scraping result for match {match_id}")
 
+    # Run the blocking Selenium work on a thread pool so the event loop
+    # isn't blocked — other requests (including other single-match scrapes)
+    # can be processed concurrently.
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,  # Use the default ThreadPoolExecutor (uvicorn manages it)
+        functools.partial(_do_single_result_scrape, match_id),
+    )
+    return result
+
+
+def _do_single_result_scrape(match_id: str) -> dict:
+    """Synchronous worker — runs on a thread pool. Does the actual Selenium work.
+
+    Each call gets its own FlashscoreScraper + Chrome browser instance, so
+    multiple calls can run in parallel without sharing state.
+    """
     # CRITICAL: thread-state reset — same as _run_scheduled_scrape / _run_results_scrape.
     # Without this, the retry_manager thinks the thread is shutting down and
     # immediately aborts with "Operation cancelled by shutdown".
