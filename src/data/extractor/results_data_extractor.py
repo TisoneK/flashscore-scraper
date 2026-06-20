@@ -112,6 +112,12 @@ class ResultsDataExtractor:
     def extract_match_status(self, elements: Optional[ResultsElements] = None, status_callback=None) -> Optional[str]:
         """
         Extracts match status from the loader's elements or from a provided elements object.
+
+        If the status element is empty/None but scores are present, falls back to
+        checking the page title for a score pattern (e.g., "78-81") to infer
+        "FINISHED". This handles Flashscore pages where the status CSS element
+        exists but has empty text (common for finished matches that went to OT).
+
         :param elements: Optionally, a ResultsElements object to extract from.
         :param status_callback: Optional callback function for status updates.
         :return: Match status string or None if not available.
@@ -119,11 +125,10 @@ class ResultsDataExtractor:
         try:
             if status_callback:
                 status_callback("Extracting match status...")
-            
+
             elements = elements or (self._loader.elements if self._loader else None)
-            
+
             if elements is None:
-                print("Error: No elements available for extraction")
                 return None
 
             def normalize(value):
@@ -132,22 +137,57 @@ class ResultsDataExtractor:
                 value = value.strip() if isinstance(value, str) else value
                 return value if value else None
 
-            # Extract match status
+            # Extract match status from the status element
             match_status = normalize(elements.match_status.text) if elements.match_status and getattr(elements.match_status, 'text', None) else None
-            
+
             if match_status:
                 is_valid, error = self.results_data_verifier.verify_match_status(match_status)
                 if not is_valid:
-                    print(f"Error verifying match status: {error}")
                     match_status = None
+
+            # ── Fallback: if status is None but scores exist, infer from page title ──
+            # Flashscore sometimes returns an empty status element for finished
+            # matches (especially after overtime). The page title contains the
+            # final score (e.g., "BEN 78-81 MEL | Bendigo Braves W v ..."), so we
+            # can check if both scores are present and infer "FINISHED".
+            if not match_status:
+                home_score = normalize(elements.home_score.text) if elements.home_score and getattr(elements.home_score, 'text', None) else None
+                away_score = normalize(elements.away_score.text) if elements.away_score and getattr(elements.away_score, 'text', None) else None
+
+                if home_score and away_score:
+                    # Both scores are present — match must be finished or in progress.
+                    # Check the page title for additional context.
+                    try:
+                        title = self._loader.driver.title if self._loader and hasattr(self._loader, 'driver') else ""
+                        if title:
+                            title_upper = title.upper()
+                            # If title contains a score pattern like "78-81" or "BEN 78-81 MEL",
+                            # and doesn't contain live indicators (Q1, Q2, etc.), it's finished.
+                            import re
+                            has_score = bool(re.search(r'\d+\s*[-:]\s*\d+', title))
+                            has_live = any(kw in title_upper for kw in ['Q1', 'Q2', 'Q3', 'Q4', 'HT', 'LIVE', 'IN PROGRESS', 'QUARTER'])
+                            if has_score and not has_live:
+                                match_status = "FINISHED"
+                                logger.info(f"[ResultsDataExtractor] Inferred FINISHED from page title (scores: {home_score}-{away_score})")
+                            elif has_score and has_live:
+                                match_status = "IN_PROGRESS"
+                                logger.info(f"[ResultsDataExtractor] Inferred IN_PROGRESS from page title (scores: {home_score}-{away_score})")
+                    except Exception:
+                        pass
+
+                    # If we still don't have a status but have scores, default to FINISHED
+                    # — a match with a final score on the summary page is almost certainly done.
+                    if not match_status:
+                        match_status = "FINISHED"
+                        logger.info(f"[ResultsDataExtractor] Defaulting to FINISHED (scores present: {home_score}-{away_score})")
 
             if status_callback:
                 status_callback("Match status extraction completed.")
 
             return match_status
-            
+
         except Exception as e:
-            print(f"Error extracting match status: {e}")
+            logger.error(f"Error extracting match status: {e}")
             return None
 
     def extract_from_final_score_text(self, score_text: str) -> Tuple[Optional[int], Optional[int]]:
