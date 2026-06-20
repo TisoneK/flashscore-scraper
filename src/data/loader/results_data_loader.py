@@ -285,7 +285,7 @@ class ResultsDataLoader:
             
         def _find_operation():
             try:
-                return self.selenium_utils.find(locator, value, index=index)
+                return self.selenium_utils.find(locator, value)
             except Exception as e:
                 logger.warning(f"Error finding element {locator}={value}: {str(e)}")
                 return None
