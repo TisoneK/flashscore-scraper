@@ -907,7 +907,7 @@ class FlashscoreScraper:
                             import requests
                             # Fetch with priority info so we can sort by importance
                             resp = requests.get(
-                                f"{website_url.rstrip('/')}/api/predictions/exists?with_priority=true",
+                                f"{website_url.rstrip('/')}/api/predictions/exists?with_priority=true&match_duration={results_config.get('match_duration_minutes', 170)}",
                                 timeout=15,
                             )
                             if resp.ok:
@@ -1143,7 +1143,7 @@ class FlashscoreScraper:
         try:
             import requests
             resp = requests.get(
-                f"{website_url.rstrip('/')}/api/predictions/exists?with_priority=true",
+                f"{website_url.rstrip('/')}/api/predictions/exists?with_priority=true&match_duration={results_config.get('match_duration_minutes', 170)}",
                 timeout=15,
             )
             if not resp.ok:
