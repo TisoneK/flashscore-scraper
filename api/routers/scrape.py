@@ -23,7 +23,11 @@ from api.state import (
     _state,
     _state_lock,
     _executor,
+    _results_state,
+    _results_state_lock,
+    _results_executor,
     _prepare_state_for_run,
+    _prepare_results_state_for_run,
     _run_scheduled_scrape,
     _run_results_scrape,
 )
@@ -69,8 +73,11 @@ async def trigger_results_scrape(req: ResultsScrapeRequest):
             422, "Invalid date — must be a real date in DD.MM.YYYY format"
         )
 
-    scrape_id = _prepare_state_for_run("results", date=req.date)
-    _executor.submit(_run_results_scrape, req.date, scrape_id)
+    # Use separate results state + executor so this doesn't block or get
+    # blocked by scheduled scrapes. Multiple results scrapes queue on the
+    # _results_executor (max_workers=1) without affecting the main scraper.
+    scrape_id = _prepare_results_state_for_run(req.date)
+    _results_executor.submit(_run_results_scrape, req.date, scrape_id)
 
     return ScrapeResponse(
         status="accepted",
@@ -81,33 +88,43 @@ async def trigger_results_scrape(req: ResultsScrapeRequest):
 
 @router.post("/scrape/stop")
 async def stop_scrape():
-    """Request the running scrape to stop after the current match.
+    """Request the running scrape(s) to stop after the current match.
 
+    Stops BOTH scheduled and results scrapes if either is running.
     The scraper checks this flag between matches; the current match
     finishes before the scrape halts cooperatively.
     """
-    with _state_lock:
-        if not _state.busy:
-            raise HTTPException(409, "No scrape is currently running")
-        _state.stop_requested = True
+    stopped_any = False
 
-    logger.info("Stop requested — scrape will halt after current match")
+    with _state_lock:
+        if _state.busy:
+            _state.stop_requested = True
+            stopped_any = True
+
+    with _results_state_lock:
+        if _results_state.busy:
+            _results_state.stop_requested = True
+            stopped_any = True
+
+    if not stopped_any:
+        raise HTTPException(409, "No scrape is currently running")
+
+    logger.info("Stop requested — scrape(s) will halt after current match")
     return {
         "status": "stop_requested",
-        "message": "Scrape will stop after the current match",
+        "message": "Scrape(s) will stop after the current match",
     }
 
 
 @router.get("/scrape/progress")
 async def get_scrape_progress():
-    """Return real-time progress of the currently running scrape.
+    """Return real-time progress of the currently running scrape(s).
 
-    Fields returned match what the CLI shows in its progress bars:
-    ``current_match_index``, ``total_matches``, ``status_message``,
-    ``progress_message``, ``stop_requested``, etc.
+    Returns both scheduled and results scrape progress so the dashboard
+    can show both if they're running concurrently.
     """
     with _state_lock:
-        return {
+        scheduled = {
             "busy": _state.busy,
             "scrape_id": _state.scrape_id,
             "scrape_type": _state.scrape_type,
@@ -122,7 +139,42 @@ async def get_scrape_progress():
             "status_message": _state.status_message,
             "stop_requested": _state.stop_requested,
             "error": _state.error,
-            "engine_forwarded": _state.engine_forwarded,
-            "streamed_count": _state.streamed_count,
-            "stream_failed_count": _state.stream_failed_count,
         }
+
+    with _results_state_lock:
+        results = {
+            "busy": _results_state.busy,
+            "scrape_id": _results_state.scrape_id,
+            "scrape_type": _results_state.scrape_type,
+            "date": _results_state.date,
+            "started_at": _results_state.started_at,
+            "current_match_index": _results_state.current_match_index,
+            "total_matches": _results_state.total_matches,
+            "progress_message": _results_state.progress_message,
+            "status_message": _results_state.status_message,
+            "stop_requested": _results_state.stop_requested,
+            "error": _results_state.error,
+        }
+
+    return {
+        "scheduled": scheduled,
+        "results": results,
+        # Backwards-compat: also return top-level fields from whichever is busy
+        "busy": scheduled["busy"] or results["busy"],
+        "scrape_id": scheduled["scrape_id"] if scheduled["busy"] else results["scrape_id"],
+        "scrape_type": scheduled["scrape_type"] if scheduled["busy"] else results["scrape_type"],
+        "day": scheduled["day"],
+        "date": results["date"] if results["busy"] else scheduled["date"],
+        "started_at": scheduled["started_at"] if scheduled["busy"] else results["started_at"],
+        "current_match_index": scheduled["current_match_index"] if scheduled["busy"] else results["current_match_index"],
+        "total_matches": scheduled["total_matches"] if scheduled["busy"] else results["total_matches"],
+        "complete_matches": scheduled["complete_matches"],
+        "incomplete_matches": scheduled["incomplete_matches"],
+        "progress_message": scheduled["progress_message"] if scheduled["busy"] else results["progress_message"],
+        "status_message": scheduled["status_message"] if scheduled["busy"] else results["status_message"],
+        "stop_requested": scheduled["stop_requested"] or results["stop_requested"],
+        "error": scheduled["error"] or results["error"],
+        "engine_forwarded": scheduled.get("engine_forwarded", False),
+        "streamed_count": scheduled.get("streamed_count", 0),
+        "stream_failed_count": scheduled.get("stream_failed_count", 0),
+    }

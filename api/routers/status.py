@@ -26,7 +26,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from api.state import _state, _state_lock, _scrape_history
+from api.state import _state, _state_lock, _results_state, _results_state_lock, _scrape_history
 
 # PROJECT_ROOT is the scraper repo root (parent of the api/ package)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -63,18 +63,26 @@ async def get_status():
         last = _state.result
         err = _state.error
 
-    if busy:
+    # Also check results scrape state (runs concurrently with scheduled scrapes)
+    with _results_state_lock:
+        results_busy = _results_state.busy
+        results_last = _results_state.result
+        results_err = _results_state.error
+
+    if busy or results_busy:
         status_text = "scraping"
-    elif last is not None:
+    elif last is not None or results_last is not None:
         status_text = "idle (last scrape succeeded)"
-    elif err:
+    elif err or results_err:
         status_text = "idle (last scrape failed)"
     else:
         status_text = "idle (no runs yet)"
 
     return {
         "status": status_text,
-        "scraper_busy": busy,
+        "scraper_busy": busy or results_busy,
+        "scheduled_busy": busy,
+        "results_busy": results_busy,
         "last_scrape": (
             {
                 "success": err is None and last is not None,

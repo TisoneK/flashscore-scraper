@@ -86,6 +86,16 @@ class _ScraperState:
 
 _state: _ScraperState = _ScraperState()
 
+# ── Separate state for results scrapes ───────────────────────────────
+# Results scrapes run INDEPENDENTLY of scheduled scrapes — they have their
+# own state + executor so:
+#   1. A results scrape doesn't block a scheduled scrape (or vice versa)
+#   2. Multiple results scrapes can queue without interrupting the main scraper
+#   3. The /api/status endpoint reports both independently
+_results_state: _ScraperState = _ScraperState()
+_results_executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1)
+_results_state_lock = threading.Lock()
+
 
 # ════════════════════════════════════════════════════════════════
 #  Background scraper runners (threaded, with live callbacks)
@@ -300,29 +310,26 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
 
 
 def _run_results_scrape(date_str: str, scrape_id: str) -> None:
-    """Run FlashscoreScraper.scrape_results() on a background thread."""
-    global _state
+    """Run FlashscoreScraper.scrape_results() on a background thread.
 
+    Uses _results_state (separate from _state) so results scrapes run
+    concurrently with scheduled scrapes without blocking each other.
+    """
     # CRITICAL: thread-state reset. DO NOT REMOVE.
-    # Same rationale as _run_scheduled_scrape above — without this clear,
-    # the worker thread is poisoned by the previous run's close() and the
-    # next scrape dies immediately with "Operation cancelled by shutdown"
-    # in retry_manager. See the full comment in _run_scheduled_scrape.
-    # (Restored in commit 16d39a7 after being accidentally removed in bf1bf6f.)
-    with _state_lock:
-        _state.stop_requested = False
+    with _results_state_lock:
+        _results_state.stop_requested = False
     threading.current_thread()._is_shutting_down = False
 
     def status_cb(msg: str) -> None:
-        with _state_lock:
-            _state.status_message = msg
+        with _results_state_lock:
+            _results_state.status_message = msg
         logger.info("[%s] %s", scrape_id, msg)
 
     def progress_cb(current: int, total: int, task: str = None) -> None:
-        with _state_lock:
-            _state.current_match_index = current
-            _state.total_matches = total
-            _state.progress_message = task or f"Processing match {current}/{total}"
+        with _results_state_lock:
+            _results_state.current_match_index = current
+            _results_state.total_matches = total
+            _results_state.progress_message = task or f"Processing match {current}/{total}"
 
     scraper = FlashscoreScraper(
         status_callback=status_cb, progress_callback=progress_cb
@@ -333,26 +340,26 @@ def _run_results_scrape(date_str: str, scrape_id: str) -> None:
             status_callback=status_cb,
             progress_callback=progress_cb,
         )
-        with _state_lock:
-            _state.busy = False
-            _state.finished_at = datetime.now(timezone.utc).isoformat()
-            _state.error = None
-            _state.result = {"date": date_str, "success": True}
+        with _results_state_lock:
+            _results_state.busy = False
+            _results_state.finished_at = datetime.now(timezone.utc).isoformat()
+            _results_state.error = None
+            _results_state.result = {"date": date_str, "success": True}
         logger.info("[%s] Results scrape for %s finished", scrape_id, date_str)
     except Exception as exc:
         logger.error("[%s] Results scrape failed: %s", scrape_id, exc)
-        with _state_lock:
-            _state.busy = False
-            _state.finished_at = datetime.now(timezone.utc).isoformat()
-            _state.error = str(exc)
+        with _results_state_lock:
+            _results_state.busy = False
+            _results_state.finished_at = datetime.now(timezone.utc).isoformat()
+            _results_state.error = str(exc)
 
     _scrape_history.append(
         {
             "scrape_id": scrape_id,
             "type": "results",
             "date": date_str,
-            "finished_at": _state.finished_at,
-            "success": _state.error is None,
+            "finished_at": _results_state.finished_at,
+            "success": _results_state.error is None,
         }
     )
 
@@ -379,4 +386,28 @@ def _prepare_state_for_run(scrape_type: str, **kwargs: Any) -> str:
     )
     with _state_lock:
         _state.scrape_id = scrape_id
+    return scrape_id
+
+
+def _prepare_results_state_for_run(date_str: str) -> str:
+    """Atomically reset + prepare _results_state for a new results scrape.
+
+    Separate from _prepare_state_for_run so results scrapes don't check
+    _state.busy (which would block if a scheduled scrape is running).
+
+    Returns the generated scrape_id. Raises HTTPException(409) if a
+    results scrape is already in progress.
+    """
+    with _results_state_lock:
+        if _results_state.busy:
+            raise HTTPException(409, "A results scrape is already in progress")
+        _results_state.reset()
+        _results_state.busy = True
+        _results_state.scrape_type = "results"
+        _results_state.date = date_str
+        _results_state.started_at = datetime.now(timezone.utc).isoformat()
+
+    scrape_id = datetime.now().strftime(f"results_%Y%m%d_%H%M%S")
+    with _results_state_lock:
+        _results_state.scrape_id = scrape_id
     return scrape_id

@@ -922,33 +922,26 @@ class FlashscoreScraper:
                             status_callback(warn_msg)
                         continue
                     elements = results_loader.get_elements()
-                    # Extract match status
+                    # Extract match status — process ALL matches, not just finished ones.
+                    # The website maps Flashscore statuses (FINISHED, IN_PROGRESS, POSTPONED, etc.)
+                    # to our resultStatus (FINAL, LIVE, POSTPONED, etc.) and stores whatever
+                    # scores are available.
                     match_status = extractor.extract_match_status(elements, status_callback=status_callback)
-                    if not match_status or match_status.lower() != "finished":
-                        skip_msg = f"Skipping match {match_id}: status is '{match_status}' (not finished)"
-                        logger.info(skip_msg)
-                        if status_callback:
-                            status_callback(skip_msg)
-                        continue
-                    # Extract final scores
+                    # Extract scores — may be None for non-finished matches (that's OK)
                     home_score, away_score = extractor.extract_final_scores(elements, status_callback=status_callback)
-                    if home_score is None or away_score is None:
-                        warn_msg = f"No final scores found for match {match_id}"
-                        logger.warning(warn_msg)
-                        if status_callback:
-                            status_callback(warn_msg)
-                        continue
-                    # Save or log the result (here, just collect for summary)
+                    # Collect ALL results — the website decides what to do with each status
                     results.append({
                         "match_id": match_id,
                         "home_score": home_score,
                         "away_score": away_score,
-                        "status": match_status
+                        "status": match_status or "UNKNOWN",
                     })
+                    status_msg = f"Match {match_id}: status='{match_status}', scores={home_score}-{away_score}"
+                    logger.info(status_msg)
                 # Save results using JSONStorage
                 results_filename = f"results_{file_date}.json"
                 self.json_storage.save_results(results, filename=results_filename)
-                summary_msg = f"\n--- Results scraping summary: {len(results)} matches with final scores for {date} ---"
+                summary_msg = f"\n--- Results scraping summary: {len(results)} matches processed for {date} ---"
                 logger.info(summary_msg)
                 if status_callback:
                     status_callback(summary_msg)
