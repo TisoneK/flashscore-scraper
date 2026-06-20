@@ -243,11 +243,13 @@ class ChromeDriverManager:
         Works around a known webdriver-manager bug where install() sometimes
         returns the path to THIRD_PARTY_NOTICES.chromedriver (a text file)
         instead of the actual chromedriver binary. Both files match the glob
-        pattern *chromedriver* in the extracted archive.
+        pattern *chromedriver* in the extracted archive, AND webdriver-manager
+        sets the executable bit on ALL extracted files — so checking the
+        executable bit alone isn't enough.
 
-        Fix: after install(), validate that the returned path is actually
-        executable. If not, look for the real 'chromedriver' binary in the
-        same directory.
+        Fix: after install(), validate that the returned path is actually a
+        binary by checking its magic bytes (ELF/Mach-O/PE). If it's not a
+        binary, search the same directory for the real chromedriver binary.
         """
         try:
             from webdriver_manager.chrome import ChromeDriverManager as WDMChromeDriverManager
@@ -255,30 +257,40 @@ class ChromeDriverManager:
             if not chromedriver_path or not Path(chromedriver_path).exists():
                 return None
 
-            # Check if the returned path is actually the binary (not a text file
-            # like THIRD_PARTY_NOTICES.chromedriver). The real binary is named
-            # exactly 'chromedriver' (on Linux/Mac) or 'chromedriver.exe' (Windows).
-            # THIRD_PARTY_NOTICES.chromedriver is a text file that matches the
-            # *chromedriver* glob but is NOT executable.
-            import os
-            import stat
+            def is_real_binary(path: str) -> bool:
+                """Check if a file is an actual executable binary by reading its magic bytes.
 
-            def is_executable(path: str) -> bool:
+                Checks for:
+                  - ELF (Linux): 0x7F 0x45 0x4C 0x46
+                  - PE (Windows): 0x4D 0x5A ("MZ")
+                  - Mach-O (macOS): several variants
+                  - Shell script: 0x23 0x21 ("#!")
+
+                THIRD_PARTY_NOTICES.chromedriver is a UTF-8 text file — none of these
+                magic byte patterns match.
+                """
                 try:
-                    st = os.stat(path)
-                    return bool(st.st_mode & stat.S_IXUSR) and not stat.S_ISDIR(st.st_mode)
-                except OSError:
+                    with open(path, "rb") as f:
+                        magic = f.read(4)
+                    return (
+                        magic == b"\x7fELF" or  # Linux ELF
+                        magic[:2] == b"MZ" or   # Windows PE
+                        magic in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
+                                  b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce") or  # Mach-O
+                        magic[:2] == b"#!"       # Shell script
+                    )
+                except Exception:
                     return False
 
-            if is_executable(chromedriver_path):
+            if is_real_binary(chromedriver_path):
                 logger.info(f"Found ChromeDriver via webdriver-manager: {chromedriver_path}")
                 return chromedriver_path
 
-            # The returned path is not executable — likely THIRD_PARTY_NOTICES.chromedriver.
+            # The returned path is not a real binary — likely THIRD_PARTY_NOTICES.chromedriver.
             # Look for the real chromedriver binary in the same directory.
             parent = Path(chromedriver_path).parent
             logger.warning(
-                f"webdriver-manager returned non-executable path: {chromedriver_path}. "
+                f"webdriver-manager returned non-binary path: {chromedriver_path}. "
                 f"Searching {parent} for the real chromedriver binary..."
             )
 
@@ -287,20 +299,20 @@ class ChromeDriverManager:
             candidates = sorted(parent.iterdir(), key=lambda p: len(p.name))
             for candidate in candidates:
                 name = candidate.name.lower()
-                if (name == "chromedriver" or name == "chromedriver.exe") and is_executable(str(candidate)):
+                if (name == "chromedriver" or name == "chromedriver.exe") and is_real_binary(str(candidate)):
                     logger.info(f"Found real ChromeDriver binary: {candidate}")
                     return str(candidate)
 
-            # Fallback: any file containing 'chromedriver' that's executable
+            # Fallback: any file containing 'chromedriver' that's a real binary
             # (but NOT containing 'notices' or 'license')
             for candidate in candidates:
                 name = candidate.name.lower()
                 if "chromedriver" in name and "notices" not in name and "license" not in name:
-                    if is_executable(str(candidate)):
+                    if is_real_binary(str(candidate)):
                         logger.info(f"Found ChromeDriver binary (fallback): {candidate}")
                         return str(candidate)
 
-            logger.error(f"Could not find executable chromedriver in {parent}")
+            logger.error(f"Could not find real chromedriver binary in {parent}")
             logger.error(f"Directory contents: {[p.name for p in candidates]}")
             return None
         except ImportError:
