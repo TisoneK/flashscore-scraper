@@ -924,7 +924,7 @@ class FlashscoreScraper:
                     elements = results_loader.get_elements()
                     # Extract match status
                     match_status = extractor.extract_match_status(elements, status_callback=status_callback)
-                    if match_status != "finished":
+                    if match_status.lower() != "finished":
                         skip_msg = f"Skipping match {match_id}: status is '{match_status}' (not finished)"
                         logger.info(skip_msg)
                         if status_callback:
