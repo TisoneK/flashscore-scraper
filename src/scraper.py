@@ -939,22 +939,18 @@ class FlashscoreScraper:
                     return
 
                 # ── Sort match IDs by priority ──────────────────────────────
-                # If we have priority buckets from the website, sort:
-                #   HIGH (AWAITING_RESULT) first → users see final results ASAP
-                #   MEDIUM (LIVE) second → live score updates
-                #   LOW (PENDING) last → scheduled matches (may have started)
-                # If no priority info (local file fallback), process in original order.
+                # If we have priority buckets from the website, ONLY process
+                # non-done matches (high + medium + low). Skip "done" matches
+                # (already FINAL/POSTPONED/CANCELLED) — no need to re-visit
+                # Flashscore pages for matches we already have results for.
                 if priority_buckets["high"] or priority_buckets["medium"] or priority_buckets["low"]:
-                    sorted_ids = priority_buckets["high"] + priority_buckets["medium"] + priority_buckets["low"]
-                    # Include any match_ids not in any bucket (edge case)
-                    for mid in match_ids:
-                        if mid not in sorted_ids:
-                            sorted_ids.append(mid)
-                    match_ids = sorted_ids
+                    match_ids = priority_buckets["high"] + priority_buckets["medium"] + priority_buckets["low"]
+                    done_count = len(data.get("by_priority", {}).get("done", [])) if 'data' in locals() else 0
                     logger.info(
                         f"Sorted by priority: {len(priority_buckets['high'])} high → "
                         f"{len(priority_buckets['medium'])} medium → "
-                        f"{len(priority_buckets['low'])} low"
+                        f"{len(priority_buckets['low'])} low "
+                        f"({done_count} done — skipped)"
                     )
 
                 found_msg = f"Found {len(match_ids)} matches for results scraping on {date}."
