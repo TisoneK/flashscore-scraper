@@ -3,6 +3,9 @@ from src.data.elements_model import ResultsElements
 from src.data.verifier.results_data_verifier import ResultsDataVerifier
 from src.models import MatchModel
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ResultsDataExtractor:
     def __init__(self, loader):
@@ -200,31 +203,34 @@ class ResultsDataExtractor:
                         pass
 
                     # If we still don't have a status but have scores:
-                    # DON'T default to FINISHED — the match might be in live OT
-                    # with an empty status element. Check if the match start time
-                    # was more than 4 hours ago (basketball + OT rarely exceeds 4h).
-                    # If > 4h ago → FINISHED (must be done by now).
-                    # If < 4h ago → IN_PROGRESS (might still be playing OT).
+                    # Use the page title to determine if the match is finished.
+                    # Flashscore titles for finished matches end with "| Summary" or "| Match".
+                    # Live matches have "LIVE" in the title or no "| Summary".
                     if not match_status:
                         try:
-                            from datetime import datetime, timezone
-                            # Can't easily get match start time here, so use a simpler heuristic:
-                            # Check if the page has any "live" CSS classes or indicators
-                            # that we might have missed. If not, default to FINISHED only
-                            # if the page URL contains "/summary/" (summary page = finished).
-                            # For live matches, Flashscore shows the "match" page, not "summary".
                             current_url = self._loader.driver.current_url if self._loader and hasattr(self._loader, 'driver') else ""
-                            if '/summary/' in current_url:
-                                match_status = "FINISHED"
-                                logger.info(f"[ResultsDataExtractor] Defaulting to FINISHED (on summary page, scores: {home_score}-{away_score})")
-                            else:
-                                # Not on summary page — could be live. Mark as IN_PROGRESS
-                                # to be safe. The next scrape will catch it as FINISHED
-                                # once Flashscore moves it to the summary page.
+                            current_title = self._loader.driver.title if self._loader and hasattr(self._loader, 'driver') else ""
+                            title_upper = current_title.upper() if current_title else ""
+
+                            # Check if title indicates a finished match
+                            # Finished: "...| Summary" or "...| Match"
+                            # Live: title contains "LIVE" or doesn't have "| Summary"
+                            has_summary_in_title = 'SUMMARY' in title_upper or '| MATCH' in title_upper
+                            has_live_in_title = 'LIVE' in title_upper
+
+                            if has_live_in_title:
                                 match_status = "IN_PROGRESS"
-                                logger.info(f"[ResultsDataExtractor] Defaulting to IN_PROGRESS (not on summary page, scores: {home_score}-{away_score})")
+                                logger.info(f"[ResultsDataExtractor] IN_PROGRESS (title has LIVE, scores: {home_score}-{away_score})")
+                            elif has_summary_in_title or '/summary/' in current_url:
+                                match_status = "FINISHED"
+                                logger.info(f"[ResultsDataExtractor] FINISHED (title has Summary/Match, scores: {home_score}-{away_score})")
+                            else:
+                                # Can't determine — default to IN_PROGRESS to be safe.
+                                # Next scrape will catch it as FINISHED once Flashscore
+                                # updates the title to include "Summary".
+                                match_status = "IN_PROGRESS"
+                                logger.info(f"[ResultsDataExtractor] IN_PROGRESS (unknown state, scores: {home_score}-{away_score})")
                         except Exception:
-                            # Can't determine — default to FINISHED (most common case)
                             match_status = "FINISHED"
                             logger.info(f"[ResultsDataExtractor] Defaulting to FINISHED (scores present: {home_score}-{away_score})")
 
