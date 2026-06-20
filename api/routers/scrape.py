@@ -105,6 +105,12 @@ async def trigger_single_result_scrape(req: dict):
 
     logger.info(f"[single-result] Scraping result for match {match_id}")
 
+    # CRITICAL: thread-state reset — same as _run_scheduled_scrape / _run_results_scrape.
+    # Without this, the retry_manager thinks the thread is shutting down and
+    # immediately aborts with "Operation cancelled by shutdown".
+    import threading
+    threading.current_thread()._is_shutting_down = False
+
     try:
         from src.scraper import FlashscoreScraper
         from src.data.loader.results_data_loader import ResultsDataLoader
