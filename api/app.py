@@ -53,16 +53,18 @@ app.include_router(init.router, prefix="/api")
 
 
 @app.on_event("startup")
-async def _reattach_log_handler_on_startup() -> None:
-    """Re-attach the log capture handler after uvicorn's dictConfig runs.
-
-    Uvicorn installs its own logging config on startup (via dictConfig with
-    disable_existing_loggers=True), which strips any handlers we attached
-    at module-import time. This startup event fires AFTER uvicorn's config
-    has been applied, so the handler survives.
-    """
+async def _on_startup() -> None:
+    """Startup: re-attach log handler + auto-start results scheduler."""
+    # 1. Re-attach log capture handler (uvicorn strips it)
     attach_log_capture_handler()
     logger.info("Log capture handler attached — /api/logs is live")
+
+    # 2. Auto-start the results scheduler if it was enabled before restart
+    try:
+        from api.routers.schedule import _try_autostart
+        _try_autostart()
+    except Exception as e:
+        logger.warning(f"Failed to auto-start results scheduler: {e}")
 
 
 @app.get("/health")
