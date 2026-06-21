@@ -141,7 +141,24 @@ class ResultsDataExtractor:
                 return value if value else None
 
             # Extract match status from the status element
-            match_status = normalize(elements.match_status.text) if elements.match_status and getattr(elements.match_status, 'text', None) else None
+            # The status span (fixedHeaderDuel__detailStatus) may contain just
+            # "4th Quarter" while the elapsed minutes "9'" are in a sibling
+            # element. Read the PARENT element's text to capture both.
+            match_status = None
+            if elements.match_status and getattr(elements.match_status, 'text', None):
+                span_text = normalize(elements.match_status.text)
+                # Try to get the parent element's full text (includes siblings)
+                try:
+                    parent = elements.match_status.find_element('xpath', '..')
+                    parent_text = normalize(parent.text) if parent else None
+                    # Use parent text if it's longer (contains more info like minutes)
+                    if parent_text and span_text and len(parent_text) > len(span_text):
+                        match_status = parent_text
+                        logger.debug(f"[ResultsDataExtractor] Using parent text: '{parent_text}' (span was: '{span_text}')")
+                    else:
+                        match_status = span_text
+                except Exception:
+                    match_status = span_text
 
             if match_status:
                 is_valid, error = self.results_data_verifier.verify_match_status(match_status)
