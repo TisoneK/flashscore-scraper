@@ -141,7 +141,7 @@ class PerformanceMonitor:
                 self.metrics.memory_metrics.system_memory_total_mb = vm.total / 1024 / 1024
                 self.metrics.memory_metrics.system_memory_percent = float(vm.percent)
             except Exception:
-                pass
+                logger.debug("Non-critical error (swallowed)")
                 
         except Exception as e:
             self.logger.debug(f"Error updating memory metrics: {e}")
@@ -163,7 +163,7 @@ class PerformanceMonitor:
             try:
                 self.metrics.cpu_metrics.system_cpu_percent = psutil.cpu_percent(interval=0.1)
             except Exception:
-                pass
+                logger.debug("Non-critical error (swallowed)")
                 
         except Exception as e:
             self.logger.debug(f"Error updating CPU metrics: {e}")
@@ -312,7 +312,7 @@ class PerformanceMonitor:
                 elapsed = time.time() - self._start_time
                 return elapsed / max(1, total_processed)
         except Exception:
-            pass
+            logger.debug("Non-critical error (swallowed)")
         return 0.0
 
     def log_progress(self, current_batch_time: Optional[float] = None) -> None:
@@ -349,7 +349,7 @@ class PerformanceMonitor:
             if avg_match_time > 0 and avg_match_time < 0.01:
                 avg_match_time = 0.01
         except Exception:
-            pass
+            logger.debug("Non-critical error (swallowed)")
 
         return {
             'total_time': total_time,

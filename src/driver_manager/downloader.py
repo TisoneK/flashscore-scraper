@@ -94,7 +94,7 @@ class DriverDownloader:
             try:
                 temp_target.unlink()
             except Exception:
-                pass
+                logger.debug("Non-critical error (swallowed)")
 
     def download(self, url: str, target: Path) -> None:
         """

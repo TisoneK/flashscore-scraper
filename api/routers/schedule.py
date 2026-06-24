@@ -227,8 +227,9 @@ async def _results_scheduler_loop():
             # ── Check queue status ────────────────────────────────────────
             scraper_base = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
             if not scraper_base:
-                # Running on Railway — use localhost
-                scraper_base = "http://localhost:8080"
+                # Running locally — use the PORT env var or default to 8000
+                port = os.environ.get("PORT", "8000")
+                scraper_base = f"http://localhost:{port}"
             else:
                 scraper_base = f"https://{scraper_base}"
 

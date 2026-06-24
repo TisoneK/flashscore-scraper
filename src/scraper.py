@@ -85,7 +85,7 @@ def _get_results_config():
         if pm:
             defaults["priority_mode"] = pm.lower()
     except Exception:
-        pass
+        logger.debug("Non-critical error (swallowed)")
     return defaults
 
 class FlashscoreScraper:
@@ -599,7 +599,7 @@ class FlashscoreScraper:
                 if 'original_retry' in locals():
                     urllib3.util.retry.Retry.DEFAULT = original_retry
             except Exception:
-                pass
+                logger.debug("Non-critical error (swallowed)")
                 
         except Exception as e:
             logger.debug(f"Error during cleanup: {e}")
@@ -644,7 +644,7 @@ class FlashscoreScraper:
                     match_finalized_callback=existing_match_finalized_cb
                 )
         except Exception:
-            pass
+            logger.debug("Non-critical error (swallowed)")
         try:
             def main_scrape():
                 match_ids = self.load_initial_data(day, status_callback=status_callback)
@@ -833,7 +833,7 @@ class FlashscoreScraper:
                             match_payload = match.to_dict() if match.status == "complete" else None
                             self.reporter.match_finalized(match_id, match=match_payload)
                         except Exception:
-                            pass
+                            logger.debug("Non-critical error (swallowed)")
                         # Log this match's full info immediately after processing
                         FlashscoreScraper.log_match_info(match)
                     else:
@@ -1293,7 +1293,7 @@ class FlashscoreScraper:
                 try:
                     worker_scraper.close()
                 except Exception:
-                    pass
+                    logger.debug("Non-critical error (swallowed)")
 
         # Run up to 3 concurrent workers (one per non-empty priority bucket)
         buckets = [

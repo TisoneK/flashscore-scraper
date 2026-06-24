@@ -75,13 +75,13 @@ class CallbackReporter(Reporter):
                 try:
                     print(message)
                 except Exception:
-                    pass
+                    logger.debug("Reporter callback error (swallowed)")
         else:
             # Fallback to print for CLI when no callback provided
             try:
                 print(message)
             except Exception:
-                pass
+                logger.debug("Reporter callback error (swallowed)")
 
     def progress(self, current: int, total: int, message: typing.Optional[str] = None) -> None:
         cb = self._progress_cb
@@ -96,7 +96,7 @@ class CallbackReporter(Reporter):
                         progress_msg += f" - {message}"
                     print(progress_msg)
                 except Exception:
-                    pass
+                    logger.debug("Reporter callback error (swallowed)")
         else:
             # Fallback to print for CLI when no callback provided
             try:
@@ -105,7 +105,7 @@ class CallbackReporter(Reporter):
                     progress_msg += f" - {message}"
                 print(progress_msg)
             except Exception:
-                pass
+                logger.debug("Reporter callback error (swallowed)")
 
     def match_finalized(self, match_id: str, match: typing.Optional[dict] = None) -> None:
         cb = self._match_finalized_cb
@@ -117,7 +117,7 @@ class CallbackReporter(Reporter):
                 else:
                     cb(match_id)
             except Exception:
-                pass
+                logger.debug("Reporter callback error (swallowed)")
         # No CLI print fallback; this is a structured event
 
 

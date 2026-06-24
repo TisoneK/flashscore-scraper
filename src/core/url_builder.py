@@ -155,7 +155,7 @@ class UrlBuilder:
                     if CONFIG.get('logging', {}).get('verbose_url_builder_debug', False):
                         logger.debug(f"Selector '{selector}' failed: {e}")
                 except Exception:
-                    pass
+                    logger.debug("Non-critical error (swallowed)")
                 continue
         
         if not anchor or not url:
@@ -177,7 +177,7 @@ class UrlBuilder:
                         onclick = d.get_attribute('onclick')
                         logger.debug(f"  Div {i}: onclick='{onclick}', class='{d.get_attribute('class')}'")
             except Exception:
-                pass
+                logger.debug("Non-critical error (swallowed)")
             raise ValueError("No valid anchor element found in match element")
         
         if not url:

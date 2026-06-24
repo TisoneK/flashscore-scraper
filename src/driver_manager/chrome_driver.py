@@ -300,7 +300,7 @@ class ChromeDriverManager:
                             st = os.stat(str(candidate))
                             os.chmod(str(candidate), st.st_mode | 0o111)
                         except Exception:
-                            pass
+                            logger.debug("Non-critical error (swallowed)")
                         logger.info(f"Found real ChromeDriver binary: {candidate}")
                         _chromedriver_cache = str(candidate)
                         return str(candidate)

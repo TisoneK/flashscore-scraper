@@ -1,0 +1,33 @@
+# Exclude CLI code (not needed in API server deployment)
+src/cli/
+
+# Exclude tests
+tests/
+
+# Exclude docs
+docs/
+
+# Exclude dev/CI scripts
+src/scripts/
+
+# Exclude git
+.git/
+.gitignore
+
+# Exclude Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Exclude output (created at runtime)
+output/
+
+# Exclude drivers (downloaded at runtime)
+drivers/
+
+# Exclude IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
