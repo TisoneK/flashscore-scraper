@@ -365,18 +365,31 @@ class FlashscoreScraper:
             return False
 
     def extract_over_under_odds(self, status_callback=None):
+        """Extract calculation line + reduced-risk lines. Returns a dict."""
         over_under_extractor = OddsDataExtractor(self.over_under_loader)
         selected = over_under_extractor.get_selected_alternative()
         if selected:
             match_total = float(selected['alternative']) if selected['alternative'] else None
             over_odds = float(selected['over']) if selected['over'] else None
             under_odds = float(selected['under']) if selected['under'] else None
-            
-            # Log the selected alternative
-            logger.debug(f"Selected total: {match_total}, over: {over_odds}, under: {under_odds}")
-            
-            return match_total, over_odds, under_odds
-        return None, None, None
+
+            reduced_over = over_under_extractor.get_lowest_alternative()
+            reduced_under = over_under_extractor.get_highest_alternative()
+
+            return {
+                'match_total': match_total,
+                'over_odds': over_odds,
+                'under_odds': under_odds,
+                'reduced_over_total': float(reduced_over['alternative']) if reduced_over and reduced_over.get('alternative') else None,
+                'reduced_over_odds': float(reduced_over['over']) if reduced_over and reduced_over.get('over') else None,
+                'reduced_under_total': float(reduced_under['alternative']) if reduced_under and reduced_under.get('alternative') else None,
+                'reduced_under_odds': float(reduced_under['under']) if reduced_under and reduced_under.get('under') else None,
+            }
+        return {
+            'match_total': None, 'over_odds': None, 'under_odds': None,
+            'reduced_over_total': None, 'reduced_over_odds': None,
+            'reduced_under_total': None, 'reduced_under_odds': None,
+        }
 
     def load_h2h_data(self, match_id, status_callback=None):
         if self.driver is None:
@@ -731,7 +744,14 @@ class FlashscoreScraper:
                             self.reporter.status(warn_msg)
 
                         if self.load_over_under_odds(match_id, status_callback=status_callback):
-                            odds.match_total, odds.over_odds, odds.under_odds = self.extract_over_under_odds(status_callback=status_callback)
+                            ou = self.extract_over_under_odds(status_callback=status_callback)
+                            odds.match_total = ou['match_total']
+                            odds.over_odds = ou['over_odds']
+                            odds.under_odds = ou['under_odds']
+                            odds.reduced_over_total = ou.get('reduced_over_total')
+                            odds.reduced_over_odds = ou.get('reduced_over_odds')
+                            odds.reduced_under_total = ou.get('reduced_under_total')
+                            odds.reduced_under_odds = ou.get('reduced_under_odds')
                             if odds.match_total is None:
                                 warn_msg = f"  - No selected over/under alternative available for {match_display}"
                                 logger.warning(warn_msg)

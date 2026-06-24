@@ -522,4 +522,55 @@ class OddsDataExtractor:
 
     def set_best_alternative_checker(self, target_over_odds=1.85):
         """Set the target over odds value for selecting the best alternative (default 1.85)."""
-        self._best_alternative_target = target_over_odds 
+        self._best_alternative_target = target_over_odds
+
+    def _norm_alt(self, alt):
+        """Normalize an alternative dict to strings."""
+        def to_str(v):
+            try:
+                if v is None: return None
+                if hasattr(v, 'text'): return v.text.strip() or None
+                if isinstance(v, str): return v.strip() or None
+                return None
+            except: return None
+        return {
+            'alternative': to_str(alt.get('alternative')),
+            'over': to_str(alt.get('over')),
+            'under': to_str(alt.get('under')),
+        }
+
+    def get_lowest_alternative(self):
+        """Return the alternative with the LOWEST total value (reduced-risk Over)."""
+        totals = self.get_all_totals()
+        if not totals: return None
+        best_half = best_all = None
+        min_half = min_all = float('inf')
+        for alt in totals:
+            n = self._norm_alt(alt)
+            try:
+                v = float(n['alternative']) if n['alternative'] else None
+            except: v = None
+            if v is None or n['over'] is None or n['under'] is None: continue
+            if v < min_all: min_all, best_all = v, n
+            if self.has_half_point(n['alternative']) and v < min_half: min_half, best_half = v, n
+        result = best_half or best_all
+        if result: logger.info(f"Lowest alternative (reduced Over): {result['alternative']}")
+        return result
+
+    def get_highest_alternative(self):
+        """Return the alternative with the HIGHEST total value (reduced-risk Under)."""
+        totals = self.get_all_totals()
+        if not totals: return None
+        best_half = best_all = None
+        max_half = max_all = float('-inf')
+        for alt in totals:
+            n = self._norm_alt(alt)
+            try:
+                v = float(n['alternative']) if n['alternative'] else None
+            except: v = None
+            if v is None or n['over'] is None or n['under'] is None: continue
+            if v > max_all: max_all, best_all = v, n
+            if self.has_half_point(n['alternative']) and v > max_half: max_half, best_half = v, n
+        result = best_half or best_all
+        if result: logger.info(f"Highest alternative (reduced Under): {result['alternative']}")
+        return result

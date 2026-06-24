@@ -9,10 +9,16 @@ class OddsModel:
     match_id: str = ""  # FK to MatchModel.match_id
     home_odds: Optional[float] = None
     away_odds: Optional[float] = None
+    # Calculation line (Over odds nearest 1.85) — the core reference line
     over_odds: Optional[float] = None
     under_odds: Optional[float] = None
     match_total: Optional[float] = None
-    # Add more fields as needed
+    # Reduced-risk Over line (lowest alternative total — easiest to beat)
+    reduced_over_total: Optional[float] = None
+    reduced_over_odds: Optional[float] = None
+    # Reduced-risk Under line (highest alternative total — safest to stay under)
+    reduced_under_total: Optional[float] = None
+    reduced_under_odds: Optional[float] = None
 
 @dataclass
 class H2HMatchModel:
