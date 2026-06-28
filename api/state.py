@@ -292,6 +292,17 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
             _state.busy = False
             _state.finished_at = datetime.now(timezone.utc).isoformat()
             _state.error = str(exc)
+    finally:
+        # ── CRITICAL: Always close the Chrome browser ──────────────────
+        # Without this, Chrome stays running as a zombie process after the
+        # scrape finishes. The next scrape creates ANOTHER Chrome instance,
+        # and eventually memory pressure causes "session not created: Chrome
+        # instance exited" errors. This was the root cause of scrapes failing
+        # after running a results scrape followed by a scheduled scrape.
+        try:
+            scraper.close()
+        except Exception as close_err:
+            logger.debug("[%s] Scraper close failed: %s", scrape_id, close_err)
 
     _scrape_history.append(
         {
@@ -354,6 +365,18 @@ def _run_results_scrape(date_str: str, scrape_id: str) -> None:
             _results_state.busy = False
             _results_state.finished_at = datetime.now(timezone.utc).isoformat()
             _results_state.error = str(exc)
+    finally:
+        # ── CRITICAL: Always close the Chrome browser ──────────────────
+        # Without this, Chrome stays running as a zombie process after the
+        # results scrape finishes. The next scrape (scheduled or results)
+        # creates ANOTHER Chrome instance, and eventually memory pressure
+        # causes "session not created: Chrome instance exited" errors.
+        # This was the root cause of the scheduled scraper failing after
+        # running a results scrape — the results Chrome was never closed.
+        try:
+            scraper.close()
+        except Exception as close_err:
+            logger.debug("[%s] Scraper close failed: %s", scrape_id, close_err)
 
     _scrape_history.append(
         {
