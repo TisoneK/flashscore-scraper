@@ -165,45 +165,80 @@ class FlashscoreScraper:
 
     def initialize(self, status_callback=None):
         import time
+        import threading
         start_time = time.time()
-        timeout = 90  # 90 seconds timeout for initialization
+        timeout = 120  # 2 minutes hard timeout for initialization
 
         logger.info("🔄 Initializing scraper components...")
 
         if status_callback is None:
             status_callback = self.status_callback
 
-        # Note: ChromeDriver discovery now uses a multi-strategy approach in
-        # ChromeDriverManager.create_driver() that falls back to webdriver-manager
-        # and system PATH, so we no longer need a strict pre-check here. The driver
-        # initialization will attempt multiple strategies before failing.
-
         try:
             self.reporter.status("Launching browser and initializing driver...")
 
-            # Initialize the driver manager and get the driver
-            self._driver_manager.initialize()
-            elapsed = time.time() - start_time
-            logger.info(f"✅ Driver manager initialized in {elapsed:.2f}s")
+            # ── Create Chrome WebDriver with a HARD TIMEOUT ──────────────
+            # The previous code called self.driver (which calls webdriver.Chrome())
+            # directly — if Chrome hung during startup, the call would block
+            # FOREVER with no way to recover. The declared `timeout = 90` was
+            # never enforced.
+            #
+            # Now we run the driver creation in a separate thread and enforce
+            # a real timeout. If Chrome doesn't start within 2 minutes, we
+            # raise a TimeoutError so the scrape fails fast instead of
+            # hanging indefinitely.
+            driver_result = {"driver": None, "error": None}
+            driver_created = threading.Event()
 
-            # This will trigger driver creation through the property
-            driver = self.driver
+            def _create_driver():
+                try:
+                    # Initialize the driver manager first
+                    self._driver_manager.initialize()
+                    # Then trigger driver creation through the property
+                    driver_result["driver"] = self.driver
+                except Exception as e:
+                    driver_result["error"] = e
+                finally:
+                    driver_created.set()
+
+            driver_thread = threading.Thread(target=_create_driver, daemon=True)
+            driver_thread.start()
+
+            if not driver_created.wait(timeout=timeout):
+                # Timed out — Chrome didn't start within 2 minutes
+                elapsed = time.time() - start_time
+                logger.error(f"❌ Chrome initialization timed out after {elapsed:.1f}s")
+                # Try to kill any zombie Chrome that might be blocking
+                try:
+                    import subprocess
+                    subprocess.run(["pkill", "-9", "-f", "chrome"], timeout=5, capture_output=True)
+                    subprocess.run(["pkill", "-9", "-f", "chromedriver"], timeout=5, capture_output=True)
+                    logger.info("Killed zombie Chrome/chromedriver processes")
+                except Exception:
+                    pass
+                raise TimeoutError(f"Chrome failed to start within {timeout}s — likely a zombie process. Restart the service.")
+
+            # Check if the driver creation thread raised an error
+            if driver_result["error"]:
+                raise driver_result["error"]
+
+            driver = driver_result["driver"]
             elapsed = time.time() - start_time
             logger.info(f"✅ WebDriver created in {elapsed:.2f}s")
-            
+
             self.reporter.status("Browser ready!")
-            
+
             # Initialize utilities with the driver
             self.selenium_utils = SeleniumUtils(driver)
             self.url_verifier = URLVerifier(driver)
-            
+
             # Start network monitoring (pass status_callback)
             self.network_monitor.start_monitoring(status_callback=status_callback)
             logger.info("Network monitoring started.")
-            
+
             total_elapsed = time.time() - start_time
             logger.info(f"✅ Scraper initialization completed in {total_elapsed:.2f}s")
-            
+
         except Exception as e:
             elapsed = time.time() - start_time
             logger.error(f"❌ Scraper initialization failed after {elapsed:.2f}s: {e}")
