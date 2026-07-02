@@ -135,7 +135,11 @@ class SingleScrapeQueue:
             }
 
     def _run_job(self, job_id: str, work_fn: Callable[[str], Dict[str, Any]]) -> None:
-        """Worker thread — waits if paused, then runs the scrape."""
+        """Worker thread — waits if paused, then runs the scrape.
+
+        Checks job status before starting. If the job was killed while
+        queued (e.g. by kill_all), exits immediately without running.
+        """
         # Wait if paused
         while True:
             with self._lock:
@@ -143,13 +147,13 @@ class SingleScrapeQueue:
                     break
                 job = self._jobs.get(job_id)
                 if job and job.status != JobStatus.QUEUED:
-                    return  # Job was cancelled
+                    return  # Job was cancelled or killed while waiting
             time.sleep(0.5)  # Poll every 500ms
 
         with self._lock:
             job = self._jobs.get(job_id)
             if not job or job.status != JobStatus.QUEUED:
-                return
+                return  # Job was killed before it could start
             job.status = JobStatus.RUNNING
             job.started_at = time.time()
 
@@ -157,8 +161,14 @@ class SingleScrapeQueue:
 
         try:
             result = work_fn(job.match_id)
+
+            # Check if the job was killed while running
             with self._lock:
                 job = self._jobs.get(job_id)
+                if job and job.status == JobStatus.ERROR:
+                    logger.info(f"[scrape-queue] Job {job_id} was killed during execution — discarding result")
+                    self._match_to_job.pop(job.match_id, None)
+                    return
                 if job:
                     job.status = JobStatus.DONE
                     job.finished_at = time.time()
@@ -167,13 +177,12 @@ class SingleScrapeQueue:
         except Exception as exc:
             with self._lock:
                 job = self._jobs.get(job_id)
-                if job:
+                if job and job.status != JobStatus.ERROR:  # don't overwrite kill status
                     job.status = JobStatus.ERROR
                     job.finished_at = time.time()
                     job.error = str(exc)
             logger.error(f"[scrape-queue] Job {job_id} failed for {job.match_id}: {exc}")
         finally:
-            # Remove from active match map (allows re-scraping later)
             with self._lock:
                 if job:
                     self._match_to_job.pop(job.match_id, None)
@@ -247,6 +256,44 @@ class SingleScrapeQueue:
                 self._match_to_job.pop(job.match_id, None)
                 return True
             return False
+
+    def kill_all(self) -> Dict[str, Any]:
+        """Kill ALL jobs — queued AND running.
+
+        Queued jobs are marked as ERROR ("Killed by admin").
+        Running jobs are marked as ERROR too — the worker thread will
+        check the job status after its current operation and exit.
+
+        Also clears the match-to-job map so matches can be re-scraped.
+
+        This is the nuclear option — use when the scraper is stuck and
+        you need to clear everything. Chrome processes are NOT killed
+        here (that's the caller's responsibility) but the threads will
+        exit as soon as they check the job status.
+
+        Returns: { killed_queued, killed_running }
+        """
+        killed_queued = 0
+        killed_running = 0
+        with self._lock:
+            for job in self._jobs.values():
+                if job.status == JobStatus.QUEUED:
+                    job.status = JobStatus.ERROR
+                    job.error = "Killed by admin"
+                    job.finished_at = time.time()
+                    killed_queued += 1
+                elif job.status == JobStatus.RUNNING:
+                    job.status = JobStatus.ERROR
+                    job.error = "Killed by admin"
+                    job.finished_at = time.time()
+                    killed_running += 1
+            self._match_to_job.clear()
+            self._paused = True  # pause so no new jobs start
+
+        logger.info(
+            f"[scrape-queue] Kill all — {killed_queued} queued + {killed_running} running jobs killed"
+        )
+        return {"killed_queued": killed_queued, "killed_running": killed_running}
 
 
 # Singleton

@@ -243,6 +243,7 @@ async def stop_scrape():
     Stops BOTH scheduled and results scrapes if either is running.
     The scraper checks this flag between matches; the current match
     finishes before the scrape halts cooperatively.
+    Also pauses the single-scrape queue so queued jobs wait.
     """
     stopped_any = False
 
@@ -256,13 +257,88 @@ async def stop_scrape():
             _results_state.stop_requested = True
             stopped_any = True
 
+    # Also pause the single-scrape queue
+    from api.scrape_queue import _scrape_queue
+    queue_was_active = _scrape_queue.get_status()
+    if queue_was_active["running_count"] > 0 or queue_was_active["queued_count"] > 0:
+        _scrape_queue.pause()
+        stopped_any = True
+
     if not stopped_any:
         raise HTTPException(409, "No scrape is currently running")
 
-    logger.info("Stop requested — scrape(s) will halt after current match")
+    logger.info("Stop requested — scrape(s) will halt after current match, queue paused")
     return {
         "status": "stop_requested",
-        "message": "Scrape(s) will stop after the current match",
+        "message": "Scrape(s) will stop after current match. Single-scrape queue paused.",
+    }
+
+
+@router.post("/scrape/kill")
+async def kill_all_scrapes():
+    """Kill ALL active scrapes immediately — the nuclear option.
+
+    Unlike /scrape/stop (which waits for the current match to finish),
+    this endpoint:
+      1. Sets stop_requested on scheduled + results scrapes
+      2. Kills ALL single-scrape queue jobs (queued AND running)
+      3. Pauses the queue so no new jobs start
+      4. Kills any zombie Chrome/chromedriver processes
+
+    Use this when the scraper is stuck and /scrape/stop isn't enough.
+    After killing, the queue is paused — call /scrape/results/single/resume
+    to restart it.
+    """
+    import subprocess
+    killed = {
+        "scheduled_stopped": False,
+        "results_stopped": False,
+        "queue_killed": {"killed_queued": 0, "killed_running": 0},
+        "chrome_processes_killed": 0,
+    }
+
+    # 1. Stop scheduled + results scrapes
+    with _state_lock:
+        if _state.busy:
+            _state.stop_requested = True
+            killed["scheduled_stopped"] = True
+
+    with _results_state_lock:
+        if _results_state.busy:
+            _results_state.stop_requested = True
+            killed["results_stopped"] = True
+
+    # 2. Kill all single-scrape queue jobs
+    from api.scrape_queue import _scrape_queue
+    killed["queue_killed"] = _scrape_queue.kill_all()
+
+    # 3. Kill zombie Chrome processes
+    try:
+        result = subprocess.run(
+            ["pkill", "-9", "-f", "chrome"],
+            timeout=5,
+            capture_output=True,
+        )
+        killed["chrome_processes_killed"] = result.returncode == 0
+    except Exception:
+        pass
+    try:
+        subprocess.run(["pkill", "-9", "-f", "chromedriver"], timeout=5, capture_output=True)
+    except Exception:
+        pass
+
+    logger.warning(
+        f"[kill] Killed all — scheduled={killed['scheduled_stopped']}, "
+        f"results={killed['results_stopped']}, "
+        f"queue={killed['queue_killed']}, "
+        f"chrome_killed={killed['chrome_processes_killed']}"
+    )
+
+    return {
+        "status": "killed",
+        "message": "All scrapes killed. Queue is paused. Chrome processes terminated.",
+        "details": killed,
+        "next_step": "Call POST /scrape/results/single/resume to restart the queue.",
     }
 
 
