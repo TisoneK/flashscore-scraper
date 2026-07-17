@@ -1,0 +1,5 @@
+# written by context-sync — the last-known-good core version.
+# Do not edit by hand. If core fails verify, `context-sync rollback`
+# restores the version recorded here from git history.
+version=0.2.0
+verified=2026-07-16

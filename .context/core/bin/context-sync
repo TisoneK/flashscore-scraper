@@ -1,0 +1,269 @@
+#!/bin/sh
+# context-sync — manage the vendored protocol core (.context/core/)
+#
+# POSIX sh; runs on macOS (shasum) and Linux (sha256sum). Never touches
+# .context/memory/ except the single file memory/core.lock.
+#
+# Commands (project mode — run as: sh .context/core/bin/context-sync <cmd>):
+#   status               local core version + best reachable update source
+#   verify               check every core file against core/MANIFEST.sha256
+#   update [SOURCE]      replace core/ from SOURCE (package clone / unpacked
+#                        archive). Same-MAJOR updates apply directly; a MAJOR
+#                        bump needs --major. Memory is never touched.
+#   rollback [VERSION]   restore core/ from this project's git history
+#                        (default VERSION: the one in memory/core.lock)
+#   lock                 record the current verified core version in
+#                        memory/core.lock (update/verify call this for you)
+#
+# Commands (package mode — run from a clone of the protocol package):
+#   manifest             regenerate core/MANIFEST.sha256 (maintainers, per release)
+#   bootstrap DEST       initialize DEST project repo with .context/
+#                        (vendored core + memory skeleton + root files)
+#
+# Exit codes: 0 ok · 1 failure · 2 usage · 3 verify mismatch
+
+set -u
+
+say()  { printf '%s\n' "$*"; }
+err()  { printf 'context-sync: %s\n' "$*" >&2; }
+die()  { err "$*"; exit 1; }
+
+# --- locate ourselves -------------------------------------------------------
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+CORE_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd) || exit 1
+PARENT_DIR=$(dirname -- "$CORE_DIR")
+
+if [ "$(basename -- "$PARENT_DIR")" = ".context" ]; then
+  MODE=project
+  CONTEXT_DIR=$PARENT_DIR
+  PROJECT_DIR=$(dirname -- "$CONTEXT_DIR")
+  MEMORY_DIR=$CONTEXT_DIR/memory
+else
+  MODE=package                     # running from a package clone
+  PACKAGE_DIR=$PARENT_DIR
+fi
+
+# --- helpers ----------------------------------------------------------------
+sha_cmd() {
+  if command -v sha256sum >/dev/null 2>&1; then echo "sha256sum"
+  elif command -v shasum >/dev/null 2>&1; then echo "shasum -a 256"
+  else die "need sha256sum or shasum on PATH"; fi
+}
+
+core_version() { # $1 = a core dir
+  [ -f "$1/VERSION" ] || { echo "0.0.0"; return; }
+  head -n1 "$1/VERSION" | tr -d '[:space:]'
+}
+
+ver_part() { echo "$1" | cut -d. -f"$2" | tr -cd '0-9'; }
+
+# echoes: newer | same | older  ($1 relative to $2)
+ver_cmp() {
+  for i in 1 2 3; do
+    a=$(ver_part "$1" "$i"); b=$(ver_part "$2" "$i")
+    [ "${a:-0}" -gt "${b:-0}" ] && { echo newer; return; }
+    [ "${a:-0}" -lt "${b:-0}" ] && { echo older; return; }
+  done
+  echo same
+}
+
+# a directory is a core source if it's a package clone (has core/) or an
+# already-unpacked core (has VERSION + rules/)
+source_core_dir() { # $1 = candidate path -> echoes the core dir inside it, or nothing
+  [ -d "$1/core/rules" ] && [ -f "$1/core/VERSION" ] && { echo "$1/core"; return; }
+  [ -d "$1/rules" ] && [ -f "$1/VERSION" ] && { echo "$1"; return; }
+  return 1
+}
+
+find_source() { # echoes a core dir, or nothing. $1 = optional explicit source
+  if [ -n "${1:-}" ]; then
+    source_core_dir "$1" || die "not a package clone or core tree: $1"
+    return
+  fi
+  [ -n "${CONTEXT_PKG:-}" ] && source_core_dir "$CONTEXT_PKG" && return
+  for d in "$PROJECT_DIR/../context" "$PROJECT_DIR/../.context"; do
+    source_core_dir "$d" 2>/dev/null && return
+  done
+  return 1
+}
+
+verify_tree() { # $1 = a core dir; returns 0 clean, 3 mismatch
+  [ -f "$1/MANIFEST.sha256" ] || { err "no MANIFEST.sha256 in $1"; return 3; }
+  if ( cd "$1" && $(sha_cmd) --check --status MANIFEST.sha256 ); then
+    return 0
+  fi
+  ( cd "$1" && $(sha_cmd) --check MANIFEST.sha256 2>&1 | grep -v ': OK$' | head -n 20 ) >&2
+  return 3
+}
+
+write_lock() { # $1 = version
+  [ "$MODE" = project ] || return 0
+  mkdir -p "$MEMORY_DIR"
+  {
+    echo "# written by context-sync — the last-known-good core version."
+    echo "# Do not edit by hand. If core fails verify, \`context-sync rollback\`"
+    echo "# restores the version recorded here from git history."
+    echo "version=$1"
+    echo "verified=$(date +%Y-%m-%d)"
+  } > "$MEMORY_DIR/core.lock"
+}
+
+lock_version() {
+  [ -f "$MEMORY_DIR/core.lock" ] || { echo ""; return; }
+  sed -n 's/^version=//p' "$MEMORY_DIR/core.lock" | head -n1
+}
+
+need_project() { [ "$MODE" = project ] || die "'$1' runs inside a project (.context/core/bin/context-sync), not the package clone"; }
+need_package() { [ "$MODE" = package ] || die "'$1' runs from a package clone, not inside a project"; }
+
+# --- commands ----------------------------------------------------------------
+cmd_status() {
+  need_project status
+  LOCAL_V=$(core_version "$CORE_DIR")
+  say "core:   $LOCAL_V  (.context/core)"
+  say "locked: $(lock_version | grep . || echo '(no core.lock yet)')"
+  if SRC=$(find_source "${1:-}"); then
+    SRC_V=$(core_version "$SRC")
+    case $(ver_cmp "$SRC_V" "$LOCAL_V") in
+      newer)
+        if [ "$(ver_part "$SRC_V" 1)" = "$(ver_part "$LOCAL_V" 1)" ]; then
+          say "source: $SRC_V  ($SRC) — UPDATE AVAILABLE (same MAJOR: safe to 'update')"
+        else
+          say "source: $SRC_V  ($SRC) — MAJOR update: read its CHANGELOG.md, then 'update --major' with the user's go-ahead"
+        fi ;;
+      same)  say "source: $SRC_V  ($SRC) — up to date" ;;
+      older) say "source: $SRC_V  ($SRC) — source is OLDER than local; nothing to do" ;;
+    esac
+  else
+    say "source: none reachable (no sibling package clone; set CONTEXT_PKG or pass a path) — skipping, this is fine"
+  fi
+}
+
+cmd_verify() {
+  TARGET=${1:-$CORE_DIR}
+  if verify_tree "$TARGET"; then
+    say "core OK: every file matches MANIFEST.sha256 ($(core_version "$TARGET"))"
+    [ "$TARGET" = "$CORE_DIR" ] && write_lock "$(core_version "$TARGET")"
+    return 0
+  fi
+  err "CORE INTEGRITY FAILURE — core/ does not match its manifest."
+  err "Do not 'fix' core in place. Run: context-sync rollback"
+  err "Then log the incident in memory/flaws/log.md and continue."
+  return 3
+}
+
+cmd_update() {
+  need_project update
+  ALLOW_MAJOR=no; SRC_ARG=""
+  for a in "$@"; do
+    case "$a" in
+      --major) ALLOW_MAJOR=yes ;;
+      *) SRC_ARG=$a ;;
+    esac
+  done
+  SRC=$(find_source "$SRC_ARG") || die "no update source found (sibling clone, CONTEXT_PKG, or a path argument)"
+  SRC_V=$(core_version "$SRC"); LOCAL_V=$(core_version "$CORE_DIR")
+  case $(ver_cmp "$SRC_V" "$LOCAL_V") in
+    same)  say "already at $LOCAL_V — nothing to do"; return 0 ;;
+    older) say "source ($SRC_V) is older than local ($LOCAL_V) — refusing to downgrade"; return 0 ;;
+  esac
+  if [ "$(ver_part "$SRC_V" 1)" != "$(ver_part "$LOCAL_V" 1)" ] && [ "$ALLOW_MAJOR" = no ]; then
+    die "MAJOR version bump ($LOCAL_V -> $SRC_V): read CHANGELOG.md migration notes, get the user's go-ahead, re-run with --major"
+  fi
+  verify_tree "$SRC" || die "update source fails its own manifest — refusing to install a corrupt core"
+
+  STAGE=$CONTEXT_DIR/core.new
+  rm -rf "$STAGE"
+  cp -R "$SRC" "$STAGE" || die "staging copy failed"
+  verify_tree "$STAGE" || { rm -rf "$STAGE"; die "staged copy fails verify — aborting, core untouched"; }
+
+  # unlink-safe: this running script keeps its open inode
+  rm -rf "$CORE_DIR" && mv "$STAGE" "$CORE_DIR" || die "swap failed — restore .context/core from git (git checkout -- .context/core)"
+  write_lock "$SRC_V"
+  # refresh the core-owned root file
+  cp "$CORE_DIR/templates/context-README.md" "$CONTEXT_DIR/README.md" 2>/dev/null || true
+  say "core updated: $LOCAL_V -> $SRC_V"
+  say "next: read the new entries in .context/core/CHANGELOG.md;"
+  say "      if templates/kickoff.md or templates/AGENTS.md changed materially,"
+  say "      regenerate .context/kickoff.md / AGENTS.md (facts from memory);"
+  say "      commit as: chore(context): update core to $SRC_V"
+}
+
+cmd_rollback() {
+  need_project rollback
+  WANT=${1:-$(lock_version)}
+  [ -n "$WANT" ] || die "no version given and no memory/core.lock — pass a version: context-sync rollback 0.2.0"
+  cd "$PROJECT_DIR" || exit 1
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "project is not a git repo — cannot roll back"
+  FOUND=""
+  for sha in $(git log --format=%H -- .context/core/VERSION); do
+    V=$(git show "$sha:.context/core/VERSION" 2>/dev/null | head -n1 | tr -d '[:space:]')
+    [ "$V" = "$WANT" ] && { FOUND=$sha; break; }
+  done
+  [ -n "$FOUND" ] || die "no commit in history has core VERSION $WANT"
+  rm -rf .context/core
+  git checkout "$FOUND" -- .context/core || die "git checkout failed — run: git checkout HEAD -- .context/core"
+  write_lock "$WANT"
+  say "core rolled back to $WANT (from commit ${FOUND%????????????????????????????????})"
+  say "log the incident in memory/flaws/log.md, then commit as:"
+  say "  chore(context): roll back core to $WANT"
+}
+
+cmd_manifest() {
+  need_package manifest
+  cd "$CORE_DIR" || exit 1
+  TMP=MANIFEST.sha256.tmp
+  find . -type f ! -name 'MANIFEST.sha256*' ! -name '.DS_Store' | LC_ALL=C sort \
+    | sed 's|^\./||' | while IFS= read -r f; do $(sha_cmd) "$f"; done > "$TMP" \
+    || { rm -f "$TMP"; die "manifest generation failed"; }
+  mv "$TMP" MANIFEST.sha256
+  say "wrote core/MANIFEST.sha256 ($(wc -l < MANIFEST.sha256 | tr -d ' ') files, version $(core_version "$CORE_DIR"))"
+}
+
+cmd_bootstrap() {
+  need_package bootstrap
+  DEST=${1:-}; [ -n "$DEST" ] || die "usage: context-sync bootstrap <project-root>"
+  [ -d "$DEST" ] || die "no such directory: $DEST"
+  DEST=$(CDPATH= cd -- "$DEST" && pwd)
+  git -C "$DEST" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "$DEST is not a git repo — git init it first"
+  [ -e "$DEST/.context" ] && die "$DEST/.context already exists — this is a sync session, not a bootstrap (use the project's own .context/kickoff.md)"
+  verify_tree "$CORE_DIR" || die "package core fails its manifest — pull a clean package first"
+
+  mkdir "$DEST/.context" || exit 1
+  cp -R "$CORE_DIR" "$DEST/.context/core"                            || die "vendoring core failed"
+  cp -R "$CORE_DIR/templates/memory" "$DEST/.context/memory"         || die "copying memory skeleton failed"
+  cp "$CORE_DIR/templates/context-README.md" "$DEST/.context/README.md"
+  cp "$CORE_DIR/templates/kickoff.md" "$DEST/.context/kickoff.md"
+  [ -e "$DEST/AGENTS.md" ] || cp "$CORE_DIR/templates/AGENTS.md" "$DEST/AGENTS.md"
+
+  V=$(core_version "$CORE_DIR")
+  {
+    echo "# written by context-sync — the last-known-good core version."
+    echo "# Do not edit by hand. If core fails verify, \`context-sync rollback\`"
+    echo "# restores the version recorded here from git history."
+    echo "version=$V"
+    echo "verified=$(date +%Y-%m-%d)"
+  } > "$DEST/.context/memory/core.lock"
+
+  say "bootstrapped $DEST/.context (core $V) + AGENTS.md"
+  say "next (the bootstrapping agent does this):"
+  say "  1. fill .context/kickoff.md Project Facts + AGENTS.md <PROJECT_NAME>"
+  say "  2. fill memory/: user/, workflows/active.md, system/, tasks/current.md, agents/sessions.md"
+  say "  3. scan: grep -rn '<PROJECT\\|<GIT_\\|<LIVE_' $DEST/.context --include='*.md' (hits only in HTML comments/token forms)"
+  say "  4. commit as: chore(context): bootstrap .context/ (core $V)  — and push"
+}
+
+# --- dispatch ----------------------------------------------------------------
+CMD=${1:-}; [ $# -gt 0 ] && shift
+case "$CMD" in
+  status)    cmd_status "$@" ;;
+  verify)    cmd_verify "$@" ;;
+  update)    cmd_update "$@" ;;
+  rollback)  cmd_rollback "$@" ;;
+  lock)      need_project lock; write_lock "$(core_version "$CORE_DIR")"; say "locked $(core_version "$CORE_DIR")" ;;
+  manifest)  cmd_manifest "$@" ;;
+  bootstrap) cmd_bootstrap "$@" ;;
+  ''|-h|--help|help)
+    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) die "unknown command: $CMD (try: context-sync help)" ;;
+esac
