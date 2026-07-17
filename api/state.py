@@ -244,6 +244,31 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
             _state.incomplete_matches,
         )
 
+        # ── Push scrape report to website (per-match status + skip reasons) ──
+        # Only complete matches travel to the engine, so without this report
+        # the incomplete matches (and WHY they didn't qualify) are invisible
+        # to admins outside scraper logs. Failure to push is logged, never fatal.
+        try:
+            from webhook_utils import forward_scrape_report_to_website
+            report_wurl = get_env_config("SCOREWISE_WEBSITE_URL")
+            report_wsecret = get_env_config("SCOREWISE_WEBHOOK_SECRET")
+            if report_wurl and report_wsecret:
+                forward_scrape_report_to_website(
+                    scrape_id=scrape_id,
+                    day=day,
+                    result=result,
+                    website_url=report_wurl,
+                    webhook_secret=report_wsecret,
+                )
+            else:
+                logger.warning(
+                    "[%s] SCOREWISE_WEBSITE_URL/SCOREWISE_WEBHOOK_SECRET not set — "
+                    "scrape report NOT pushed to website (admins won't see skip reasons)",
+                    scrape_id,
+                )
+        except Exception as report_exc:
+            logger.warning("[%s] Scrape report push failed: %s", scrape_id, report_exc)
+
         # ── Forward results to ScoreWise engine ──────────────────
         engine_forwarded = False
         webhook_url = get_env_config("SCOREWISE_WEBHOOK_URL")

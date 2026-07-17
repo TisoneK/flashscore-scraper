@@ -353,3 +353,94 @@ def forward_results_to_website(
     except Exception as e:
         logger.error(f"Forward results to website failed: {e}")
         return False
+
+
+def forward_scrape_report_to_website(
+    scrape_id: str,
+    day: str,
+    result: dict,
+    website_url: str,
+    webhook_secret: str,
+    timeout: int = 20,
+) -> bool:
+    """Push a per-match scrape report to the website's /api/webhook/scrape-report.
+
+    Admins/operators need eyes on EVERYTHING a scrape did — including the
+    matches that did NOT qualify for prediction and why (missing odds fields,
+    insufficient H2H, ...). Only complete matches travel to the engine, so
+    without this report the incomplete ones are invisible outside scraper
+    logs. The website stores the report in its activity log and surfaces it
+    on the admin dashboard.
+
+    The payload is HMAC-SHA256 signed with webhook_secret (same scheme as
+    forward_results_to_website).
+    """
+    matches = result.get("matches") or []
+    report_matches = []
+    for m in matches:
+        report_matches.append({
+            "match_id": getattr(m, "match_id", ""),
+            "home_team": getattr(m, "home_team", ""),
+            "away_team": getattr(m, "away_team", ""),
+            "country": getattr(m, "country", ""),
+            "league": getattr(m, "league", ""),
+            "date": getattr(m, "date", ""),
+            "time": getattr(m, "time", ""),
+            "status": getattr(m, "status", "unknown"),
+            "skip_reason": getattr(m, "skip_reason", None),
+        })
+
+    if not website_url:
+        logger.warning("forward_scrape_report_to_website: website_url is empty — skipping.")
+        return False
+    if not webhook_secret:
+        logger.warning("forward_scrape_report_to_website: webhook_secret is empty — cannot sign payload. Skipping.")
+        return False
+
+    try:
+        import hashlib
+        import hmac
+        import json
+        from datetime import datetime, timezone
+        import requests
+
+        envelope = {
+            "event": "scrape_report",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "data": {
+                "scrape_id": scrape_id,
+                "day": day,
+                "total_collected": result.get("total_collected", len(report_matches)),
+                "complete_matches": result.get("complete_matches", 0),
+                "incomplete_matches": result.get("incomplete_matches", 0),
+                "matches": report_matches,
+            },
+        }
+        body = json.dumps(envelope, default=str).encode("utf-8")
+        signature = hmac.new(
+            webhook_secret.encode("utf-8"),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+
+        url = f"{website_url.rstrip('/')}/api/webhook/scrape-report"
+        headers = {
+            "Content-Type": "application/json",
+            "X-ScoreWise-Event": "scrape_report",
+            "X-ScoreWise-Signature": signature,
+        }
+
+        logger.info(
+            f"Pushing scrape report to {url} "
+            f"({len(report_matches)} matches, {result.get('incomplete_matches', 0)} incomplete) ..."
+        )
+        resp = requests.post(url, data=body, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        logger.info(f"Website accepted scrape report ({resp.status_code}).")
+        return True
+    except ImportError:
+        logger.error("The 'requests' library is not installed. Cannot POST scrape report to website.")
+        return False
+    except Exception as e:
+        logger.error(f"Forward scrape report to website failed: {e}")
+        return False
