@@ -144,7 +144,7 @@ def _stream_match_to_engine(match_id: str, match: Optional[dict], scrape_id: str
         logger.error("[%s] Error streaming match %s: %s", scrape_id, match_id, e)
 
 
-def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
+def _run_scheduled_scrape(day: str, scrape_id: str, force: bool = False) -> None:
     """Run FlashscoreScraper.scrape() on a background thread.
 
     All progress / status callbacks update ``_state`` under the lock so that
@@ -229,6 +229,7 @@ def _run_scheduled_scrape(day: str, scrape_id: str) -> None:
             progress_callback=progress_cb,
             status_callback=status_cb,
             stop_callback=stop_cb,
+            force=force,
         )
         with _state_lock:
             _state.result = result

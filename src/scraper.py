@@ -641,7 +641,7 @@ class FlashscoreScraper:
         finally:
             logger.debug("✅ Scraper cleanup completed")
 
-    def scrape(self, progress_callback=None, day="Today", status_callback=None, stop_callback=None):
+    def scrape(self, progress_callback=None, day="Today", status_callback=None, stop_callback=None, force=False):
         global scraper_log_path, chrome_log_path
         
         # Set up log file paths based on the day parameter
@@ -713,6 +713,15 @@ class FlashscoreScraper:
                 except Exception as e:
                     logger.debug(f"Could not check existing predictions in DB: {e}")
                     # Non-fatal — proceed with all matches if DB check fails
+
+                if force:
+                    logger.info(
+                        "FORCE re-scrape: ignoring skip lists "
+                        f"({len(processed_match_ids)} in day file, {len(existing_db_ids)} in website DB "
+                        "would have been skipped) — re-processing everything"
+                    )
+                    processed_match_ids, processed_reasons = set(), {}
+                    existing_db_ids = set()
 
                 # Collect immutable URLs upfront (no fallbacks)
                 url_snapshots = self.match_loader.collect_match_urls()

@@ -17,6 +17,12 @@ from pydantic import BaseModel, Field
 
 class ScrapeRequest(BaseModel):
     day: str = Field("Today", description="Which day: 'Today' or 'Tomorrow'")
+    force: bool = Field(
+        False,
+        description="Re-scrape everything: ignore the processed-day-file and "
+        "website-DB skip lists. Use after a code update (e.g. new odds "
+        "extraction) to refresh matches that were already scraped.",
+    )
 
 
 class ScrapeResponse(BaseModel):

@@ -48,11 +48,12 @@ async def trigger_scrape(req: ScrapeRequest):
         raise HTTPException(422, "day must be 'Today' or 'Tomorrow'")
 
     scrape_id = _prepare_state_for_run("scheduled", day=req.day)
-    _executor.submit(_run_scheduled_scrape, req.day, scrape_id)
+    _executor.submit(_run_scheduled_scrape, req.day, scrape_id, req.force)
 
     return ScrapeResponse(
         status="accepted",
-        message=f"Scrape for {req.day} started (ID: {scrape_id})",
+        message=f"Scrape for {req.day} started (ID: {scrape_id})"
+        + (" — FORCE mode: re-scraping already-processed matches" if req.force else ""),
         scrape_id=scrape_id,
     )
 
