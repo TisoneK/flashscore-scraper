@@ -157,6 +157,59 @@ async def cancel_single_scrape(job_id: str):
     return {"status": "cancelled", "job_id": job_id}
 
 
+def _wait_for_batch_idle(match_id: str, max_wait_s: int = 1800) -> bool:
+    """Block until no batch scrape (scheduled or results) is running.
+
+    A batch run owns a Chrome instance. Launching a second browser beside it
+    is what OOM-kills Chrome on small containers ("session not created:
+    Chrome instance exited"). Single jobs run on a worker pool, so blocking
+    here simply keeps them queued until the container has memory to spare.
+    """
+    import time
+    waited = 0
+    while waited < max_wait_s:
+        with _state_lock:
+            scheduled_busy = _state.busy
+        with _results_state_lock:
+            results_busy = _results_state.busy
+        if not scheduled_busy and not results_busy:
+            return True
+        if waited == 0:
+            logger.info(
+                f"[single-result] {match_id}: batch scrape in progress — "
+                "waiting for Chrome to free up before starting"
+            )
+        time.sleep(5)
+        waited += 5
+    return False
+
+
+def _other_single_jobs_running() -> bool:
+    """True if any single-scrape job besides the calling thread's is running."""
+    try:
+        from api.scrape_queue import _scrape_queue
+        status = _scrape_queue.get_status()
+        return len(status.get("running", [])) > 1
+    except Exception:
+        return True  # unknown → assume yes, don't kill anything
+
+
+def _kill_zombie_chrome(match_id: str) -> None:
+    """Best-effort cleanup of leftover Chrome/chromedriver processes.
+
+    Called ONLY when no batch scrape and no other single job is running —
+    any chrome process alive at that point is a leftover from a crashed run
+    holding the memory that just prevented a new session from starting.
+    """
+    import subprocess
+    logger.warning(f"[single-result] {match_id}: killing zombie Chrome processes before retry")
+    for pattern in ("chrome", "chromedriver"):
+        try:
+            subprocess.run(["pkill", "-9", "-f", pattern], timeout=5, capture_output=True)
+        except Exception:
+            pass
+
+
 def _do_single_result_scrape(match_id: str) -> dict:
     """Synchronous worker — runs on a thread pool. Does the actual Selenium work.
 
@@ -167,7 +220,18 @@ def _do_single_result_scrape(match_id: str) -> dict:
     # Without this, the retry_manager thinks the thread is shutting down and
     # immediately aborts with "Operation cancelled by shutdown".
     import threading
+    import time
     threading.current_thread()._is_shutting_down = False
+
+    # Never launch a Chrome next to a running batch scrape — that memory
+    # contention is the root cause of "session not created: Chrome instance
+    # exited" on Railway. Jobs wait (queued) until the batch finishes.
+    if not _wait_for_batch_idle(match_id):
+        return {
+            "status": "error",
+            "match_id": match_id,
+            "message": "A batch scrape has been running for over 30 minutes — try again when it finishes.",
+        }
 
     try:
         from src.scraper import FlashscoreScraper
@@ -176,7 +240,23 @@ def _do_single_result_scrape(match_id: str) -> dict:
 
         scraper = FlashscoreScraper(status_callback=None, progress_callback=None)
         try:
-            scraper.initialize(status_callback=lambda msg: logger.debug(f"[single-result] {msg}"))
+            try:
+                scraper.initialize(status_callback=lambda msg: logger.debug(f"[single-result] {msg}"))
+            except Exception as init_exc:
+                # Chrome failed to start (usually memory exhaustion or a
+                # zombie browser from a crashed run). Clean up and retry ONCE.
+                if "session not created" not in str(init_exc).lower():
+                    raise
+                logger.warning(f"[single-result] {match_id}: Chrome session failed to start — {init_exc}")
+                try:
+                    scraper.close()
+                except Exception:
+                    pass
+                if not _other_single_jobs_running():
+                    _kill_zombie_chrome(match_id)
+                time.sleep(5)
+                scraper = FlashscoreScraper(status_callback=None, progress_callback=None)
+                scraper.initialize(status_callback=lambda msg: logger.debug(f"[single-result] {msg}"))
             results_loader = ResultsDataLoader(
                 scraper.driver,
                 selenium_utils=scraper.selenium_utils,
