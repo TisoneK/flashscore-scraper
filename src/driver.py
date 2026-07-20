@@ -17,13 +17,60 @@ from .config import CHROME_OPTIONS
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
+# Managed Chrome profile dirs — named so stale ones from CRASHED runs are
+# recognizable and sweepable. A crashed Chrome leaves its temp profile (and
+# its SingletonLock) behind; enough of those fill /tmp and no new session
+# can ever start again — the "can't recover after a crash" failure mode.
+PROFILE_PREFIX = "fs-scraper-profile-"
+
+
+def cleanup_stale_chrome(kill_processes: bool = False, max_age_s: int = 3600) -> None:
+    """Best-effort recovery sweep after (or before) Chrome crashes.
+
+    - Removes stale managed profile dirs in /tmp older than max_age_s
+      (a live scrape's profile is younger; a crashed run's is not).
+    - Optionally pkills chrome/chromedriver — ONLY safe when the caller
+      knows no legitimate browser session should be alive (e.g. batch
+      scrape startup). Linux-only: on a dev machine this would kill the
+      developer's own Chrome.
+    """
+    import shutil
+    import tempfile
+    import time as _time
+
+    tmp = tempfile.gettempdir()
+    try:
+        for name in os.listdir(tmp):
+            if not name.startswith(PROFILE_PREFIX):
+                continue
+            path = os.path.join(tmp, name)
+            try:
+                if _time.time() - os.path.getmtime(path) > max_age_s:
+                    shutil.rmtree(path, ignore_errors=True)
+                    logger.info(f"Swept stale Chrome profile: {name}")
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+    if kill_processes and platform.system().lower() == "linux":
+        import subprocess
+        for pattern in ("chrome", "chromedriver"):
+            try:
+                subprocess.run(["pkill", "-9", "-f", pattern], timeout=5, capture_output=True)
+            except Exception:
+                pass
+        logger.info("Killed leftover chrome/chromedriver processes (recovery sweep)")
+
+
 class WebDriverManager:
     """Manages the WebDriver instance and its lifecycle."""
-    
+
     def __init__(self):
         """Initialize the WebDriver manager."""
         self.driver = None
         self._active = False
+        self._profile_dir: Optional[str] = None
         self.logger = logging.getLogger(__name__)
         
     def _get_platform_paths(self, system: str, project_root: str) -> tuple[Optional[str], Optional[str]]:
@@ -68,7 +115,19 @@ class WebDriverManager:
     def initialize(self) -> None:
         """Initialize the WebDriver with appropriate options."""
         if self.driver is not None:
-            return
+            # The cached driver may be DEAD (its Chrome crashed underneath
+            # it). Reusing a dead driver fails every call until close() —
+            # the "can't recover after a crash" loop. Probe it; if dead,
+            # discard and fall through to a fresh session.
+            try:
+                self.driver.execute_script("return 1")
+                return
+            except WebDriverException:
+                self.logger.warning(
+                    "Cached WebDriver is dead (Chrome crashed underneath it) — "
+                    "discarding and re-initializing"
+                )
+                self.close()
         
         browser_name = CONFIG.get('browser', {}).get('browser_name', 'chrome').lower()
         options = None
@@ -90,6 +149,13 @@ class WebDriverManager:
             options.add_argument('--disable-gpu')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
+            # Managed, uniquely-named profile dir: crashed runs leave their
+            # profile (and SingletonLock) behind — naming them lets
+            # cleanup_stale_chrome() sweep the wreckage so new sessions can
+            # always start.
+            import tempfile
+            self._profile_dir = tempfile.mkdtemp(prefix=PROFILE_PREFIX)
+            options.add_argument(f'--user-data-dir={self._profile_dir}')
             window_size = browser_config.get('window_size', [1920, 1080])
             options.add_argument(f'--window-size={window_size[0]},{window_size[1]}')
             # Comprehensive browser console output suppression
@@ -147,11 +213,18 @@ class WebDriverManager:
             
             # Start Chrome WebDriver
             if driver_path and os.path.exists(driver_path):
-                service = ChromeService(executable_path=driver_path)
-                self.driver = webdriver.Chrome(service=service, options=options)
+                resolved_path = driver_path
+                self.driver = self._create_chrome_with_recovery(
+                    lambda: webdriver.Chrome(
+                        service=ChromeService(executable_path=resolved_path),
+                        options=options,
+                    )
+                )
                 self.logger.info(f"Using ChromeDriver: {driver_path}")
             else:
-                self.driver = webdriver.Chrome(options=options)
+                self.driver = self._create_chrome_with_recovery(
+                    lambda: webdriver.Chrome(options=options)
+                )
                 self.logger.warning(f"Local ChromeDriver not found, using system ChromeDriver")
                 
         elif browser_name == 'firefox':
@@ -196,6 +269,27 @@ class WebDriverManager:
         self._active = True
         self.logger.info("WebDriver initialized successfully")
             
+    def _create_chrome_with_recovery(self, factory):
+        """Create a Chrome session; on 'session not created' sweep stale
+        profiles and retry ONCE. A single crash must never wedge the
+        scraper permanently — that was the pre-2026-07 behavior: the
+        exception propagated, nothing cleaned up, and every subsequent
+        launch hit the same leftover wreckage."""
+        try:
+            return factory()
+        except WebDriverException as exc:
+            msg = str(exc).lower()
+            if "session not created" not in msg and "chrome" not in msg:
+                raise
+            self.logger.warning(
+                f"Chrome session failed to start ({exc}) — sweeping stale "
+                "profiles and retrying once"
+            )
+            cleanup_stale_chrome(kill_processes=False)
+            import time as _time
+            _time.sleep(3)
+            return factory()
+
     def get_driver(self) -> Optional[webdriver.Remote]:
         """Get the WebDriver instance, initializing it if necessary."""
         if self.driver is None:
@@ -213,6 +307,10 @@ class WebDriverManager:
             finally:
                 self.driver = None
                 self._active = False
+                if self._profile_dir:
+                    import shutil
+                    shutil.rmtree(self._profile_dir, ignore_errors=True)
+                    self._profile_dir = None
                 
     def is_active(self) -> bool:
         """Check if the WebDriver is currently active."""

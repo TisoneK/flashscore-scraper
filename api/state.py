@@ -214,6 +214,17 @@ def _run_scheduled_scrape(day: str, scrape_id: str, force: bool = False) -> None
                 e,
             )
 
+    # ── Pre-flight recovery sweep ─────────────────────────────────
+    # Batch startup is the one moment a full cleanup is safe: single-match
+    # jobs stand down while a batch runs, so any chrome process or stale
+    # profile alive right now is wreckage from a crashed run — exactly what
+    # blocks new sessions from starting ("can't recover after a crash").
+    try:
+        from src.driver import cleanup_stale_chrome
+        cleanup_stale_chrome(kill_processes=True)
+    except Exception as sweep_exc:
+        logger.warning("Pre-flight Chrome sweep failed: %s", sweep_exc)
+
     scraper = FlashscoreScraper(
         status_callback=status_cb,
         progress_callback=progress_cb,
@@ -367,6 +378,16 @@ def _run_results_scrape(date_str: str, scrape_id: str) -> None:
             _results_state.current_match_index = current
             _results_state.total_matches = total
             _results_state.progress_message = task or f"Processing match {current}/{total}"
+
+    # ── Pre-flight recovery sweep ─────────────────────────────────
+    # See _run_scheduled_scrape: batch startup is the safe moment to clear
+    # crashed-run wreckage (zombie Chrome + stale profiles) so a new
+    # session can always start.
+    try:
+        from src.driver import cleanup_stale_chrome
+        cleanup_stale_chrome(kill_processes=True)
+    except Exception as sweep_exc:
+        logger.warning("Pre-flight Chrome sweep failed: %s", sweep_exc)
 
     scraper = FlashscoreScraper(
         status_callback=status_cb, progress_callback=progress_cb
