@@ -54,6 +54,24 @@ _results_scheduler_state: Dict[str, Any] = {
     "current_action": "idle",
 }
 
+# ── Scheduled-matches scheduler ─────────────────────────────────────────
+# Fetches matches + runs predictions on a fixed cadence (default every 6h),
+# so the site no longer depends on a human clicking a manual scrape. Runs
+# a "Today" scheduled scrape; single-match result scrapes automatically
+# stand down while it runs (wait-for-batch), so there is no Chrome
+# collision to schedule around.
+_scheduled_scraper_task: asyncio.Task | None = None
+_scheduled_scraper_state: Dict[str, Any] = {
+    "enabled": False,
+    "running": False,
+    "interval_hours": 6.0,
+    "day": "Today",
+    "last_run": None,
+    "next_run": None,
+    "runs_triggered": 0,
+    "current_action": "idle",
+}
+
 
 class ScheduleConfigRequest(BaseModel):
     enabled: bool = False
@@ -65,6 +83,10 @@ class ScheduleConfigRequest(BaseModel):
     live_interval_seconds: int = 60  # how often to scrape live matches
     awaiting_interval_seconds: int = 30  # how often to check for newly finished matches
     idle_interval_seconds: int = 120  # how often to check when no matches are live
+    # New: scheduled-matches scheduler config
+    scheduled_enabled: bool = True  # fetch matches + predict on a cadence
+    scheduled_interval_hours: float = 6.0  # how often to run the scheduled scrape
+    scheduled_day: str = "Today"  # "Today" or "Tomorrow"
 
 
 @router.get("/schedule")
@@ -72,41 +94,62 @@ async def get_schedule():
     """Return the current scheduler state."""
     return {
         "results_scheduler": _results_scheduler_state,
+        "scheduled_scraper": _scheduled_scraper_state,
         "config": {
             "results_enabled": _results_scheduler_state.get("enabled", False),
             "live_interval_seconds": _results_scheduler_state.get("live_interval_seconds", 60),
             "awaiting_interval_seconds": _results_scheduler_state.get("awaiting_interval_seconds", 30),
             "idle_interval_seconds": _results_scheduler_state.get("idle_interval_seconds", 120),
+            "scheduled_enabled": _scheduled_scraper_state.get("enabled", False),
+            "scheduled_interval_hours": _scheduled_scraper_state.get("interval_hours", 6.0),
+            "scheduled_day": _scheduled_scraper_state.get("day", "Today"),
         },
     }
 
 
+def _persist_scheduler_config() -> None:
+    """Write both schedulers' config to disk so they auto-resume on restart."""
+    sched_path = PROJECT_ROOT / "output" / "scheduler_config.json"
+    sched_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(sched_path, "w") as f:
+        json.dump({
+            "results_enabled": _results_scheduler_state.get("enabled", False),
+            "live_interval_seconds": _results_scheduler_state.get("live_interval_seconds", 60),
+            "awaiting_interval_seconds": _results_scheduler_state.get("awaiting_interval_seconds", 30),
+            "idle_interval_seconds": _results_scheduler_state.get("idle_interval_seconds", 120),
+            "scheduled_enabled": _scheduled_scraper_state.get("enabled", False),
+            "scheduled_interval_hours": _scheduled_scraper_state.get("interval_hours", 6.0),
+            "scheduled_day": _scheduled_scraper_state.get("day", "Today"),
+        }, f, indent=2)
+
+
 @router.put("/schedule")
 async def set_schedule(req: ScheduleConfigRequest):
-    """Configure the results scheduler."""
-    global _results_scheduler_state
+    """Configure both schedulers (results + scheduled-matches)."""
+    global _results_scheduler_state, _scheduled_scraper_state
 
     _results_scheduler_state["enabled"] = req.results_enabled
     _results_scheduler_state["live_interval_seconds"] = req.live_interval_seconds
     _results_scheduler_state["awaiting_interval_seconds"] = req.awaiting_interval_seconds
     _results_scheduler_state["idle_interval_seconds"] = req.idle_interval_seconds
 
-    # Persist to file
-    sched_path = PROJECT_ROOT / "output" / "scheduler_config.json"
-    sched_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(sched_path, "w") as f:
-        json.dump({
-            "results_enabled": req.results_enabled,
-            "live_interval_seconds": req.live_interval_seconds,
-            "awaiting_interval_seconds": req.awaiting_interval_seconds,
-            "idle_interval_seconds": req.idle_interval_seconds,
-        }, f, indent=2)
+    # Clamp the scheduled interval to a sane range (30 min .. 24 h).
+    _scheduled_scraper_state["enabled"] = req.scheduled_enabled
+    _scheduled_scraper_state["interval_hours"] = max(0.5, min(24.0, req.scheduled_interval_hours))
+    _scheduled_scraper_state["day"] = req.scheduled_day if req.scheduled_day in ("Today", "Tomorrow") else "Today"
 
-    # Start or stop the scheduler
+    _persist_scheduler_config()
+
+    # Start or stop each scheduler independently
     if req.results_enabled:
         await start_results_scheduler()
     else:
         await stop_results_scheduler()
+
+    if req.scheduled_enabled:
+        await start_scheduled_scraper()
+    else:
+        await stop_scheduled_scraper()
 
     logger.info("Results scheduler config updated: enabled=%s", req.results_enabled)
     return {"status": "ok", "config": _results_scheduler_state}
@@ -147,6 +190,112 @@ async def stop_results_scheduler():
 
     logger.info("[results-scheduler] Stopped")
     return {"status": "stopped"}
+
+
+@router.post("/schedule/scheduled/start")
+async def start_scheduled_scraper():
+    """Start the background scheduled-matches loop (fetch matches + predict)."""
+    global _scheduled_scraper_task, _scheduled_scraper_state
+
+    if _scheduled_scraper_task is not None and not _scheduled_scraper_task.done():
+        return {"status": "already_running"}
+
+    _scheduled_scraper_state["enabled"] = True
+    _scheduled_scraper_state["running"] = True
+    _scheduled_scraper_task = asyncio.create_task(_scheduled_scraper_loop())
+
+    logger.info(
+        "[scheduled-scraper] Started (every %.2fh, day=%s)",
+        _scheduled_scraper_state.get("interval_hours", 6.0),
+        _scheduled_scraper_state.get("day", "Today"),
+    )
+    return {"status": "started"}
+
+
+@router.post("/schedule/scheduled/stop")
+async def stop_scheduled_scraper():
+    """Stop the background scheduled-matches loop."""
+    global _scheduled_scraper_task, _scheduled_scraper_state
+
+    if _scheduled_scraper_task is not None and not _scheduled_scraper_task.done():
+        _scheduled_scraper_task.cancel()
+        try:
+            await asyncio.wait_for(_scheduled_scraper_task, timeout=5)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+
+    _scheduled_scraper_task = None
+    _scheduled_scraper_state["enabled"] = False
+    _scheduled_scraper_state["running"] = False
+    _scheduled_scraper_state["current_action"] = "stopped"
+
+    logger.info("[scheduled-scraper] Stopped")
+    return {"status": "stopped"}
+
+
+def _trigger_scheduled_scrape(day: str) -> Optional[str]:
+    """Kick off a scheduled (Today/Tomorrow) scrape on the batch executor.
+
+    Returns the scrape_id, or None if a scrape is already in progress (the
+    scraper runs one batch at a time — we skip this cycle rather than error).
+    """
+    from api.state import _prepare_state_for_run, _executor, _run_scheduled_scrape
+
+    try:
+        scrape_id = _prepare_state_for_run("scheduled", day=day)
+    except HTTPException:
+        return None  # already busy — skip this cycle
+    _executor.submit(_run_scheduled_scrape, day, scrape_id, False)
+    return scrape_id
+
+
+async def _scheduled_scraper_loop():
+    """Fetch matches + run predictions on a fixed cadence (default 6h).
+
+    Removes the dependence on a human clicking a manual scrape. Each cycle
+    triggers one "Today" (or "Tomorrow") scheduled scrape; if a scrape is
+    already running it skips this cycle. Single-match result scrapes stand
+    down while the batch runs (wait-for-batch), so there is no collision to
+    schedule around.
+    """
+    global _scheduled_scraper_state
+
+    logger.info("[scheduled-scraper] Loop started")
+    # Run once shortly after start so a fresh deploy has data without waiting
+    # a full interval, then settle into the cadence.
+    first_delay = 30
+    while True:
+        try:
+            _scheduled_scraper_state["current_action"] = "waiting"
+            interval_h = _scheduled_scraper_state.get("interval_hours", 6.0)
+            wait_s = first_delay if first_delay is not None else interval_h * 3600
+            next_run = datetime.now(timezone.utc) + timedelta(seconds=wait_s)
+            _scheduled_scraper_state["next_run"] = next_run.isoformat()
+            await asyncio.sleep(wait_s)
+            first_delay = None  # subsequent cycles use the full interval
+
+            day = _scheduled_scraper_state.get("day", "Today")
+            _scheduled_scraper_state["current_action"] = "triggering_scrape"
+            scrape_id = _trigger_scheduled_scrape(day)
+            if scrape_id:
+                _scheduled_scraper_state["last_run"] = datetime.now(timezone.utc).isoformat()
+                _scheduled_scraper_state["runs_triggered"] += 1
+                logger.info(
+                    "[scheduled-scraper] Triggered %s scrape %s (run #%d)",
+                    day, scrape_id, _scheduled_scraper_state["runs_triggered"],
+                )
+            else:
+                logger.info("[scheduled-scraper] A scrape is already running — skipping this cycle")
+
+        except asyncio.CancelledError:
+            logger.info("[scheduled-scraper] Loop cancelled — shutting down")
+            _scheduled_scraper_state["running"] = False
+            _scheduled_scraper_state["current_action"] = "stopped"
+            break
+        except Exception as e:
+            logger.error("[scheduled-scraper] Unexpected error: %s", e)
+            _scheduled_scraper_state["current_action"] = "error"
+            await asyncio.sleep(300)  # back off 5 min on errors
 
 
 async def _results_scheduler_loop():
@@ -335,33 +484,63 @@ def _get_match_duration_minutes() -> int:
 
 # ── Auto-start on import (if enabled in config) ─────────────────────────
 def _try_autostart():
-    """Check if the scheduler was enabled before restart and auto-start it."""
+    """Auto-start both schedulers on boot.
+
+    Defaults BOTH to enabled when there is no saved config, so a fresh deploy
+    runs autonomously with no manual trigger (the whole point of this
+    feature). A saved scheduler_config.json overrides the defaults, so an
+    admin who turned a scheduler off keeps it off across restarts.
+    """
     try:
+        config: Dict[str, Any] = {}
         sched_path = PROJECT_ROOT / "output" / "scheduler_config.json"
         if sched_path.exists():
             with open(sched_path, "r") as f:
                 config = json.load(f)
-            if config.get("results_enabled", False):
-                _results_scheduler_state["enabled"] = True
-                _results_scheduler_state["live_interval_seconds"] = config.get("live_interval_seconds", 60)
-                _results_scheduler_state["awaiting_interval_seconds"] = config.get("awaiting_interval_seconds", 30)
-                _results_scheduler_state["idle_interval_seconds"] = config.get("idle_interval_seconds", 120)
-                logger.info("[results-scheduler] Auto-starting (was enabled before restart)")
-                # Schedule the start on the event loop
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(_start_after_delay())
-                else:
-                    loop.run_until_complete(_start_after_delay())
+
+        # Results scheduler (live/awaiting) — default ON.
+        _results_scheduler_state["enabled"] = config.get("results_enabled", True)
+        _results_scheduler_state["live_interval_seconds"] = config.get("live_interval_seconds", 60)
+        _results_scheduler_state["awaiting_interval_seconds"] = config.get("awaiting_interval_seconds", 30)
+        _results_scheduler_state["idle_interval_seconds"] = config.get("idle_interval_seconds", 120)
+
+        # Scheduled-matches scheduler (6h fetch) — default ON.
+        _scheduled_scraper_state["enabled"] = config.get("scheduled_enabled", True)
+        _scheduled_scraper_state["interval_hours"] = config.get("scheduled_interval_hours", 6.0)
+        _scheduled_scraper_state["day"] = config.get("scheduled_day", "Today")
+
+        if _results_scheduler_state["enabled"] or _scheduled_scraper_state["enabled"]:
+            logger.info(
+                "[scheduler] Auto-starting (results=%s, scheduled=%s @ %.2fh)",
+                _results_scheduler_state["enabled"],
+                _scheduled_scraper_state["enabled"],
+                _scheduled_scraper_state["interval_hours"],
+            )
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(_start_after_delay())
+            else:
+                loop.run_until_complete(_start_after_delay())
     except Exception as e:
-        logger.warning(f"[results-scheduler] Auto-start check failed: {e}")
+        logger.warning(f"[scheduler] Auto-start check failed: {e}")
 
 
 async def _start_after_delay():
-    """Wait a bit for the server to fully start, then begin the loop."""
+    """Wait a bit for the server to fully start, then begin the enabled loops."""
     await asyncio.sleep(10)  # let the server warm up
     global _results_scheduler_task, _results_scheduler_state
-    if _results_scheduler_task is None or _results_scheduler_task.done():
+    global _scheduled_scraper_task, _scheduled_scraper_state
+
+    if _results_scheduler_state.get("enabled") and (
+        _results_scheduler_task is None or _results_scheduler_task.done()
+    ):
         _results_scheduler_state["running"] = True
         _results_scheduler_task = asyncio.create_task(_results_scheduler_loop())
         logger.info("[results-scheduler] Auto-started after 10s delay")
+
+    if _scheduled_scraper_state.get("enabled") and (
+        _scheduled_scraper_task is None or _scheduled_scraper_task.done()
+    ):
+        _scheduled_scraper_state["running"] = True
+        _scheduled_scraper_task = asyncio.create_task(_scheduled_scraper_loop())
+        logger.info("[scheduled-scraper] Auto-started after 10s delay")
