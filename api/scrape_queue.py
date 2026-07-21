@@ -71,7 +71,9 @@ class SingleScrapeQueue:
         self._match_to_job: Dict[str, str] = {}  # match_id → job_id (active only)
         self._paused = False
         self._executor: Optional[ThreadPoolExecutor] = None
-        self._max_workers = 3  # default, updated on first enqueue
+        # One worker by default — a single Chrome at a time. More than one on a
+        # small container exhausts OS threads. Raise RESULTS_MAX_WORKERS to opt up.
+        self._max_workers = 1  # default, updated on first enqueue
 
     def _ensure_executor(self) -> None:
         """Lazily create the thread pool with the configured max workers."""

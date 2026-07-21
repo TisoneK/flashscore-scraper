@@ -65,7 +65,11 @@ def _get_results_config():
       - priority_mode: str ('status' | 'time' | 'off', default 'status')
     """
     defaults = {
-        "max_workers": 3,
+        # Serialize by default: one Chrome at a time. Each browser is dozens
+        # of OS threads, and running 3 alongside the autonomous schedulers on
+        # a small container exhausted the thread limit ("can't start new
+        # thread"). Raise RESULTS_MAX_WORKERS only on a larger instance.
+        "max_workers": 1,
         "incremental_push": True,
         "match_duration_minutes": 170,
         "priority_mode": "status",
@@ -1355,21 +1359,45 @@ class FlashscoreScraper:
             status_callback(f"Spawning {max_workers} concurrent browser instances...")
 
         all_results = []
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(worker_fn, name, ids, num): name
-                for name, ids, num in active_workers
-            }
-            for future in as_completed(futures):
-                bucket_name = futures[future]
+        # If the container is out of OS threads ("can't start new thread"),
+        # a ThreadPoolExecutor can't be created at all — fall back to running
+        # the buckets SERIALLY in this thread so the scrape still completes.
+        def _run_serial():
+            for name, ids, num in active_workers:
                 try:
-                    result = future.result()
-                    all_results.extend(result.get("results", []))
-                    logger.info(
-                        f"Bucket '{bucket_name}' complete: {result.get('processed', 0)} results"
-                    )
+                    res = worker_fn(name, ids, num)
+                    all_results.extend(res.get("results", []))
+                    logger.info(f"Bucket '{name}' complete (serial): {res.get('processed', 0)} results")
                 except Exception as e:
-                    logger.error(f"Bucket '{bucket_name}' failed: {e}")
+                    logger.error(f"Bucket '{name}' failed (serial): {e}")
+
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {
+                    pool.submit(worker_fn, name, ids, num): name
+                    for name, ids, num in active_workers
+                }
+                for future in as_completed(futures):
+                    bucket_name = futures[future]
+                    try:
+                        result = future.result()
+                        all_results.extend(result.get("results", []))
+                        logger.info(
+                            f"Bucket '{bucket_name}' complete: {result.get('processed', 0)} results"
+                        )
+                    except Exception as e:
+                        logger.error(f"Bucket '{bucket_name}' failed: {e}")
+        except RuntimeError as pool_err:
+            if "can't start new thread" in str(pool_err).lower():
+                logger.warning("Out of OS threads — running results buckets serially instead")
+                try:
+                    from src.driver import cleanup_stale_chrome
+                    cleanup_stale_chrome(kill_processes=True)
+                except Exception:
+                    pass
+                _run_serial()
+            else:
+                raise
 
         # Save all results locally
         file_date = date.replace('.', '')
