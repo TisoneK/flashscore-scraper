@@ -443,6 +443,11 @@ def _prepare_state_for_run(scrape_type: str, **kwargs: Any) -> str:
     a scrape is already in progress.
     """
     global _state
+    # Mutual exclusion with the results batch: only one batch scrape (Chrome)
+    # runs at a time. Two concurrent batches spawned enough Chrome to exhaust
+    # the container's OS threads.
+    if _results_state.busy:
+        raise HTTPException(409, "A results scrape is already in progress")
     with _state_lock:
         if _state.busy:
             raise HTTPException(409, "A scrape is already in progress")
@@ -464,12 +469,15 @@ def _prepare_state_for_run(scrape_type: str, **kwargs: Any) -> str:
 def _prepare_results_state_for_run(date_str: str) -> str:
     """Atomically reset + prepare _results_state for a new results scrape.
 
-    Separate from _prepare_state_for_run so results scrapes don't check
-    _state.busy (which would block if a scheduled scrape is running).
+    Mutually exclusive with the scheduled batch: only one batch scrape runs
+    at a time so we never spawn two sets of Chrome instances at once (that
+    exhausted the container's OS threads).
 
-    Returns the generated scrape_id. Raises HTTPException(409) if a
-    results scrape is already in progress.
+    Returns the generated scrape_id. Raises HTTPException(409) if a scrape is
+    already in progress.
     """
+    if _state.busy:
+        raise HTTPException(409, "A scheduled scrape is already in progress")
     with _results_state_lock:
         if _results_state.busy:
             raise HTTPException(409, "A results scrape is already in progress")
